@@ -1,0 +1,17 @@
+packages: **.cabal
+tests: True
+benchmarks: True
+write-ghc-environment-files: always
+
+source-repository-package
+  type: git
+  location: https://github.com/konn/linear-extra.git
+  tag: 5f2362b0a04b2f248bd0b818cc057aa249985eba
+  subdir:
+    linear-array-extra
+    linear-witness
+
+source-repository-package
+  type: git
+  location: https://github.com/SoftwareFoundationGroupAtKyotoU/pure-borrow.git
+  tag: 6f1726bbbcbc01f0fe08c77c1c9fd12ea3016ce4
