@@ -163,10 +163,10 @@ unsafeFind x (UnionFind n parent rank) =
 with path compression for efficiency.
 Returns Nothing if the key is out of bounds.
 -}
-find :: Key -> UnionFind %1 -> (Ur (Maybe Key), UnionFind)
+find :: Key -> UnionFind %1 -> (Maybe (Ur Key), UnionFind)
 find (Key x) (UnionFind n parent rank)
-  | x >= n = (Ur Nothing, UnionFind n parent rank)
-  | otherwise = unsafeFind (Key x) (UnionFind n parent rank) & \(Ur root, uf') -> (Ur (Just root), uf')
+  | x >= n = (Nothing, UnionFind n parent rank)
+  | otherwise = unsafeFind (Key x) (UnionFind n parent rank) & \(root, uf') -> (Just root, uf')
 
 {- | Unite the sets containing the two given elements using union-by-rank.
 If the elements are already in the same set, this is a no-op.

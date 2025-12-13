@@ -1,25 +1,35 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
-module Data.EGraph.Types (EGraph, find) where
+module Data.EGraph.Types (EGraph, new, borrowNew, find, unsafeFind) where
 
-import Control.Syntax.DataFlow qualified as DataFlow
-import Data.Coerce (coerce)
+import Control.Functor.Linear (asks, runReader)
+import Control.Functor.Linear qualified as Control
+import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
+import Data.Coerce (Coercible, coerce)
 import Data.Functor.Classes (Eq1, Ord1, Show1, compare1, eq1, showsPrec1)
 import Data.Functor.Linear qualified as Data
+import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear (HashMap)
+import Data.HashMap.Mutable.Linear.Witness qualified as HM
 import Data.Hashable (Hashable (..))
 import Data.Hashable.Lifted (Hashable1, hashWithSalt1)
+import Data.Linear.Witness.Compat (fromPB)
 import Data.Set.Mutable.Linear
 import Data.UnionFind.Linear (Key, UnionFind)
 import Data.UnionFind.Linear qualified as UF
+import Data.UnionFind.Linear.Borrowed qualified as UFB
 import GHC.Generics (Generic)
 import Prelude.Linear hiding (Eq, Ord, Show, find)
+import Unsafe.Linear qualified as Unsafe
 import Prelude (Eq (..), Ord, Show)
 import Prelude qualified as P
 
@@ -53,7 +63,33 @@ data EGraph f = EGraph
   }
   deriving (Generic)
 
-find :: EGraph f %1 -> EClassId -> (Ur (Maybe EClassId), EGraph f)
-find EGraph {..} (EClassId k) = DataFlow.do
-  (k', unionFind) <- UF.find k unionFind
-  (Data.fmap EClassId Data.<$> k', EGraph {..})
+instance LinearOnly (EGraph f) where
+  linearOnly :: LinearOnlyWitness (EGraph f)
+  linearOnly = UnsafeLinearOnly
+
+new :: (Hashable1 f) => Word -> Linearly %1 -> EGraph f
+new capacity = runReader Control.do
+  unionFind <- asks $ UF.newL capacity
+  classes <- asks $ HM.emptyL (P.fromIntegral capacity) . fromPB
+  hashcons <- asks $ HM.emptyL (P.fromIntegral capacity) . fromPB
+  Control.pure EGraph {..}
+
+borrowNew ::
+  (Hashable1 f) =>
+  Word ->
+  Linearly %1 ->
+  (Mut α (EGraph f), Lend α (EGraph f))
+borrowNew capacity = borrowLinearOnly . new capacity
+
+find :: Borrow k α (EGraph f) %1 -> EClassId -> BO α (Maybe (Ur EClassId))
+find egraph (EClassId k) = Control.do
+  let uf = egraph .# #unionFind
+  coerceLin Data.<$> UFB.find k uf
+
+unsafeFind :: Borrow k α (EGraph f) %1 -> EClassId -> BO α (Ur EClassId)
+unsafeFind egraph (EClassId k) = Control.do
+  let uf = egraph .# #unionFind
+  coerceLin Data.<$> UFB.unsafeFind k uf
+
+coerceLin :: (Coercible a b) => a %1 -> b
+coerceLin = Unsafe.toLinear coerce

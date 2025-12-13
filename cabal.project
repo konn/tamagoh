@@ -14,4 +14,4 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/SoftwareFoundationGroupAtKyotoU/pure-borrow.git
-  tag: 6f1726bbbcbc01f0fe08c77c1c9fd12ea3016ce4
+  tag: 805fac928e9f9dd419d50d58d9f5964608e77e0c

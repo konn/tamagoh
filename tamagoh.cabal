@@ -53,6 +53,7 @@ library
   -- cabal-gild: discover src --exclude=src/**/Internal.hs
   exposed-modules:
     Data.EGraph.Types
+    Data.HasField.Linear
     Data.Linear.Witness.Compat
     Data.UnionFind.Linear
     Data.UnionFind.Linear.Borrowed
