@@ -156,7 +156,7 @@ unsafeFind x (UnionFind n parent rank) =
               else
                 findRoot parentKey p' r & \(Ur root, UnionFind _ p'' r') ->
                   -- Path compression: make i point directly to root
-                  Vector.set (keyToInt i) (let Key w = root in w) p'' & \p''' ->
+                  Vector.set (keyToInt i) (getKey root) p'' & \p''' ->
                     (Ur root, UnionFind n p''' r')
 
 {- | Find the representative (root) of the set containing the given element,
@@ -170,45 +170,46 @@ find (Key x) (UnionFind n parent rank)
 
 {- | Unite the sets containing the two given elements using union-by-rank.
 If the elements are already in the same set, this is a no-op.
+Returns the representative (root) of the unified set.
 
 __Unsafe__: Does not check bounds. Will crash if keys >= size.
 -}
-unsafeUnion :: Key -> Key -> UnionFind %1 -> UnionFind
+unsafeUnion :: Key -> Key -> UnionFind %1 -> (Ur Key, UnionFind)
 unsafeUnion x y uf =
   unsafeFind x uf & \(Ur rootX, uf') ->
     unsafeFind y uf' & \(Ur rootY, uf'') ->
       if rootX == rootY
-        then uf'' -- Already in same set
+        then (Ur rootX, uf'') -- Already in same set, return the root
         else unionRoots rootX rootY uf''
   where
-    unionRoots :: Key -> Key -> UnionFind %1 -> UnionFind
+    unionRoots :: Key -> Key -> UnionFind %1 -> (Ur Key, UnionFind)
     unionRoots rx ry (UnionFind n parent rank) =
       Vector.get (keyToInt rx) rank & \(Ur rankX, rank') ->
         Vector.get (keyToInt ry) rank' & \(Ur rankY, rank'') ->
           if rankX < rankY
             then
-              -- Make ry the parent of rx
-              Vector.set (keyToInt rx) (let Key w = ry in w) parent & \parent' ->
-                UnionFind n parent' rank''
+              -- Make ry the parent of rx, ry becomes the root
+              Vector.set (keyToInt rx) (getKey ry) parent & \parent' ->
+                (Ur ry, UnionFind n parent' rank'')
             else
               if rankX > rankY
                 then
-                  -- Make rx the parent of ry
-                  Vector.set (keyToInt ry) (let Key w = rx in w) parent & \parent' ->
-                    UnionFind n parent' rank''
+                  -- Make rx the parent of ry, rx becomes the root
+                  Vector.set (keyToInt ry) (getKey rx) parent & \parent' ->
+                    (Ur rx, UnionFind n parent' rank'')
                 else
-                  -- Equal ranks: make ry parent of rx and increment ry's rank
-                  Vector.set (keyToInt rx) (let Key w = ry in w) parent & \parent' ->
+                  -- Equal ranks: make ry parent of rx and increment ry's rank, ry becomes the root
+                  Vector.set (keyToInt rx) (getKey ry) parent & \parent' ->
                     Vector.set (keyToInt ry) (rankY + 1) rank'' & \rank''' ->
-                      UnionFind n parent' rank'''
+                      (Ur ry, UnionFind n parent' rank''')
 
 {- | Unite the sets containing the two given elements using union-by-rank.
-Returns False if either key is out of bounds, True otherwise.
+Returns Nothing if either key is out of bounds, otherwise returns Just the representative key of the unified set.
 -}
-union :: Key -> Key -> UnionFind %1 -> (Ur Bool, UnionFind)
+union :: Key -> Key -> UnionFind %1 -> (Ur (Maybe Key), UnionFind)
 union (Key x) (Key y) (UnionFind n parent rank)
-  | x >= n || y >= n = (Ur False, UnionFind n parent rank)
-  | otherwise = unsafeUnion (Key x) (Key y) (UnionFind n parent rank) & \uf' -> (Ur True, uf')
+  | x >= n || y >= n = (Ur Nothing, UnionFind n parent rank)
+  | otherwise = unsafeUnion (Key x) (Key y) (UnionFind n parent rank) & \(Ur root, uf') -> (Ur (Just root), uf')
 
 {- | Check if two elements are in the same set.
 

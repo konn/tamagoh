@@ -61,17 +61,17 @@ union ::
   Key ->
   Key ->
   Mut α UnionFind %1 ->
-  BO α (Ur Bool, UnionFind)
+  BO α (Ur (Maybe Key), UnionFind)
 union k1 k2 (UnsafeAlias uf) = case Raw.union k1 k2 uf of
-  (b, !uf) -> Control.pure (b, uf)
+  (mk, !uf') -> Control.pure (mk, uf')
 
 unsafeUnion ::
   Key ->
   Key ->
   Mut α UnionFind %1 ->
-  BO α UnionFind
-unsafeUnion k1 k2 (UnsafeAlias uf) =
-  Control.pure $! Raw.unsafeUnion k1 k2 uf
+  BO α (Ur Key, UnionFind)
+unsafeUnion k1 k2 (UnsafeAlias uf) = case Raw.unsafeUnion k1 k2 uf of
+  (k, !uf') -> Control.pure (k, uf')
 
 equivalent :: Key -> Key -> Borrow k α UnionFind %1 -> BO α (Ur (Maybe Bool))
 equivalent k1 k2 = Unsafe.toLinear \(UnsafeAlias uf) -> case Raw.equivalent k1 k2 uf of
