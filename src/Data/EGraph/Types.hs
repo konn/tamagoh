@@ -8,7 +8,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
-module Data.EGraph.Types (EGraph, new, borrowNew, find, unsafeFind) where
+module Data.EGraph.Types (EGraph, new, borrowNew, find, unsafeFind, canonicalize) where
 
 import Control.Functor.Linear (asks, runReader)
 import Control.Functor.Linear qualified as Control
@@ -27,6 +27,8 @@ import Data.Set.Mutable.Linear
 import Data.UnionFind.Linear (Key, UnionFind)
 import Data.UnionFind.Linear qualified as UF
 import Data.UnionFind.Linear.Borrowed qualified as UFB
+import Data.Unrestricted.Linear (UrT (..), runUrT)
+import Data.Unrestricted.Linear qualified as Ur
 import GHC.Generics (Generic)
 import Prelude.Linear hiding (Eq, Ord, Show, find)
 import Unsafe.Linear qualified as Unsafe
@@ -85,6 +87,20 @@ find :: Borrow k α (EGraph f) %1 -> EClassId -> BO α (Maybe (Ur EClassId))
 find egraph (EClassId k) = Control.do
   let uf = egraph .# #unionFind
   coerceLin Data.<$> UFB.find k uf
+
+canonicalize :: (P.Traversable l) => Share α (EGraph f) %1 -> ENode l -> BO α (Ur (Maybe (ENode l)))
+canonicalize egraph0 (ENode node) = Control.do
+  let %1 !(Ur egraph) = move egraph0
+  let uf = egraph .# #unionFind
+  runUrT do
+    coerce P.. P.sequenceA
+      P.<$> P.mapM
+        ( \eid ->
+            UrT
+              $ maybe (Ur Nothing) (Ur.lift (Just P.. EClassId))
+              Control.<$> UFB.find (coerce eid) uf
+        )
+        node
 
 unsafeFind :: Borrow k α (EGraph f) %1 -> EClassId -> BO α (Ur EClassId)
 unsafeFind egraph (EClassId k) = Control.do
