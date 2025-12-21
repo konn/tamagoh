@@ -1,12 +1,16 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- | Efficient union-find data structure with path compression,
 using linear types for safe mutation and unboxed vectors for performance.
@@ -104,7 +108,11 @@ All fields are strict to prevent space leaks.
 data UnionFind where
   UnionFind :: !Word -> !(Vector Word) %1 -> !(Vector Word) %1 -> UnionFind
 
+instance Consumable UnionFind where
+  consume (UnionFind _ p r) = consume p `lseq` consume r
+
 instance LinearOnly UnionFind where
+  linearOnly :: LinearOnlyWitness UnionFind
   linearOnly = UnsafeLinearOnly
 
 -- Helper function to convert Key to Int for array indexing

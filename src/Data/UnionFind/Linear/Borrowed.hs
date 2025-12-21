@@ -53,25 +53,25 @@ unsafeFind :: Key -> Borrow k α UnionFind %1 -> BO α (Ur Key)
 unsafeFind key = Unsafe.toLinear \(UnsafeAlias uf) -> case Raw.unsafeFind key uf of
   (k, !_) -> Control.pure k
 
-fresh :: Mut α UnionFind %1 -> BO α (Ur Key, UnionFind)
+fresh :: Mut α UnionFind %1 -> BO α (Ur Key, Mut α UnionFind)
 fresh (UnsafeAlias uf) = case Raw.fresh uf of
-  (k, !uf') -> Control.pure (k, uf')
+  (k, !uf') -> Control.pure (k, UnsafeAlias uf')
 
 union ::
   Key ->
   Key ->
   Mut α UnionFind %1 ->
-  BO α (Ur (Maybe Key), UnionFind)
+  BO α (Ur (Maybe Key), Mut α UnionFind)
 union k1 k2 (UnsafeAlias uf) = case Raw.union k1 k2 uf of
-  (mk, !uf') -> Control.pure (mk, uf')
+  (mk, !uf') -> Control.pure (mk, UnsafeAlias uf')
 
 unsafeUnion ::
   Key ->
   Key ->
   Mut α UnionFind %1 ->
-  BO α (Ur Key, UnionFind)
+  BO α (Ur Key, Mut α UnionFind)
 unsafeUnion k1 k2 (UnsafeAlias uf) = case Raw.unsafeUnion k1 k2 uf of
-  (k, !uf') -> Control.pure (k, uf')
+  (k, !uf') -> Control.pure (k, UnsafeAlias uf')
 
 equivalent :: Key -> Key -> Borrow k α UnionFind %1 -> BO α (Ur (Maybe Bool))
 equivalent k1 k2 = Unsafe.toLinear \(UnsafeAlias uf) -> case Raw.equivalent k1 k2 uf of

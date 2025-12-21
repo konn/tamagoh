@@ -36,18 +36,20 @@ common defaults
 
   default-language: GHC2021
   build-depends: base >=4.18 && <5
+  build-depends:
+    linear-array-extra,
+    linear-base,
+    pure-borrow,
+    vector,
 
 library
   import: defaults
   build-depends:
     hashable,
-    linear-array-extra,
-    linear-base,
+    linear-generics,
     linear-witness,
-    pure-borrow,
     recursion-schemes,
     unordered-containers,
-    vector,
 
   hs-source-dirs: src
   -- cabal-gild: discover src --exclude=src/**/Internal.hs
@@ -86,10 +88,12 @@ test-suite tamagoh-test
     -with-rtsopts=-N
 
   -- cabal-gild: discover test --exclude=test/Main.hs
-  other-modules:
+  other-modules: Data.UnionFind.Linear.BorrowedSpec
   build-depends:
+    falsify,
     tamagoh,
     tasty,
+    tasty-hunit,
 
   build-tool-depends: tasty-discover:tasty-discover
 
