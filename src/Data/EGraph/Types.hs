@@ -89,18 +89,18 @@ find egraph (EClassId k) = Control.do
   coerceLin Data.<$> UFB.find k uf
 
 canonicalize :: (P.Traversable l) => Share α (EGraph f) %1 -> ENode l -> BO α (Ur (Maybe (ENode l)))
-canonicalize egraph0 (ENode node) = Control.do
-  let %1 !(Ur egraph) = move egraph0
-  let uf = egraph .# #unionFind
-  runUrT do
-    coerce P.. P.sequenceA
-      P.<$> P.mapM
-        ( \eid ->
-            UrT
-              $ maybe (Ur Nothing) (Ur.lift (Just P.. EClassId))
-              Control.<$> UFB.find (coerce eid) uf
-        )
-        node
+canonicalize egraph (ENode node) =
+  move egraph & \(Ur egraph) -> Control.do
+    let uf = egraph .# #unionFind
+    runUrT do
+      coerce P.. P.sequenceA
+        P.<$> P.mapM
+          ( \eid ->
+              UrT
+                $ maybe (Ur Nothing) (Ur.lift (Just P.. EClassId))
+                Control.<$> UFB.find (coerce eid) uf
+          )
+          node
 
 unsafeFind :: Borrow k α (EGraph f) %1 -> EClassId -> BO α (Ur EClassId)
 unsafeFind egraph (EClassId k) = Control.do
