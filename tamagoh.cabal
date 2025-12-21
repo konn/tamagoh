@@ -49,6 +49,7 @@ library
     linear-generics,
     linear-witness,
     recursion-schemes,
+    transformers,
     unordered-containers,
 
   hs-source-dirs: src
@@ -56,6 +57,7 @@ library
   exposed-modules:
     Data.EGraph.Types
     Data.HasField.Linear
+    Data.HashMap.Mutable.Linear.Borrowed
     Data.Linear.Witness.Compat
     Data.UnionFind.Linear
     Data.UnionFind.Linear.Borrowed

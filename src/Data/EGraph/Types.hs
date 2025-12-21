@@ -8,18 +8,28 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
-module Data.EGraph.Types (EGraph, new, borrowNew, find, unsafeFind, canonicalize) where
+module Data.EGraph.Types (
+  EGraph,
+  new,
+  borrowNew,
+  find,
+  lookup,
+  unsafeFind,
+  canonicalize,
+) where
 
 import Control.Functor.Linear (asks, runReader)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
+import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Coerce (Coercible, coerce)
 import Data.Functor.Classes (Eq1, Ord1, Show1, compare1, eq1, showsPrec1)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear (HashMap)
-import Data.HashMap.Mutable.Linear.Witness qualified as HM
+import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
+import Data.HashMap.Mutable.Linear.Witness qualified as HMW
 import Data.Hashable (Hashable (..))
 import Data.Hashable.Lifted (Hashable1, hashWithSalt1)
 import Data.Linear.Witness.Compat (fromPB)
@@ -30,7 +40,7 @@ import Data.UnionFind.Linear.Borrowed qualified as UFB
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import GHC.Generics (Generic)
-import Prelude.Linear hiding (Eq, Ord, Show, find)
+import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Unsafe.Linear qualified as Unsafe
 import Prelude (Eq (..), Ord, Show)
 import Prelude qualified as P
@@ -72,8 +82,8 @@ instance LinearOnly (EGraph f) where
 new :: (Hashable1 f) => Word -> Linearly %1 -> EGraph f
 new capacity = runReader Control.do
   unionFind <- asks $ UF.newL capacity
-  classes <- asks $ HM.emptyL (P.fromIntegral capacity) . fromPB
-  hashcons <- asks $ HM.emptyL (P.fromIntegral capacity) . fromPB
+  classes <- asks $ HMW.emptyL (P.fromIntegral capacity) . fromPB
+  hashcons <- asks $ HMW.emptyL (P.fromIntegral capacity) . fromPB
   Control.pure EGraph {..}
 
 borrowNew ::
@@ -88,19 +98,24 @@ find egraph (EClassId k) = Control.do
   let uf = egraph .# #unionFind
   coerceLin Data.<$> UFB.find k uf
 
+lookup :: (P.Traversable l, Hashable1 l) => Share α (EGraph l) %1 -> ENode l -> BO α (Ur (Maybe EClassId))
+lookup egraph enode =
+  move egraph & \(Ur egraph) -> runUrT $ runMaybeT do
+    enode <- MaybeT $ UrT (canonicalize egraph enode)
+    MaybeT $ UrT $ HMB.lookup enode (egraph .# #hashcons)
+
 canonicalize :: (P.Traversable l) => Share α (EGraph f) %1 -> ENode l -> BO α (Ur (Maybe (ENode l)))
 canonicalize egraph (ENode node) =
   move egraph & \(Ur egraph) -> Control.do
     let uf = egraph .# #unionFind
-    runUrT do
-      coerce P.. P.sequenceA
-        P.<$> P.mapM
-          ( \eid ->
-              UrT
-                $ maybe (Ur Nothing) (Ur.lift (Just P.. EClassId))
-                Control.<$> UFB.find (coerce eid) uf
-          )
-          node
+    runUrT $ coerce P.. P.sequenceA
+      P.<$> P.mapM
+        ( \eid ->
+            UrT
+              $ maybe (Ur Nothing) (Ur.lift (Just P.. EClassId))
+              Control.<$> UFB.find (coerce eid) uf
+        )
+        node
 
 unsafeFind :: Borrow k α (EGraph f) %1 -> EClassId -> BO α (Ur EClassId)
 unsafeFind egraph (EClassId k) = Control.do
