@@ -52,6 +52,7 @@ module Data.UnionFind.Linear (
 
 import Control.Functor.Linear (asks, runReader)
 import Control.Functor.Linear qualified as Control
+import Control.Monad.Borrow.Pure (Copyable)
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Data.Coerce qualified
 import Data.Hashable (Hashable)
@@ -78,6 +79,7 @@ newtype Key = Key {getKey :: Word}
     , Consumable
     , Dupable
     , Movable
+    , Copyable
     )
 
 instance Linear.Eq Key where

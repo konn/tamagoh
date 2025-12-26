@@ -8,20 +8,15 @@ module Data.HashMap.Mutable.Linear.Borrowed (
   HashMap,
   Keyed,
   empty,
-  fromList,
   insert,
-  insertAll,
   delete,
-  filter,
-  filterWithKey,
-  mapMaybe,
-  mapMaybeWithKey,
   shrinkToFit,
   alter,
   alterF,
   size,
   capacity,
   lookup,
+  lookups,
   member,
   toList,
 ) where
@@ -29,12 +24,15 @@ module Data.HashMap.Mutable.Linear.Borrowed (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
+import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear (HashMap, Keyed)
 import Data.HashMap.Mutable.Linear qualified as Raw
 import Data.HashMap.Mutable.Linear.Witness qualified as Raw
+import Data.HashSet qualified as IHS
 import Data.Linear.Witness.Compat (fromPB)
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe)
 import Unsafe.Linear qualified as Unsafe
+import Prelude qualified as P
 
 empty :: (Keyed k) => Int -> BO α (Mut α (HashMap k v), Lend α (HashMap k v))
 {-# INLINE empty #-}
@@ -43,61 +41,37 @@ empty size = Control.do
     dup l & \(l, l') -> Control.do
       Control.pure $ borrow (Raw.emptyL size $ fromPB l) l'
 
-fromList :: (Keyed k) => [(k, v)] -> BO α (Mut α (HashMap k v), Lend α (HashMap k v))
-{-# INLINE fromList #-}
-fromList kvs = Control.do
-  withLinearlyBO $ \l ->
-    dup l & \(l, l') -> Control.do
-      Control.pure $ borrow (Raw.fromListL kvs $ fromPB l) l'
+-- TODO: more efficient implementation
+insert :: (Keyed k) => k -> v %1 -> Mut α (HashMap k v) %1 -> BO α (Maybe v, Mut α (HashMap k v))
+{-# NOINLINE insert #-}
+insert key = Unsafe.toLinear2 \v dic -> Control.do
+  (mold, dic) <- delete key dic
+  !dic <- case dic of
+    UnsafeAlias !dic ->
+      Control.pure $! Raw.insert key v dic
+  Control.pure (mold, UnsafeAlias dic)
 
-insert :: (Keyed k) => k -> v -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
-{-# INLINE insert #-}
-insert key val (UnsafeAlias dic) = case Raw.insert key val dic of
-  !dic -> Control.pure (UnsafeAlias dic)
-
-insertAll :: (Keyed k) => [(k, v)] -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
-{-# INLINE insertAll #-}
-insertAll kvs (UnsafeAlias dic) = case Raw.insertAll kvs dic of
-  !dic -> Control.pure (UnsafeAlias dic)
-
-delete :: (Keyed k) => k -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
-{-# INLINE delete #-}
-delete key (UnsafeAlias dic) = case Raw.delete key dic of
-  !dic -> Control.pure (UnsafeAlias dic)
-
-filter :: (Keyed k) => (v -> Bool) -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
-{-# INLINE filter #-}
-filter p (UnsafeAlias dic) = case Raw.filter p dic of
-  !dic -> Control.pure (UnsafeAlias dic)
-
-filterWithKey :: (Keyed k) => (k -> v -> Bool) -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
-{-# INLINE filterWithKey #-}
-filterWithKey p (UnsafeAlias dic) = case Raw.filterWithKey p dic of
-  !dic -> Control.pure (UnsafeAlias dic)
-
-mapMaybe :: (Keyed k) => (v -> Maybe v') -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v'))
-{-# INLINE mapMaybe #-}
-mapMaybe f (UnsafeAlias dic) = case Raw.mapMaybe f dic of
-  !dic -> Control.pure (UnsafeAlias dic)
-
-mapMaybeWithKey :: (Keyed k) => (k -> v -> Maybe v') -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v'))
-{-# INLINE mapMaybeWithKey #-}
-mapMaybeWithKey f (UnsafeAlias dic) = case Raw.mapMaybeWithKey f dic of
-  !dic -> Control.pure (UnsafeAlias dic)
+-- TODO: more efficient implementation
+delete :: (Keyed k) => k -> Mut α (HashMap k v) %1 -> BO α (Maybe v, Mut α (HashMap k v))
+{-# NOINLINE delete #-}
+delete key (UnsafeAlias dic) = case Raw.lookup key dic of
+  (!(Ur !(Just !v)), !dic) -> case Raw.delete key dic of
+    !dic -> Control.pure (Just v, UnsafeAlias dic)
+  (!(Ur Nothing), !dic) -> Control.pure (Nothing, UnsafeAlias dic)
 
 shrinkToFit :: (Keyed k) => Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
 {-# INLINE shrinkToFit #-}
 shrinkToFit (UnsafeAlias dic) = case Raw.shrinkToFit dic of
   !dic -> Control.pure (UnsafeAlias dic)
 
-alter :: (Keyed k) => (Maybe v -> Maybe v) -> k -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
+alter :: (Keyed k) => (Maybe v %1 -> Maybe v) %1 -> k -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
 {-# INLINE alter #-}
-alter f key (UnsafeAlias dic) = case Raw.alter f key dic of
+alter = Unsafe.toLinear \f -> \key (UnsafeAlias dic) -> case Raw.alter (Unsafe.toLinear f) key dic of
   !dic -> Control.pure (UnsafeAlias dic)
 
-alterF :: (Keyed k) => (Maybe v -> BO α (Ur (Maybe v))) -> k -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
+alterF :: (Keyed k) => (Maybe v %1 -> BO α (Maybe v)) -> k -> Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
 {-# INLINE alterF #-}
-alterF f key (UnsafeAlias dic) = UnsafeAlias Control.<$> Raw.alterF f key dic
+alterF f key (UnsafeAlias dic) = UnsafeAlias Control.<$> Raw.alterF (\x -> Unsafe.toLinear Ur Control.<$> f x) key dic
 
 size :: Borrow bk α (HashMap k v) %1 -> BO α (Ur Int)
 {-# INLINE size #-}
@@ -109,16 +83,30 @@ capacity :: Borrow bk α (HashMap k v) %1 -> BO α (Ur Int)
 capacity = Unsafe.toLinear \(UnsafeAlias dic) -> case Raw.capacity dic of
   (!sz, !_) -> Control.pure sz
 
-lookup :: (Keyed k) => k -> Borrow bk α (HashMap k v) %1 -> BO α (Ur (Maybe v))
+lookup ::
+  (Keyed k) =>
+  k ->
+  Borrow bk α (HashMap k v) %1 ->
+  BO α (Maybe (Borrow bk α v))
 {-# INLINE lookup #-}
 lookup key = Unsafe.toLinear \(UnsafeAlias dic) -> case Raw.lookup key dic of
-  (!mv, !_) -> Control.pure mv
+  (!(Ur mv), !_) -> Control.pure (UnsafeAlias Data.<$> mv)
+
+lookups ::
+  (Keyed k) =>
+  [k] ->
+  Borrow bk α (HashMap k v) %1 ->
+  BO α [(Ur k, (Maybe (Borrow bk α v)))]
+{-# INLINE lookups #-}
+lookups keys0 = Unsafe.toLinear \dic -> Control.do
+  let keys = P.map Ur $ IHS.toList $ IHS.fromList keys0
+  Data.forM keys (\(Ur !key) -> lookup key dic Control.<&> \ !v -> (Ur key, v))
 
 member :: (Keyed k) => k -> Borrow bk α (HashMap k v) %1 -> BO α (Ur Bool)
 {-# INLINE member #-}
 member key = Unsafe.toLinear \(UnsafeAlias dic) -> case Raw.member key dic of
   (!b, !_) -> Control.pure b
 
-toList :: Lend α (HashMap k v) %1 -> End α -> Ur [(k, v)]
+toList :: Lend α (HashMap k v) %1 -> End α -> [(k, v)]
 {-# INLINE toList #-}
-toList lend end = Raw.toList (reclaim lend end)
+toList lend end = unur $ Raw.toList (reclaim lend end)
