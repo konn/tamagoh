@@ -1,43 +1,89 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoFieldSelectors #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
 
 module Data.EGraph.Types.EClasses (
   EClasses (),
+  parents,
+  addParent,
   member,
   insertIfNew,
   merge,
   unsafeMerge,
 ) where
 
+import Control.Functor.Linear (void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Orphans ()
+import Control.Monad.Borrow.Pure.Orphans (Movable1)
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.ENode
 import Data.Functor.Linear qualified as Data
+import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
-import Data.HashSet (HashSet)
-import Data.HashSet qualified as HS
 import Data.Hashable.Lifted (Hashable1)
+import Data.Set.Mutable.Linear.Borrowed (Set)
+import Data.Set.Mutable.Linear.Borrowed qualified as Set
+import GHC.Generics qualified as GHC
+import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear
+import Prelude.Linear.Internal.Generically
 import Unsafe.Linear qualified as Unsafe
 
--- TODO: consider using mutable sets under the hood?
 newtype EClasses l = EClasses (Raw l)
 
-type Raw l = HashMap EClassId (HashSet (ENode l))
+type Raw l = HashMap EClassId (EClass l)
+
+-- TODO: use (unsafe) indirection around Sets to reduce copying cost
+data EClass l
+  = EClass
+  { nodes :: !(Set (ENode l))
+  , parents :: !(Set EClassId)
+  }
+  deriving (GHC.Generic)
+
+deriveGeneric ''EClass
+
+deriving via Generically (EClass l) instance Consumable (EClass l)
+
+deriving via Generically (EClass l) instance Dupable (EClass l)
+
+parents ::
+  forall bk α l.
+  EClassId -> Borrow bk α (EClasses l) %1 -> BO α (Ur (Maybe [EClassId]))
+parents eid clss0 = Control.do
+  let %1 clss = coerceLin clss0 :: Borrow bk α (Raw l)
+  mclass <- HMB.lookup eid clss
+  case mclass of
+    Nothing -> Control.pure (Ur Nothing)
+    Just eclass -> move . Just Control.<$> Set.toList (eclass .# #parents)
+
+addParent ::
+  EClassId ->
+  Mut α (EClass l) %1 ->
+  BO α (Mut α (EClass l))
+addParent pid eclass = Control.do
+  eclass <- reborrowing_ eclass \eclass -> Control.do
+    let %1 !parentsSet = eclass .# #parents
+    parentsSet <- Set.insert pid parentsSet
+    Control.pure $ consume parentsSet
+  Control.pure eclass
 
 member ::
   forall l α.
@@ -60,11 +106,13 @@ insertIfNew ::
   Mut α (EClasses l) %1 ->
   BO α (Ur Bool, Mut α (EClasses l))
 insertIfNew eid enode clss = Control.do
-  (Ur mem, clss) <- sharing_ clss \clss -> member eid clss
+  (Ur mem, clss) <- sharing clss \clss -> member eid clss
   if mem
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
-      (mop, clss) <- HMB.insert eid (HS.singleton enode) $ coerceLin clss
+      nodes <- Set.singleton enode
+      parents <- Set.empty 16
+      (mop, clss) <- HMB.insert eid EClass {parents, nodes} $ coerceLin clss
       () <- case mop of
         Nothing -> Control.pure ()
         Just x -> error "Cannot happen" x
@@ -72,56 +120,53 @@ insertIfNew eid enode clss = Control.do
 
 -- | Returns 'False' if the classes were already merged and no change will be made.
 merge ::
-  (Hashable1 l, Data.Functor l, DistributesAlias l) =>
+  (Hashable1 l, Data.Functor l, Movable1 l, DistributesAlias l) =>
   EClassId ->
   EClassId ->
   Mut α (EClasses l) %1 ->
   BO α (Ur Bool, Mut α (EClasses l))
 merge eid1 eid2 clss = Control.do
-  (Ur mem1, clss) <- sharing_ clss $ \clss -> member eid1 clss
-  (Ur mem2, clss) <- sharing_ clss $ \clss -> member eid2 clss
+  (Ur mem1, clss) <- sharing clss $ \clss -> member eid1 clss
+  (Ur mem2, clss) <- sharing clss $ \clss -> member eid2 clss
   if not mem1 || not mem2
     then Control.pure (Ur False, clss)
     else (Ur True,) Control.<$> unsafeMerge eid1 eid2 clss
 
 unsafeMerge ::
   forall α l.
-  (Hashable1 l, Data.Functor l, DistributesAlias l) =>
+  (Hashable1 l, Movable1 l, Data.Functor l, DistributesAlias l) =>
   EClassId ->
   EClassId ->
   Mut α (EClasses l) %1 ->
   BO α (Mut α (EClasses l))
-unsafeMerge eid1 eid2 clss0 = Control.do
-  let clss = coerceLin clss0 :: Mut _ (Raw l)
-  (mnew, clss) <- sharing_ clss \clss -> Control.do
+unsafeMerge eid1 eid2 clss = Control.do
+  clss <- reborrowing_ clss \clss0 -> Control.do
+    let clss = coerceLin clss0 :: Mut _ (Raw l)
     comps <- HMB.lookups [eid1, eid2] clss
     case comps of
-      [(Ur _, set)] -> set `lseq` Control.pure Nothing
+      [(Ur _, set)] -> Control.pure $ consume set
       [(Ur _, Just l), (Ur _, Just r)] -> Control.do
-        Control.pure $ Just (copy l, copy r)
-      comps -> error "Cannot happen" comps
-  clss <- case mnew of
-    Nothing -> Control.pure clss
-    Just (l, r) -> Control.do
-      clss <-
-        HMB.alter
-          ( \ml -> case ml of
-              Nothing -> Just r
-              Just l -> Just $ HS.union l r
-          )
-          eid1
-          clss
-      clss <-
-        HMB.alter
-          ( \mr -> case mr of
-              Nothing -> Just l
-              Just r -> Just (HS.union l r)
-          )
-          eid2
-          clss
-      Control.pure clss
+        ((lnodes, lparents), l) <- sharing l \l ->
+          (,)
+            Control.<$> Set.toList (l .# #nodes)
+            Control.<*> Set.toList (l .# #parents)
+        ((rnodes, rparents), r) <- sharing r \r ->
+          (,)
+            Control.<$> Set.toList (r .# #nodes)
+            Control.<*> Set.toList (r .# #parents)
 
-  Control.pure $ coerceLin clss
+        l <- reborrowing_ l \l -> Control.do
+          void $ Set.inserts rnodes (l .# #nodes)
+        Control.void $ reborrowing_ l \l -> Control.do
+          void $ Set.inserts rparents $ l .# #parents
+
+        r <- reborrowing_ r \r -> Control.do
+          void $ Set.inserts lnodes (r .# #nodes)
+        Control.void $ reborrowing_ r \r -> Control.do
+          void $ Set.inserts lparents $ r .# #parents
+      comps -> error "Cannot happen" comps
+
+  Control.pure clss
 
 coerceLin :: (Coercible a b) => a %1 -> b
 coerceLin = Unsafe.toLinear coerce

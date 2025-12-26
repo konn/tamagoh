@@ -30,7 +30,7 @@ test_union =
                   let %1 !(uf, lend) = new 10 l'
                   (Ur key1, uf) <- fresh uf
                   (Ur key2, uf) <- fresh uf
-                  (Ur eql, uf) <- sharing_ uf \uf -> Control.do
+                  (Ur eql, uf) <- sharing uf \uf -> Control.do
                     Ur k1 <- move Control.<$> find key1 uf
                     Ur k2 <- move Control.<$> find key2 uf
                     Control.pure PL.$ move (isJust k1 && isJust k2, k1 PL./= k2)
@@ -46,7 +46,7 @@ test_union =
                   (Ur key1, uf) <- fresh uf
                   (Ur key2, uf) <- fresh uf
                   (Ur newKey, uf) <- union key1 key2 uf
-                  ((k1, k2), uf) <- sharing_ uf \uf -> Control.do
+                  ((k1, k2), uf) <- sharing uf \uf -> Control.do
                     k1 <- Data.fmap unur Control.<$> find key1 uf
                     k2 <- Data.fmap unur Control.<$> find key2 uf
                     Control.pure (k1, k2)
@@ -67,7 +67,7 @@ test_union =
                   (Ur key2, uf) <- fresh uf
                   (Ur key3, uf) <- fresh uf
                   (Ur newKey, uf) <- union key1 key2 uf
-                  ((k1, k2, k3), uf) <- sharing_ uf \uf -> Control.do
+                  ((k1, k2, k3), uf) <- sharing uf \uf -> Control.do
                     k1 <- Data.fmap unur Control.<$> find key1 uf
                     k2 <- Data.fmap unur Control.<$> find key2 uf
                     k3 <- Data.fmap unur Control.<$> find key3 uf

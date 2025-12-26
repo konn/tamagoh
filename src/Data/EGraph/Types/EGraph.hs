@@ -90,15 +90,15 @@ coerceLin = Unsafe.toLinear coerce
 
 add :: (P.Traversable l, Hashable1 l) => ENode l -> Mut α (EGraph l) %1 -> BO α (Ur EClassId, Mut α (EGraph l))
 add enode egraph = Control.do
-  (Ur mid, egraph) <- sharing_ egraph \egraph ->
+  (Ur mid, egraph) <- sharing egraph \egraph ->
     lookup enode egraph
   case mid of
     Just eid -> Control.pure (Ur eid, egraph)
     Nothing -> Control.do
-      (Ur eid, egraph) <- reborrowing_ egraph \egraph -> Control.do
+      (Ur eid, egraph) <- reborrowing egraph \egraph -> Control.do
         (eid, uf) <- UFB.fresh (egraph .# #unionFind)
         Control.pure $ uf `lseq` Ur.lift EClassId eid
-      ((), egraph) <- reborrowing_ egraph \egraph -> Control.do
+      egraph <- reborrowing_ egraph \egraph -> Control.do
         let %1 !classes = egraph .# #classes
         (Ur _, classes) <- EC.insertIfNew eid enode classes
         Control.pure $ consume classes
@@ -112,13 +112,13 @@ merge ::
   ) =>
   EClassId -> EClassId -> Mut α (EGraph l) %1 -> BO α (Ur Bool, Mut α (EGraph l))
 merge eid1 eid2 egraph = Control.do
-  (Ur merged, egraph) <- reborrowing_ egraph \egraph -> Control.do
+  (Ur merged, egraph) <- reborrowing egraph \egraph -> Control.do
     let %1 !uf = egraph .# #unionFind
     (merged, uf) <- UFB.union eid1.getKey eid2.getKey uf
     Control.pure $ uf `lseq` Ur.lift isJust merged
   if merged
     then Control.do
-      ((), egraph) <- reborrowing_ egraph \egraph -> Control.do
+      egraph <- reborrowing_ egraph \egraph -> Control.do
         let %1 !classes = egraph .# #classes
         classes <- EC.merge eid1 eid2 classes
         Control.pure $ consume classes

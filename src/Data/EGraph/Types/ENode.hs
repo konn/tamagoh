@@ -1,30 +1,50 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Data.EGraph.Types.ENode (ENode (..)) where
 
 import Control.Monad.Borrow.Pure (Copyable (..), DistributesAlias, Share, split)
+import Control.Monad.Borrow.Pure.Orphans (Movable1, move1)
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
 import Data.Functor.Classes (Eq1, Ord1, Show1, compare1, eq1, showsPrec1)
 import Data.Functor.Linear qualified as Data
 import Data.Hashable (Hashable (..))
 import Data.Hashable.Lifted (Hashable1, hashWithSalt1)
+import Data.Unrestricted.Linear (AsMovable)
+import Data.Unrestricted.Linear qualified as Ur
 import GHC.Generics (Generic)
+import GHC.Generics qualified as GHC
+import Generics.Linear.TH (deriveGeneric, deriveGenericAnd1)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
+import Prelude.Linear.Generically
 import Unsafe.Linear qualified as Unsafe
 import Prelude (Eq (..), Ord, Show)
 import Prelude qualified as P
 
 newtype ENode l = ENode {unwrap :: l EClassId}
-  deriving (Generic)
+  deriving (GHC.Generic)
+
+deriveGeneric ''ENode
+
+deriving via AsMovable (ENode l) instance (Movable1 l) => Consumable (ENode l)
+
+deriving via AsMovable (ENode l) instance (Movable1 l) => Dupable (ENode l)
+
+instance (Movable1 l) => Movable (ENode l) where
+  move (ENode l) = Ur.lift ENode (move1 l)
+  {-# INLINE move #-}
 
 instance (DistributesAlias l, Data.Functor l) => Copyable (ENode l) where
   copy = ENode . Data.fmap copy . split . coerceShr @_ @(l EClassId)
