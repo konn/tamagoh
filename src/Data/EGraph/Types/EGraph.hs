@@ -22,13 +22,13 @@ module Data.EGraph.Types.EGraph (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
+import Control.Monad.Borrow.Pure.Orphans (Movable1)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.EClasses (EClasses)
 import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.ENode
-import Data.Functor.Classes (Eq1)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear (HashMap)
@@ -49,6 +49,7 @@ data EGraph f = EGraph
   { unionFind :: !UnionFind
   , classes :: !(EClasses f)
   , hashcons :: !(HashMap (ENode f) EClassId)
+  , worklist :: ![EClassId]
   }
   deriving (Generic)
 
@@ -88,7 +89,11 @@ unsafeFind egraph (EClassId k) = Control.do
 coerceLin :: (Coercible a b) => a %1 -> b
 coerceLin = Unsafe.toLinear coerce
 
-add :: (P.Traversable l, Hashable1 l) => ENode l -> Mut α (EGraph l) %1 -> BO α (Ur EClassId, Mut α (EGraph l))
+add ::
+  (P.Traversable l, Hashable1 l) =>
+  ENode l ->
+  Mut α (EGraph l) %1 ->
+  BO α (Ur EClassId, Mut α (EGraph l))
 add enode egraph = Control.do
   (Ur mid, egraph) <- sharing egraph \egraph ->
     lookup enode egraph
@@ -109,8 +114,12 @@ merge ::
   ( Data.Functor l
   , DistributesAlias l
   , Hashable1 l
+  , Movable1 l
   ) =>
-  EClassId -> EClassId -> Mut α (EGraph l) %1 -> BO α (Ur Bool, Mut α (EGraph l))
+  EClassId ->
+  EClassId ->
+  Mut α (EGraph l) %1 ->
+  BO α (Ur Bool, Mut α (EGraph l))
 merge eid1 eid2 egraph = Control.do
   (Ur merged, egraph) <- reborrowing egraph \egraph -> Control.do
     let %1 !uf = egraph .# #unionFind

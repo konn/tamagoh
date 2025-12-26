@@ -33,6 +33,7 @@ import Control.Monad.Borrow.Pure.Orphans (Movable1)
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.ENode
+import Data.Foldable (Foldable)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
@@ -100,7 +101,7 @@ otherwise no change will be made and returns 'False'.
 -}
 insertIfNew ::
   forall l α.
-  (Hashable1 l) =>
+  (Hashable1 l, Foldable l) =>
   EClassId ->
   ENode l ->
   Mut α (EClasses l) %1 ->
@@ -111,7 +112,7 @@ insertIfNew eid enode clss = Control.do
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
       nodes <- Set.singleton enode
-      parents <- Set.empty 16
+      parents <- Set.fromList $ children enode
       (mop, clss) <- HMB.insert eid EClass {parents, nodes} $ coerceLin clss
       () <- case mop of
         Nothing -> Control.pure ()

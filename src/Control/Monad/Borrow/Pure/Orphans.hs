@@ -30,7 +30,6 @@ import Data.HashMap.Internal.Strict (HashMap)
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HashSet
 import Data.Hashable (Hashable)
-import Data.Unrestricted.Linear qualified as Ur
 import GHC.Base (Multiplicity (..))
 import Prelude.Linear
 import Prelude.Linear.Generically

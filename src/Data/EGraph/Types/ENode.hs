@@ -12,23 +12,22 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
-module Data.EGraph.Types.ENode (ENode (..)) where
+module Data.EGraph.Types.ENode (ENode (..), children) where
 
 import Control.Monad.Borrow.Pure (Copyable (..), DistributesAlias, Share, split)
 import Control.Monad.Borrow.Pure.Orphans (Movable1, move1)
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
+import Data.Foldable qualified as F
 import Data.Functor.Classes (Eq1, Ord1, Show1, compare1, eq1, showsPrec1)
 import Data.Functor.Linear qualified as Data
 import Data.Hashable (Hashable (..))
 import Data.Hashable.Lifted (Hashable1, hashWithSalt1)
 import Data.Unrestricted.Linear (AsMovable)
 import Data.Unrestricted.Linear qualified as Ur
-import GHC.Generics (Generic)
 import GHC.Generics qualified as GHC
-import Generics.Linear.TH (deriveGeneric, deriveGenericAnd1)
+import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
-import Prelude.Linear.Generically
 import Unsafe.Linear qualified as Unsafe
 import Prelude (Eq (..), Ord, Show)
 import Prelude qualified as P
@@ -68,3 +67,6 @@ instance (Ord1 l) => Ord (ENode l) where
 
 coerceShr :: (Coercible a b) => Share α a %1 -> Share α b
 coerceShr = Unsafe.toLinear coerce
+
+children :: (P.Foldable l) => ENode l -> [EClassId]
+children = F.toList P.. unwrap
