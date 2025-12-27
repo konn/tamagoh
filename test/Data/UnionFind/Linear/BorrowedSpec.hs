@@ -11,7 +11,6 @@ module Data.UnionFind.Linear.BorrowedSpec (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Data.Functor.Linear qualified as Data
 import Data.Maybe (isJust)
 import Data.UnionFind.Linear.Borrowed
 import Prelude.Linear (Ur (..), dup, lseq, move, unur)
@@ -31,8 +30,8 @@ test_union =
                   (Ur key1, uf) <- fresh uf
                   (Ur key2, uf) <- fresh uf
                   (Ur eql, uf) <- sharing uf \uf -> Control.do
-                    Ur k1 <- move Control.<$> find key1 uf
-                    Ur k2 <- move Control.<$> find key2 uf
+                    Ur k1 <- find key1 uf
+                    Ur k2 <- find key2 uf
                     Control.pure PL.$ move (isJust k1 && isJust k2, k1 PL./= k2)
                   Control.pure PL.$ \end ->
                     uf `lseq` reclaim lend end `lseq` eql
@@ -47,8 +46,8 @@ test_union =
                   (Ur key2, uf) <- fresh uf
                   (Ur newKey, uf) <- union key1 key2 uf
                   ((k1, k2), uf) <- sharing uf \uf -> Control.do
-                    k1 <- Data.fmap unur Control.<$> find key1 uf
-                    k2 <- Data.fmap unur Control.<$> find key2 uf
+                    k1 <- unur Control.<$> find key1 uf
+                    k2 <- unur Control.<$> find key2 uf
                     Control.pure (k1, k2)
                   Control.pure PL.$ \end ->
                     uf `lseq` reclaim lend end `lseq` (key1, key2, newKey, k1, k2)
@@ -68,9 +67,9 @@ test_union =
                   (Ur key3, uf) <- fresh uf
                   (Ur newKey, uf) <- union key1 key2 uf
                   ((k1, k2, k3), uf) <- sharing uf \uf -> Control.do
-                    k1 <- Data.fmap unur Control.<$> find key1 uf
-                    k2 <- Data.fmap unur Control.<$> find key2 uf
-                    k3 <- Data.fmap unur Control.<$> find key3 uf
+                    k1 <- find key1 uf
+                    k2 <- find key2 uf
+                    k3 <- find key3 uf
                     Control.pure (k1, k2, k3)
                   Control.pure PL.$ \end ->
                     uf `lseq` reclaim lend end `lseq` ((key1, key2, key3), newKey, k1, k2, k3)
@@ -78,8 +77,8 @@ test_union =
         Just newKey <- pure $ newKey
         assertBool "newKey must be one of original keys" $
           key1 == newKey || key2 == newKey
-        Just newKey @=? k1
-        Just newKey @=? k2
-        k3 @?= Just key3
+        Just newKey @=? unur k1
+        Just newKey @=? unur k2
+        unur k3 @?= Just key3
         newKey /= key3 @? "k1, k2 must be different from k3"
     ]

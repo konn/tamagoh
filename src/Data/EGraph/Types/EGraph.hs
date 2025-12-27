@@ -18,6 +18,7 @@ module Data.EGraph.Types.EGraph (
   EGraph,
   new,
   find,
+  fromTerm,
   lookup,
   unsafeFind,
   canonicalize,
@@ -25,6 +26,7 @@ module Data.EGraph.Types.EGraph (
   merge,
   rebuild,
   Language,
+  Equatable (..),
 ) where
 
 import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
@@ -39,6 +41,7 @@ import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.EClasses (EClasses, parents, setParents)
 import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.ENode
+import Data.Fix (Fix, foldFixM)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
@@ -67,6 +70,22 @@ data EGraph l = EGraph
 
 type Language l = (Hashable1 l, Movable1 l, P.Traversable l)
 
+type Term l = Fix l
+
+fromTerm ::
+  (P.Traversable l, Hashable1 l) =>
+  Mut α (EGraph l) %1 ->
+  Term l ->
+  BO α (Ur (ENode l), Mut α (EGraph l))
+fromTerm egraph term =
+  flip runStateT egraph
+    $ runUrT
+    $ foldFixM
+      ( \nodes ->
+          ENode P.<$> P.traverse (\node -> UrT $ StateT $ add node) nodes
+      )
+      term
+
 instance LinearOnly (EGraph l) where
   linearOnly :: LinearOnlyWitness (EGraph l)
   linearOnly = UnsafeLinearOnly
@@ -79,7 +98,7 @@ new = runReader Control.do
   worklist <- asks $ Set.empty 16
   Control.pure EGraph {..}
 
-find :: Borrow k α (EGraph l) %1 -> EClassId -> BO α (Maybe (Ur EClassId))
+find :: Borrow k α (EGraph l) %1 -> EClassId -> BO α (Ur (Maybe EClassId))
 find egraph (EClassId k) = Control.do
   let uf = egraph .# #unionFind
   coerceLin Data.<$> UFB.find k uf
@@ -90,6 +109,21 @@ lookup enode egraph =
     enode <- MaybeT $ UrT (canonicalize egraph enode)
     MaybeT $ UrT $ move . Data.fmap copy Control.<$> HMB.lookup enode (egraph .# #hashcons)
 
+class Equatable l a where
+  cong :: Share α (EGraph l) -> a -> a -> BO α (Ur (Maybe Bool))
+
+instance Equatable l EClassId where
+  cong egraph eid1 eid2 = Control.do
+    Ur eid1 <- find egraph eid1
+    Ur eid2 <- find egraph eid2
+    Control.pure $ Ur $ (P.==) P.<$> eid1 P.<*> eid2
+
+instance (P.Traversable l, Hashable1 l) => Equatable l (ENode l) where
+  cong egraph enode1 enode2 = Control.do
+    Ur meid1 <- canonicalize egraph enode1
+    Ur meid2 <- canonicalize egraph enode2
+    Control.pure $ Ur $ (P.==) P.<$> meid1 P.<*> meid2
+
 canonicalize :: (P.Traversable l) => Share α (EGraph l) %1 -> ENode l -> BO α (Ur (Maybe (ENode l)))
 canonicalize egraph (ENode node) =
   move egraph & \(Ur egraph) -> Control.do
@@ -98,7 +132,7 @@ canonicalize egraph (ENode node) =
       P.<$> P.mapM
         ( \eid ->
             UrT
-              $ maybe (Ur Nothing) (Ur.lift (Just P.. EClassId))
+              $ Data.fmap (coerceLin @_ @(Maybe EClassId))
               Control.<$> UFB.find (coerce eid) uf
         )
         node
@@ -139,8 +173,8 @@ merge ::
   BO α (Ur (Maybe EClassId), Mut α (EGraph l))
 merge eid1 eid2 egraph = Control.do
   (Ur eids, egraph) <- sharing egraph \egraph -> Control.do
-    Ur eid1 <- maybe (Ur Nothing) (Data.fmap Just) Control.<$> find egraph eid1
-    Ur eid2 <- maybe (Ur Nothing) (Data.fmap Just) Control.<$> find egraph eid2
+    Ur eid1 <- find egraph eid1
+    Ur eid2 <- find egraph eid2
     Control.pure $ Ur $ (,) P.<$> eid1 P.<*> eid2
   case eids of
     Nothing -> Control.pure (Ur Nothing, egraph)
@@ -174,8 +208,8 @@ rebuild = loop
             (todos, works) <- Set.take (egraph .# #worklist)
             Control.pure $ works `lseq` Set.toListUnborrowed todos
           (todos, egraph) <- sharing egraph \egraph -> Control.do
-            todos <- catMaybes Control.<$> Data.mapM (\k -> find egraph k) todos
-            Data.mapM (\(Ur k) -> (Ur k,) Control.<$> parents (egraph .# #classes) k) todos
+            todos <- mapMaybe unur Control.<$> Data.mapM (\k -> find egraph k) todos
+            Data.mapM (\k -> move k & \(Ur k) -> (Ur k,) Control.<$> parents (egraph .# #classes) k) todos
           egraph <- forRebor_ egraph todos \egraph (Ur eid, Ur ps) ->
             repair egraph eid ps
           loop egraph

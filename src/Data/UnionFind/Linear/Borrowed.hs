@@ -42,11 +42,12 @@ NOTE: This function uses path compression, which mutates the internal state;
 but this SHOULD NOT affect the external behavior of the union-find structure,
 so we provide it in for _any_ 'Borrow's (in particular, for 'Share's)  unrestrictedly.
 -}
-find :: Key -> Borrow k α UnionFind %1 -> BO α (Maybe (Ur Key))
+find :: Key -> Borrow k α UnionFind %1 -> BO α (Ur (Maybe Key))
 {-# NOINLINE find #-}
 find key = Unsafe.toLinear \(UnsafeAlias uf) -> case Raw.find key uf of
   -- We need to force a thunk here to force the mutations.
-  (mkey, !_) -> Control.pure mkey
+  (Nothing, !_) -> Control.pure $ Ur Nothing
+  (Just (Ur !k), !_) -> Control.pure $ Ur $ Just k
 
 unsafeFind :: Key -> Borrow k α UnionFind %1 -> BO α (Ur Key)
 {-# NOINLINE unsafeFind #-}

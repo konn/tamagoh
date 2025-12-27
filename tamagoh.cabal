@@ -45,6 +45,7 @@ common defaults
 library
   import: defaults
   build-depends:
+    data-fix,
     hashable,
     linear-generics,
     linear-witness,
@@ -98,7 +99,10 @@ test-suite tamagoh-test
     -with-rtsopts=-N
 
   -- cabal-gild: discover test --exclude=test/Main.hs
-  other-modules: Data.UnionFind.Linear.BorrowedSpec
+  other-modules:
+    Data.EGraph.Types.EGraphSpec
+    Data.UnionFind.Linear.BorrowedSpec
+
   build-depends:
     falsify,
     tamagoh,
