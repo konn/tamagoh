@@ -11,6 +11,7 @@ module Data.HashMap.Mutable.Linear.Borrowed (
   HashMap,
   Keyed,
   empty,
+  fromList,
   insert,
   delete,
   shrinkToFit,
@@ -22,11 +23,17 @@ module Data.HashMap.Mutable.Linear.Borrowed (
   lookups,
   member,
   toList,
+  swap,
+  take,
+  take_,
+  union,
 ) where
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
+import Control.Syntax.DataFlow qualified as DataFlow
+import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (coerce)
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear (Keyed)
@@ -36,7 +43,7 @@ import Data.HashSet qualified as IHS
 import Data.Linear.Witness.Compat (fromPB)
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
-import Prelude.Linear hiding (filter, insert, lookup, mapMaybe)
+import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
 
@@ -54,12 +61,25 @@ instance Consumable (HashMap k v) where
   consume = \(HM ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
 
-empty :: (Keyed k) => Int -> BO α (Mut α (HashMap k v), Lend α (HashMap k v))
+instance Dupable (HashMap k v) where
+  dup2 = Unsafe.toLinear \(HM ref) -> DataFlow.do
+    (lin, ref) <- withLinearly ref
+    (ref, ref2) <- Unsafe.toLinear (\ref -> let (!_, !ref2) = dup $ freeRef ref in (ref, ref2)) ref
+    (HM ref, HM $ Ref.new ref2 lin)
+  {-# INLINE dup2 #-}
+
+empty :: forall k v α. (Keyed k) => Int -> BO α (HashMap k v)
 {-# INLINE empty #-}
 empty size = Control.do
   withLinearlyBO $ \l ->
-    dup3 l & \(l, l', l'') -> Control.do
-      Control.pure $ borrow (HM $ Ref.new (Raw.emptyL size $ fromPB l) l'') l'
+    dup l & \(l, l'') -> Control.do
+      Control.pure $ HM $ Ref.new (Raw.emptyL size $ fromPB l) l''
+
+fromList :: (Keyed k) => [(k, v)] %1 -> BO α (HashMap k v)
+{-# INLINE fromList #-}
+fromList = Unsafe.toLinear \keys -> withLinearlyBO \l ->
+  dup l & \(l, l') ->
+    Control.pure $ HM $ Ref.new (Raw.fromListL keys $ fromPB l) l'
 
 -- TODO: more efficient implementation
 insert ::
@@ -168,9 +188,20 @@ member :: (Keyed k) => k -> Borrow bk α (HashMap k v) %1 -> BO α (Ur Bool)
 {-# INLINE member #-}
 member key = askRaw (Raw.member key)
 
-toList :: Lend α (HashMap k v) %1 -> End α -> [(k, v)]
+askRaw_ ::
+  (Raw.HashMap k v %1 -> Ur a) %1 ->
+  Borrow bk α (HashMap k v) %1 ->
+  BO α a
+{-# INLINE askRaw_ #-}
+askRaw_ f dic = case share dic of
+  Ur dic -> Control.do
+    UnsafeAlias dic <- readSharedRef (coerceBor dic)
+    case f dic of
+      Ur !res -> Control.pure res
+
+toList :: Borrow bk α (HashMap k v) %1 -> BO α [(k, v)]
 {-# INLINE toList #-}
-toList lend end = unur $ Raw.toList $ freeRef $ inner $ reclaim lend end
+toList = askRaw_ Raw.toList
 
 coerceBor ::
   forall k v bk α.
@@ -185,3 +216,35 @@ recoerceBor ::
   Borrow bk α (HashMap k v)
 {-# INLINE recoerceBor #-}
 recoerceBor = Unsafe.toLinear coerce
+
+swap ::
+  forall k v α.
+  HashMap k v %1 ->
+  Mut α (HashMap k v) %1 ->
+  BO α (HashMap k v, Mut α (HashMap k v))
+{-# INLINE swap #-}
+swap keys dic = withLinearlyBO \lin -> Control.do
+  Bi.second recoerceBor
+    Control.<$> updateRef (\old -> Control.pure (HM $ Ref.new old lin, freeRef $ inner keys)) (coerceBor dic)
+
+-- | Takes all elements from the set, leaving it empty.
+take :: forall k v α. (Keyed k) => Mut α (HashMap k v) %1 -> BO α (HashMap k v, Mut α (HashMap k v))
+{-# INLINE take #-}
+take set = Control.do
+  Bi.second recoerceBor Control.<$> updateRef go (coerceBor set)
+  where
+    go :: Raw.HashMap k v %1 -> BO α (HashMap k v, Raw.HashMap k v)
+    {-# INLINE go #-}
+    go = \s -> withLinearlyBO \lin ->
+      dup lin & \(lin, lin') -> Control.do
+        Control.pure (HM $ Ref.new s lin, Raw.emptyL 16 $ fromPB lin')
+
+take_ :: forall k v α. (Keyed k) => Mut α (HashMap k v) %1 -> BO α (HashMap k v)
+{-# INLINE take_ #-}
+take_ set = Control.fmap (uncurry $ flip lseq) $ take set
+
+union :: (Keyed k) => HashMap k v %1 -> HashMap k v %1 -> HashMap k v
+{-# INLINE union #-}
+union (HM ref1) (HM ref2) = DataFlow.do
+  (l, ref1) <- withLinearly ref1
+  HM $ Ref.new (Raw.union (freeRef ref1) (freeRef ref2)) l

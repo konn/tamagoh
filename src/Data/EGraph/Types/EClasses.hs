@@ -20,7 +20,9 @@ module Data.EGraph.Types.EClasses (
   EClasses (),
   EClass (),
   parents,
+  setParents,
   addParent,
+  find,
   member,
   insertIfNew,
   merge,
@@ -56,7 +58,7 @@ type Raw l = HashMap EClassId (EClass l)
 data EClass l
   = EClass
   { nodes :: !(Set (ENode l))
-  , parents :: !(Set EClassId)
+  , parents :: !(HashMap (ENode l) EClassId)
   }
   deriving (GHC.Generic)
 
@@ -66,23 +68,43 @@ deriving via Generically (EClass l) instance Consumable (EClass l)
 
 parents ::
   forall bk α l.
-  EClassId -> Borrow bk α (EClasses l) %1 -> BO α (Ur (Maybe [EClassId]))
-parents eid clss0 = Control.do
+  (Movable1 l) =>
+  Borrow bk α (EClasses l) %1 ->
+  EClassId ->
+  BO α (Ur [(ENode l, EClassId)])
+parents clss0 eid = Control.do
   let %1 clss = coerceLin clss0 :: Borrow bk α (Raw l)
   mclass <- HMB.lookup eid clss
   case mclass of
-    Nothing -> Control.pure (Ur Nothing)
-    Just eclass -> move . Just Control.<$> Set.toList (eclass .# #parents)
+    Nothing -> Control.pure (Ur [])
+    Just eclass -> move Control.<$> HMB.toList (eclass .# #parents)
+
+setParents ::
+  forall l α.
+  (Hashable1 l) =>
+  EClassId ->
+  HashMap (ENode l) EClassId ->
+  Mut α (EClasses l) %1 ->
+  BO α (Mut α (EClasses l))
+setParents eid ps clss = Control.do
+  reborrowing_ clss \clss0 -> Control.do
+    let %1 !clss = coerceLin clss0 :: Mut _ (Raw l)
+    mclass <- HMB.lookup eid clss
+    case mclass of
+      Nothing -> Control.pure ()
+      Just eclass -> Control.do
+        void $ HMB.swap ps (eclass .# #parents)
 
 addParent ::
+  (Hashable1 l) =>
   EClassId ->
+  ENode l ->
   Mut α (EClass l) %1 ->
   BO α (Mut α (EClass l))
-addParent pid eclass = Control.do
+addParent pid enode eclass = Control.do
   eclass <- reborrowing_ eclass \eclass -> Control.do
     let %1 !parentsSet = eclass .# #parents
-    parentsSet <- Set.insert pid parentsSet
-    Control.pure $ consume parentsSet
+    void $ HMB.insert enode pid parentsSet
   Control.pure eclass
 
 member ::
@@ -111,13 +133,13 @@ insertIfNew eid enode clss = Control.do
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
       nodes <- Set.singleton enode
-      parents <- Set.empty 16
+      parents <- HMB.empty 16
       (mop, clss) <- HMB.insert eid EClass {parents, nodes} $ coerceLin clss
       clss <- reborrowing_ clss \clss -> Control.do
         chss <-
           mapMaybe (\(Ur _, e) -> e)
             Control.<$> HMB.lookups (children enode) clss
-        void $ Data.forM chss \ch -> addParent eid ch
+        void $ Data.forM chss \ch -> addParent eid enode ch
       consume mop `lseq` Control.pure (Ur True, coerceLin clss)
 
 -- | Returns 'False' if the classes were already merged and no change will be made.
@@ -148,25 +170,24 @@ unsafeMerge eid1 eid2 clss = Control.do
     case comps of
       [(Ur _, set)] -> Control.pure $ consume set
       [(Ur _, Just l), (Ur _, Just r)] -> Control.do
-        ((lnodes, lparents), l) <- sharing l \l ->
-          (,)
-            Control.<$> Set.toList (l .# #nodes)
-            Control.<*> Set.toList (l .# #parents)
-        ((rnodes, rparents), r) <- sharing r \r ->
-          (,)
-            Control.<$> Set.toList (r .# #nodes)
-            Control.<*> Set.toList (r .# #parents)
+        (lnodes, l) <- reborrowing l \l -> Set.take_ (l .# #nodes)
+        (rnodes, r) <- reborrowing r \r -> Set.take_ (r .# #nodes)
+        let %1 !(nodes, nodes') = dup $ Set.union lnodes rnodes
+
+        (lparents, l) <- reborrowing l \l -> HMB.take_ (l .# #parents)
+        (rparents, r) <- reborrowing r \r -> HMB.take_ (r .# #parents)
+        let %1 !(parents, parents') = dup $ HMB.union lparents rparents
 
         l <- reborrowing_ l \l -> Control.do
-          void $ Set.inserts rnodes (l .# #nodes)
+          void $ Set.swap nodes (l .# #nodes)
         Control.void $ reborrowing_ l \l -> Control.do
-          void $ Set.inserts rparents $ l .# #parents
+          void $ HMB.swap parents $ l .# #parents
 
         r <- reborrowing_ r \r -> Control.do
-          void $ Set.inserts lnodes (r .# #nodes)
+          void $ Set.swap nodes' (r .# #nodes)
         Control.void $ reborrowing_ r \r -> Control.do
-          void $ Set.inserts lparents $ r .# #parents
-      comps -> error "Cannot happen" comps
+          void $ HMB.swap parents' $ r .# #parents
+      comps -> Control.pure $ consume comps
 
   Control.pure clss
 
