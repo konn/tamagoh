@@ -101,10 +101,13 @@ test-suite tamagoh-test
   -- cabal-gild: discover test --exclude=test/Main.hs
   other-modules:
     Data.EGraph.Types.EGraphSpec
+    Data.EGraph.Types.EGraphSpec.Cases
     Data.UnionFind.Linear.BorrowedSpec
 
   build-depends:
     falsify,
+    hashable,
+    linear-generics,
     tamagoh,
     tasty,
     tasty-hunit,

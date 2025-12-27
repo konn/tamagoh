@@ -52,6 +52,7 @@ import Prelude.Linear.Internal.Generically
 import Unsafe.Linear qualified as Unsafe
 
 newtype EClasses l = EClasses (Raw l)
+  deriving newtype (Consumable)
 
 type Raw l = HashMap EClassId (EClass l)
 

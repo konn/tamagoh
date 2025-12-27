@@ -11,6 +11,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 {- | Efficient union-find data structure with path compression,
 using linear types for safe mutation and unboxed vectors for performance.
@@ -30,8 +31,6 @@ module Data.UnionFind.Linear (
   -- * Construction
   empty,
   emptyL,
-  new,
-  newL,
 
   -- * Dynamic extension
   fresh,
@@ -55,6 +54,7 @@ import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure (Copyable)
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Data.Coerce qualified
+import Data.Functor.Linear qualified as Data
 import Data.Hashable (Hashable)
 import Data.Linear.Witness.Compat (fromPB)
 import Data.Ord.Linear qualified as Linear
@@ -133,21 +133,6 @@ emptyL lin = flip runReader lin Control.do
   ranks <- asks $ Vector.emptyL . fromPB
   Control.pure $ UnionFind 0 parents ranks
 
-{- | Create a union-find structure with @n@ elements (0..n-1).
-Initially, each element is in its own singleton set.
--}
-new :: Word -> (UnionFind %1 -> Ur b) %1 -> Ur b
-new n f =
-  Vector.fromList [0 .. n - 1] \parent ->
-    Vector.fromList (replicate (fromIntegral n) 0) \rank ->
-      f (UnionFind n parent rank)
-
-newL :: Word -> Linearly %1 -> UnionFind
-newL n lin = flip runReader lin Control.do
-  parents <- asks $ Vector.fromListL [0 .. n - 1] . fromPB
-  ranks <- asks $ Vector.fromListL (replicate (fromIntegral n) 0) . fromPB
-  Control.pure $ UnionFind n parents ranks
-
 {- | Find the representative (root) of the set containing the given element,
 with path compression for efficiency.
 
@@ -173,10 +158,12 @@ unsafeFind x (UnionFind n parent rank) =
 with path compression for efficiency.
 Returns Nothing if the key is out of bounds.
 -}
-find :: Key -> UnionFind %1 -> (Maybe (Ur Key), UnionFind)
+find :: Key -> UnionFind %1 -> (Ur (Maybe Key), UnionFind)
 find (Key x) (UnionFind n parent rank)
-  | x >= n = (Nothing, UnionFind n parent rank)
-  | otherwise = unsafeFind (Key x) (UnionFind n parent rank) & \(root, uf') -> (Just root, uf')
+  | x >= n = (Ur Nothing, UnionFind n parent rank)
+  | otherwise =
+      unsafeFind (Key x) (UnionFind n parent rank) & \(root, uf') ->
+        (Just Data.<$> root, uf')
 
 {- | Unite the sets containing the two given elements using union-by-rank.
 If the elements are already in the same set, this is a no-op.
@@ -244,11 +231,13 @@ The new element starts in its own singleton set.
 -}
 fresh :: UnionFind %1 -> (Ur Key, UnionFind)
 fresh (UnionFind n parent rank) =
-  let newIdx = n
-      newKey' = Key newIdx
-   in Vector.push newIdx parent & \parent' ->
-        Vector.push 0 rank & \rank' ->
-          (Ur newKey', UnionFind (n + 1) parent' rank')
+  case Vector.size parent of
+    (Ur k, parent) ->
+      let newIdx = fromIntegral k
+          newKey' = Key newIdx
+       in Vector.push newIdx parent & \parent' ->
+            Vector.push 0 rank & \rank' ->
+              (Ur newKey', UnionFind (n + 1) parent' rank')
 
 -- | Get the number of elements in the union-find structure.
 size :: UnionFind %1 -> (Ur Word, UnionFind)

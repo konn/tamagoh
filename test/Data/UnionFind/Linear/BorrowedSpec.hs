@@ -23,34 +23,33 @@ test_union =
   testGroup
     "union"
     [ testCase "disjoint" do
-        let Ur (bothJust, noneq) = linearly \l ->
-              dup l PL.& \(l, l') ->
-                runBO l Control.do
-                  let %1 !(uf, lend) = new 10 l'
-                  (Ur key1, uf) <- fresh uf
-                  (Ur key2, uf) <- fresh uf
-                  (Ur eql, uf) <- sharing uf \uf -> Control.do
-                    Ur k1 <- find key1 uf
-                    Ur k2 <- find key2 uf
-                    Control.pure PL.$ move (isJust k1 && isJust k2, k1 PL./= k2)
-                  Control.pure PL.$ \end ->
-                    uf `lseq` reclaim lend end `lseq` eql
+        let Ur (bothJust, noneq) = linearly \l -> runBO l Control.do
+              uf0 <- withLinearlyBO (Control.pure PL.. empty)
+              let %1 !(uf, lend) = borrowLinearOnly uf0
+              (Ur key1, uf) <- fresh uf
+              (Ur key2, uf) <- fresh uf
+              (Ur eql, uf) <- sharing uf \uf -> Control.do
+                Ur k1 <- find key1 uf
+                Ur k2 <- find key2 uf
+                Control.pure PL.$ move (isJust k1 && isJust k2, k1 PL./= k2)
+              Control.pure PL.$ \end ->
+                uf `lseq` reclaim lend end `lseq` eql
         assertBool "BothJust" bothJust
         assertBool "Nonequal" noneq
     , testCase "two unioned" do
         let Ur (key1, key2, newKey, k1, k2) = linearly \l ->
-              dup l PL.& \(l, l') ->
-                runBO l Control.do
-                  let %1 !(uf, lend) = new 10 l'
-                  (Ur key1, uf) <- fresh uf
-                  (Ur key2, uf) <- fresh uf
-                  (Ur newKey, uf) <- union key1 key2 uf
-                  ((k1, k2), uf) <- sharing uf \uf -> Control.do
-                    k1 <- unur Control.<$> find key1 uf
-                    k2 <- unur Control.<$> find key2 uf
-                    Control.pure (k1, k2)
-                  Control.pure PL.$ \end ->
-                    uf `lseq` reclaim lend end `lseq` (key1, key2, newKey, k1, k2)
+              runBO l Control.do
+                uf0 <- withLinearlyBO (Control.pure PL.. empty)
+                let %1 !(uf, lend) = borrowLinearOnly uf0
+                (Ur key1, uf) <- fresh uf
+                (Ur key2, uf) <- fresh uf
+                (Ur newKey, uf) <- union key1 key2 uf
+                ((k1, k2), uf) <- sharing uf \uf -> Control.do
+                  k1 <- unur Control.<$> find key1 uf
+                  k2 <- unur Control.<$> find key2 uf
+                  Control.pure (k1, k2)
+                Control.pure PL.$ \end ->
+                  uf `lseq` reclaim lend end `lseq` (key1, key2, newKey, k1, k2)
         assertBool "newKey is no Nohing!" $ isJust newKey
         Just newKey <- pure $ newKey
         assertBool "newKey must be one of original keys" $
@@ -59,20 +58,20 @@ test_union =
         Just newKey @=? k2
     , testCase "two equal, one indep" do
         let Ur ((key1, key2, key3), newKey, k1, k2, k3) = linearly \l ->
-              dup l PL.& \(l, l') ->
-                runBO l Control.do
-                  let %1 !(uf, lend) = new 10 l'
-                  (Ur key1, uf) <- fresh uf
-                  (Ur key2, uf) <- fresh uf
-                  (Ur key3, uf) <- fresh uf
-                  (Ur newKey, uf) <- union key1 key2 uf
-                  ((k1, k2, k3), uf) <- sharing uf \uf -> Control.do
-                    k1 <- find key1 uf
-                    k2 <- find key2 uf
-                    k3 <- find key3 uf
-                    Control.pure (k1, k2, k3)
-                  Control.pure PL.$ \end ->
-                    uf `lseq` reclaim lend end `lseq` ((key1, key2, key3), newKey, k1, k2, k3)
+              runBO l Control.do
+                uf0 <- withLinearlyBO (Control.pure PL.. empty)
+                let %1 !(uf, lend) = borrowLinearOnly uf0
+                (Ur key1, uf) <- fresh uf
+                (Ur key2, uf) <- fresh uf
+                (Ur key3, uf) <- fresh uf
+                (Ur newKey, uf) <- union key1 key2 uf
+                ((k1, k2, k3), uf) <- sharing uf \uf -> Control.do
+                  k1 <- find key1 uf
+                  k2 <- find key2 uf
+                  k3 <- find key3 uf
+                  Control.pure (k1, k2, k3)
+                Control.pure PL.$ \end ->
+                  uf `lseq` reclaim lend end `lseq` ((key1, key2, key3), newKey, k1, k2, k3)
         assertBool "newKey is no Nohing!" $ isJust newKey
         Just newKey <- pure $ newKey
         assertBool "newKey must be one of original keys" $
