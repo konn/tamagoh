@@ -1,1 +1,1 @@
-module Data.EGraph.Types.Pattern where
+module Data.EGraph.Types.Pattern () where

@@ -18,6 +18,7 @@
 
 module Data.EGraph.Types.EClasses (
   EClasses (),
+  lookup,
   parents,
   addParent,
   member,
@@ -62,8 +63,6 @@ data EClass l
 deriveGeneric ''EClass
 
 deriving via Generically (EClass l) instance Consumable (EClass l)
-
-deriving via Generically (EClass l) instance Dupable (EClass l)
 
 parents ::
   forall bk α l.

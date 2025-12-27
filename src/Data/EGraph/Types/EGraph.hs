@@ -31,7 +31,7 @@ import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.ENode
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
-import Data.HashMap.Mutable.Linear (HashMap)
+import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.Hashable.Lifted (Hashable1)
 import Data.Maybe (isJust)
