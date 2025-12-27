@@ -182,6 +182,8 @@ addNode egraph enode = Control.do
         let %1 !classes = egraph .# #classes
         (Ur _, classes) <- EC.insertIfNew eid enode classes
         Control.pure $ consume classes
+      egraph <- reborrowing_ egraph \egraph -> Control.do
+        Control.void $ HMB.insert enode eid (egraph .# #hashcons)
 
       Control.pure (Ur eid, egraph)
 
@@ -221,11 +223,12 @@ rebuild = loop
     loop egraph = Control.do
       (Ur isNull, egraph) <- sharing egraph \e -> Set.null $ e .# #worklist
       if isNull
-        then Control.pure egraph
+        then Control.do
+          Control.pure egraph
         else Control.do
           (todos, egraph) <- reborrowing egraph \egraph -> Control.do
-            (todos, works) <- Set.take (egraph .# #worklist)
-            Control.pure $ works `lseq` Set.toListUnborrowed todos
+            todos <- Set.take_ (egraph .# #worklist)
+            Control.pure $ Set.toListUnborrowed todos
           (todos, egraph) <- sharing egraph \egraph -> Control.do
             todos <- mapMaybe unur Control.<$> Data.mapM (\k -> find egraph k) todos
             Data.mapM (\k -> move k & \(Ur k) -> (Ur k,) Control.<$> parents (egraph .# #classes) k) todos
@@ -244,8 +247,9 @@ repair egraph eid parents = Control.do
   egraph <- forRebor_ egraph parents $ \egraph (Ur (p_node, p_class)) -> Control.do
     egraph <- reborrowing_ egraph \egraph ->
       void $ HMB.delete p_node (egraph .# #hashcons)
-    (Ur (fromJust -> p_node), egraph) <- sharing egraph \egraph -> canonicalize egraph p_node
-    (Ur p_class, egraph) <- sharing egraph $ \egraph ->
+    (Ur (fromJust -> p_node), egraph) <- sharing egraph \egraph ->
+      canonicalize egraph p_node
+    (Ur p_class, egraph) <- sharing egraph \egraph ->
       unsafeFind egraph p_class
     void $ HMB.insert p_node p_class (egraph .# #hashcons)
   (newParents, egraph) <- reborrowing' egraph \egraph -> Control.do

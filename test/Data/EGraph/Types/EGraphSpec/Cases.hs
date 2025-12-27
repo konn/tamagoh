@@ -32,6 +32,7 @@ import GHC.Generics qualified as GHC
 import Generics.Linear.TH qualified as GLC
 import Prelude.Linear
 import Prelude.Linear.Generically qualified as GLC
+import Text.Show.Deriving (deriveShow1)
 import Prelude qualified as P
 
 data Expr l = Add l l | Mul l l | Lit Int | Var String
@@ -49,6 +50,7 @@ data Expr l = Add l l | Mul l l | Lit Int | Var String
   deriving anyclass (Hashable, Hashable1)
 
 GLC.deriveGenericAnd1 ''Expr
+deriveShow1 ''Expr
 
 deriving via GLC.Generically1 Expr instance Movable1 Expr
 
@@ -125,7 +127,7 @@ case1 egraph = Control.do
   (Ur initAId, egraph) <- addNode egraph (ENode (Var "a"))
   (Ur initBId, egraph) <- addNode egraph (ENode (Var "b"))
   (Ur initCId, egraph) <- addNode egraph (ENode (Var "c"))
-  (Ur unionedBorCId, egraph) <- merge initCId initCId egraph
+  (Ur unionedBorCId, egraph) <- merge initBId initCId egraph
   egraph <- rebuild egraph
   (Ur abacEqAfterMerge, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph abNode acNode
