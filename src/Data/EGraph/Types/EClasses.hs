@@ -18,6 +18,7 @@
 
 module Data.EGraph.Types.EClasses (
   EClasses (),
+  EClass (),
   parents,
   addParent,
   member,
@@ -110,12 +111,14 @@ insertIfNew eid enode clss = Control.do
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
       nodes <- Set.singleton enode
-      parents <- Set.fromList $ children enode
+      parents <- Set.empty 16
       (mop, clss) <- HMB.insert eid EClass {parents, nodes} $ coerceLin clss
-      () <- case mop of
-        Nothing -> Control.pure ()
-        Just x -> error "Cannot happen" x
-      Control.pure (Ur True, coerceLin clss)
+      clss <- reborrowing_ clss \clss -> Control.do
+        chss <-
+          mapMaybe (\(Ur _, e) -> e)
+            Control.<$> HMB.lookups (children enode) clss
+        void $ Data.forM chss \ch -> addParent eid ch
+      consume mop `lseq` Control.pure (Ur True, coerceLin clss)
 
 -- | Returns 'False' if the classes were already merged and no change will be made.
 merge ::
