@@ -13,7 +13,7 @@ import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Data.Maybe (isJust)
 import Data.UnionFind.Linear.Borrowed
-import Prelude.Linear (Ur (..), dup, lseq, move, unur)
+import Prelude.Linear (Ur (..), lseq, move, unur)
 import Prelude.Linear qualified as PL
 import Test.Tasty
 import Test.Tasty.HUnit
