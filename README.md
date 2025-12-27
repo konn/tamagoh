@@ -15,4 +15,4 @@ For serious usage, go to [hegg][hegg].
 ## Etymology
 
 "Tamago (卵 or 玉子 in Kanji; たまご in Hiragana)" means "egg" in Japanese.
-The suffix "-h" is borrowed from *H*askell.
+The suffix "-h" is purely borrowed from *H*askell.
