@@ -231,13 +231,11 @@ The new element starts in its own singleton set.
 -}
 fresh :: UnionFind %1 -> (Ur Key, UnionFind)
 fresh (UnionFind n parent rank) =
-  case Vector.size parent of
-    (Ur k, parent) ->
-      let newIdx = fromIntegral k
-          newKey' = Key newIdx
-       in Vector.push newIdx parent & \parent' ->
-            Vector.push 0 rank & \rank' ->
-              (Ur newKey', UnionFind (n + 1) parent' rank')
+  let newIdx = n
+      newKey' = Key newIdx
+   in Vector.push newIdx parent & \parent' ->
+        Vector.push 0 rank & \rank' ->
+          (Ur newKey', UnionFind (n + 1) parent' rank')
 
 -- | Get the number of elements in the union-find structure.
 size :: UnionFind %1 -> (Ur Word, UnionFind)
