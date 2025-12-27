@@ -61,24 +61,23 @@ instance Dupable (Set k) where
     (Set ref, Set $ Ref.new ref2 lin)
   {-# INLINE dup2 #-}
 
-empty :: (Keyed k) => Int -> BO α (Set k)
+empty :: (Keyed k) => Int -> Linearly %1 -> Set k
 {-# INLINE empty #-}
-empty size = Control.do
-  withLinearlyBO $ \l ->
-    dup l & \(l, l') ->
-      Control.pure $ Set $ Ref.new (Raw.emptyL size $ fromPB l) l'
+empty size l =
+  dup l & \(l, l') ->
+    Set $ Ref.new (Raw.emptyL size $ fromPB l) l'
 
-singleton :: (Keyed k) => k %1 -> BO α (Set k)
+singleton :: (Keyed k) => k %1 -> Linearly %1 -> Set k
 {-# INLINE singleton #-}
-singleton = Unsafe.toLinear \key -> withLinearlyBO \l ->
+singleton = Unsafe.toLinear \key l ->
   dup l & \(l, l') ->
-    Control.pure $ Set $ Ref.new (Raw.fromListL [key] $ fromPB l) l'
+    Set $ Ref.new (Raw.fromListL [key] $ fromPB l) l'
 
-fromList :: (Keyed k) => [k] %1 -> BO α (Set k)
+fromList :: (Keyed k) => [k] %1 -> Linearly %1 -> Set k
 {-# INLINE fromList #-}
-fromList = Unsafe.toLinear \keys -> withLinearlyBO \l ->
+fromList = Unsafe.toLinear \keys -> \l ->
   dup l & \(l, l') ->
-    Control.pure $ Set $ Ref.new (Raw.fromListL keys $ fromPB l) l'
+    Set $ Ref.new (Raw.fromListL keys $ fromPB l) l'
 
 insert :: (Keyed k) => k %1 -> Mut α (Set k) %1 -> BO α (Mut α (Set k))
 {-# INLINE insert #-}

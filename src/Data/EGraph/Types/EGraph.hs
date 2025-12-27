@@ -16,6 +16,7 @@
 
 module Data.EGraph.Types.EGraph (
   EGraph,
+  new,
   find,
   lookup,
   unsafeFind,
@@ -23,9 +24,10 @@ module Data.EGraph.Types.EGraph (
   add,
   merge,
   rebuild,
+  Language,
 ) where
 
-import Control.Functor.Linear (StateT (..), runStateT, void)
+import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
@@ -55,19 +57,29 @@ import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
 
-data EGraph f = EGraph
+data EGraph l = EGraph
   { unionFind :: !UnionFind
-  , classes :: !(EClasses f)
-  , hashcons :: !(HashMap (ENode f) EClassId)
+  , classes :: !(EClasses l)
+  , hashcons :: !(HashMap (ENode l) EClassId)
   , worklist :: !(Set EClassId)
   }
   deriving (Generic)
 
-instance LinearOnly (EGraph f) where
-  linearOnly :: LinearOnlyWitness (EGraph f)
+type Language l = (Hashable1 l, Movable1 l, P.Traversable l)
+
+instance LinearOnly (EGraph l) where
+  linearOnly :: LinearOnlyWitness (EGraph l)
   linearOnly = UnsafeLinearOnly
 
-find :: Borrow k α (EGraph f) %1 -> EClassId -> BO α (Maybe (Ur EClassId))
+new :: (Hashable1 l) => Linearly %1 -> EGraph l
+new = runReader Control.do
+  unionFind <- asks $ UF.newL 16
+  classes <- asks $ EC.new
+  hashcons <- asks $ HMB.empty 16
+  worklist <- asks $ Set.empty 16
+  Control.pure EGraph {..}
+
+find :: Borrow k α (EGraph l) %1 -> EClassId -> BO α (Maybe (Ur EClassId))
 find egraph (EClassId k) = Control.do
   let uf = egraph .# #unionFind
   coerceLin Data.<$> UFB.find k uf
@@ -78,7 +90,7 @@ lookup enode egraph =
     enode <- MaybeT $ UrT (canonicalize egraph enode)
     MaybeT $ UrT $ move . Data.fmap copy Control.<$> HMB.lookup enode (egraph .# #hashcons)
 
-canonicalize :: (P.Traversable l) => Share α (EGraph f) %1 -> ENode l -> BO α (Ur (Maybe (ENode l)))
+canonicalize :: (P.Traversable l) => Share α (EGraph l) %1 -> ENode l -> BO α (Ur (Maybe (ENode l)))
 canonicalize egraph (ENode node) =
   move egraph & \(Ur egraph) -> Control.do
     let uf = egraph .# #unionFind
@@ -185,7 +197,7 @@ repair egraph eid parents = Control.do
     void $ HMB.insert p_node p_class (egraph .# #hashcons)
   (newParents, egraph) <- reborrowing' egraph \egraph -> Control.do
     (newPs, newPsLend) <- withLinearlyBO \lin -> Control.do
-      ps <- HMB.empty @(ENode _) @EClassId 16
+      ps <- withLinearlyBO $ Control.pure . HMB.empty @(ENode _) @EClassId 16
       Control.pure $ borrow ps lin
     (egraph, newPs) <- forRebor2_ egraph newPs parents
       $ \egraph newPs (Ur (p_node, p_class)) ->

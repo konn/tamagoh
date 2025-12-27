@@ -19,6 +19,7 @@
 module Data.EGraph.Types.EClasses (
   EClasses (),
   EClass (),
+  new,
   parents,
   setParents,
   addParent,
@@ -53,6 +54,9 @@ import Unsafe.Linear qualified as Unsafe
 newtype EClasses l = EClasses (Raw l)
 
 type Raw l = HashMap EClassId (EClass l)
+
+new :: Linearly %1 -> EClasses l
+new = EClasses . HMB.empty 16
 
 -- TODO: use (unsafe) indirection around Sets to reduce copying cost
 data EClass l
@@ -132,8 +136,8 @@ insertIfNew eid enode clss = Control.do
   if mem
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
-      nodes <- Set.singleton enode
-      parents <- HMB.empty 16
+      nodes <- withLinearlyBO $ Control.pure . Set.singleton enode
+      parents <- withLinearlyBO $ Control.pure . HMB.empty 16
       (mop, clss) <- HMB.insert eid EClass {parents, nodes} $ coerceLin clss
       clss <- reborrowing_ clss \clss -> Control.do
         chss <-

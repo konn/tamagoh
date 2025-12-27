@@ -68,18 +68,16 @@ instance Dupable (HashMap k v) where
     (HM ref, HM $ Ref.new ref2 lin)
   {-# INLINE dup2 #-}
 
-empty :: forall k v α. (Keyed k) => Int -> BO α (HashMap k v)
+empty :: forall k v. (Keyed k) => Int -> Linearly %1 -> HashMap k v
 {-# INLINE empty #-}
-empty size = Control.do
-  withLinearlyBO $ \l ->
-    dup l & \(l, l'') -> Control.do
-      Control.pure $ HM $ Ref.new (Raw.emptyL size $ fromPB l) l''
+empty size l =
+  dup l & \(l, l'') -> HM $ Ref.new (Raw.emptyL size $ fromPB l) l''
 
-fromList :: (Keyed k) => [(k, v)] %1 -> BO α (HashMap k v)
+fromList :: (Keyed k) => [(k, v)] %1 -> Linearly %1 -> HashMap k v
 {-# INLINE fromList #-}
-fromList = Unsafe.toLinear \keys -> withLinearlyBO \l ->
+fromList = Unsafe.toLinear \keys -> \l ->
   dup l & \(l, l') ->
-    Control.pure $ HM $ Ref.new (Raw.fromListL keys $ fromPB l) l'
+    HM $ Ref.new (Raw.fromListL keys $ fromPB l) l'
 
 -- TODO: more efficient implementation
 insert ::
