@@ -21,6 +21,7 @@ module Data.Set.Mutable.Linear.Borrowed (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
+import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Coerce (coerce)
 import Data.Linear.Witness.Compat (fromPB)
 import Data.Ref.Linear (freeRef)
@@ -34,10 +35,18 @@ import Unsafe.Linear qualified as Unsafe
 -- and regrows new array. If the our 'Set' is stored in another mutable borrows,
 -- then just threading through 'Raw.Set' would discard the change to the outer borrow.
 newtype Set k = Set (Ref (Raw.Set k))
+  deriving newtype (LinearOnly)
 
 instance Consumable (Set k) where
   consume = \(Set ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
+
+instance Dupable (Set k) where
+  dup2 = Unsafe.toLinear \(Set ref) -> DataFlow.do
+    (lin, ref) <- withLinearly ref
+    (ref, ref2) <- Unsafe.toLinear (\ref -> let (!_, !ref2) = dup $ freeRef ref in (ref, ref2)) ref
+    (Set ref, Set $ Ref.new ref2 lin)
+  {-# INLINE dup2 #-}
 
 empty :: (Keyed k) => Int -> BO α (Set k)
 {-# INLINE empty #-}

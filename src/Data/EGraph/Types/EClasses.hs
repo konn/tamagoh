@@ -18,7 +18,6 @@
 
 module Data.EGraph.Types.EClasses (
   EClasses (),
-  lookup,
   parents,
   addParent,
   member,

@@ -44,6 +44,7 @@ import Prelude qualified as P
 -- and regrows new array. If the our 'HashMap' is stored in another mutable borrows,
 -- then just threading through 'Raw.HashMap' would discard the change to the outer borrow.
 newtype HashMap k v = HM (Ref (Raw.HashMap k v))
+  deriving newtype (LinearOnly)
 
 inner :: HashMap k v %1 -> Ref (Raw.HashMap k v)
 {-# INLINE inner #-}
