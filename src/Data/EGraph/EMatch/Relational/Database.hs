@@ -5,20 +5,18 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoFieldSelectors #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
-module Data.EGraph.EMatch.Relational.Types (
-  Relation (..),
+module Data.EGraph.EMatch.Relational.Database (
+  buildDatabase,
   fromRelations,
-  Atom (..),
-  findVars,
-  Query (..),
-  ConjunctiveQuery (..),
   Database,
   universe,
   HasDatabase (..),
@@ -27,86 +25,44 @@ module Data.EGraph.EMatch.Relational.Types (
   insertDb,
 ) where
 
+import Control.Functor.Linear qualified as Control
+import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Orphans
 import Data.Coerce (coerce)
+import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.Types
 import Data.Foldable qualified as F
-import Data.Functor.Classes
+import Data.Functor.Linear qualified as Data
+import Data.HasField.Linear ((.#))
+import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HS
-import Data.Hashable
-import Data.Hashable.Lifted
-import Data.List.NonEmpty (NonEmpty)
-import Data.List.NonEmpty qualified as NE
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromJust)
 import Data.Strict (Pair (..), (:!:))
 import Data.Trie (Trie)
 import Data.Trie qualified as Trie
+import Data.Unrestricted.Linear
+import Data.Unrestricted.Linear qualified as Ur
 import GHC.Generics
-import Text.Show.Deriving
+import Prelude.Linear qualified as PL
 
-data Relation l v = MkRel {id :: !v, args :: !(l v)}
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Hashable)
-
-deriveShow1 ''Relation
-
-deriving via Generically1 (Relation l) instance (Eq1 l) => Eq1 (Relation l)
-
-deriving via Generically1 (Relation l) instance (Ord1 l) => Ord1 (Relation l)
-
-deriving anyclass instance (Hashable1 l) => Hashable1 (Relation l)
-
-data EClassIdOrVar v
-  = EClassId !EClassId
-  | Var !v
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Hashable, Hashable1)
-  deriving (Eq1, Ord1) via Generically1 EClassIdOrVar
-
-deriveShow1 ''EClassIdOrVar
-
-newtype Atom l v = Atom (Relation l (EClassIdOrVar v))
-  deriving (Generic, Generic1, Functor, Foldable, Traversable)
-  deriving (Eq1, Ord1) via Generically1 (Atom l)
-
-deriving stock instance (Show1 l, Show v) => Show (Atom l v)
-
-deriving stock instance (Eq1 l, Eq v) => Eq (Atom l v)
-
-deriving stock instance (Ord1 l, Ord v) => Ord (Atom l v)
-
-deriving anyclass instance (Hashable1 l, Hashable v) => Hashable (Atom l v)
-
-deriving anyclass instance (Hashable1 l, Functor l) => Hashable1 (Atom l)
-
-deriveShow1 ''Atom
-
-data Query l v
-  = SelectAll v
-  | Conj (ConjunctiveQuery l v)
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Hashable, Hashable1)
-  deriving (Eq1, Ord1) via Generically1 (Query l)
-
-data ConjunctiveQuery l v
-  = (:-) {head :: [v], body :: NonEmpty (Atom l v)}
-  deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Hashable, Hashable1)
-  deriving (Eq1, Ord1) via Generically1 (ConjunctiveQuery l)
-
-deriveShow1 ''ConjunctiveQuery
-deriveShow1 ''Query
-
-findVars :: (Eq v, Foldable l) => v -> Atom l v -> Maybe (NonEmpty Int)
-findVars v (Atom pattern) =
-  NE.nonEmpty
-    $ mapMaybe
-      ( uncurry \cases
-          !i (Var v') | v == v' -> Just i
-          _ _ -> Nothing
-      )
-    $ zip [0 ..]
-    $ F.toList pattern
+buildDatabase ::
+  (HasDatabase l, Movable1 l, Traversable l) =>
+  Borrow k α (EGraph l) %1 ->
+  BO α (Ur (Database l))
+buildDatabase egraph =
+  share egraph PL.& \(Ur egraph) -> Control.do
+    nodes <- HMB.toList (egraph .# hashconsL)
+    Ur nodes <- Control.fmap move
+      PL.$ Data.forM nodes \(enode, id) ->
+        move (enode, id) PL.& \(Ur (enode, id)) ->
+          (,)
+            Control.<$> (unur PL.. Ur.lift fromJust Control.<$> canonicalize egraph enode)
+            Control.<*> (unur Control.<$> unsafeFind egraph id)
+    Control.pure
+      PL.$ Ur
+      $ fromRelations
+      $ PL.map (\(ENode args, id) -> MkRel {id, args}) nodes
 
 data Database l = Database
   { database :: !(Database_ l)

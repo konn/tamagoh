@@ -45,6 +45,7 @@ common defaults
 library
   import: defaults
   build-depends:
+    bifunctors,
     containers,
     data-fix,
     deriving-compat,
@@ -65,8 +66,8 @@ library
     Control.Monad.Borrow.Pure.Orphans
     Data.EGraph.EMatch.Backtrack
     Data.EGraph.EMatch.Relational
-    Data.EGraph.EMatch.Relational.Build
-    Data.EGraph.EMatch.Relational.Types
+    Data.EGraph.EMatch.Relational.Database
+    Data.EGraph.EMatch.Relational.Query
     Data.EGraph.EMatch.Types
     Data.EGraph.Types
     Data.EGraph.Types.EClassId
