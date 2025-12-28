@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
-module Data.Trie (Trie (), empty, member, singleton, insert, focus, project) where
+module Data.Trie (Trie (), empty, cons, member, singleton, insert, focus, project) where
 
 import Control.Arrow ((&&&))
 import Data.EGraph.Types.EClassId (EClassId)
@@ -74,3 +74,7 @@ project indices =
       | otherwise =
           go (n + 1) (i : is) acc $!
             foldMap' (FML.fromList . F.toList . (.branches)) tries
+
+cons :: EClassId -> Trie -> Trie
+{-# INLINE cons #-}
+cons i = Trie (HashSet.singleton i) . HM.singleton i

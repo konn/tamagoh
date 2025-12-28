@@ -51,6 +51,7 @@ library
     dlist,
     fmlist,
     hashable,
+    indexed-traversable,
     linear-generics,
     linear-witness,
     recursion-schemes,
