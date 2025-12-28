@@ -28,15 +28,20 @@ module Data.Set.Mutable.Linear.Borrowed (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (Coercible, coerce)
 import Data.Functor.Linear qualified as Data
+import Data.HashMap.Mutable.Linear.Borrowed.Internal
 import Data.Linear.Witness.Compat (fromPB)
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear (Keyed)
+import Data.Set.Mutable.Linear.Internal qualified as Raw
 import Data.Set.Mutable.Linear.Witness qualified as Raw
+import GHC.Base (noinline)
+import GHC.Base qualified as GHC
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, null, take)
 import Unsafe.Linear qualified as Unsafe
 
@@ -54,12 +59,17 @@ instance Consumable (Set k) where
   consume = \(Set ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
 
-instance Dupable (Set k) where
-  dup2 = Unsafe.toLinear \(Set ref) -> DataFlow.do
-    (lin, ref) <- withLinearly ref
-    (ref, ref2) <- Unsafe.toLinear (\ref -> let (!_, !ref2) = dup $ freeRef ref in (ref, ref2)) ref
-    (Set ref, Set $ Ref.new ref2 lin)
-  {-# INLINE dup2 #-}
+instance (Dupable k) => Dupable (Set k) where
+  -- NOTE: we need to duplicate underlying array deeply, to dup the inner mutable arrays properly.
+  -- otherwise, the duplicated cells would be 'consume'd earlier and can (and actually) cause SEGV.
+  dup2 = noinline $ Unsafe.toLinear \(Set ref) -> DataFlow.do
+    (lin, !ref) <- withLinearly ref
+    (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, freeRef ref)) ref
+    case hm of
+      Raw.Set hm -> DataFlow.do
+        !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ deepCloneHashMap hm
+        (Set ref, Set $ Ref.new (Raw.Set hm') lin)
+  {-# NOINLINE dup2 #-}
 
 empty :: (Keyed k) => Int -> Linearly %1 -> Set k
 {-# INLINE empty #-}
@@ -96,19 +106,22 @@ askRaw ::
   (Raw.Set k %1 -> (a, Raw.Set k)) %1 ->
   Borrow bk α (Set k) %1 ->
   BO α a
-{-# INLINE askRaw #-}
-askRaw f dic = case share dic of
+{-# NOINLINE askRaw #-}
+askRaw = GHC.noinline \f dic -> case share dic of
   Ur dic -> Control.do
     UnsafeAlias dic <- readSharedRef (coerceBor dic)
     case f dic of
-      (!res, !dic) -> dic `lseq` Control.pure res
+      -- NOTE: This @dic@ is RAW memory block,
+      -- so we MUST NOT 'consume' it here, and instead just intentionally leak it.
+      -- This leakage won't cause memory leak, because Lender will eventually free the whole block.
+      (!res, !dic) -> unsafeLeak dic `lseq` Control.pure res
 
 askRaw_ ::
   (Raw.Set k %1 -> Ur a) %1 ->
   Borrow bk α (Set k) %1 ->
   BO α a
-{-# INLINE askRaw_ #-}
-askRaw_ f dic = case share dic of
+{-# NOINLINE askRaw_ #-}
+askRaw_ = GHC.noinline \f dic -> case share dic of
   Ur dic -> Control.do
     UnsafeAlias dic <- readSharedRef (coerceBor dic)
     case f dic of
@@ -121,7 +134,7 @@ member ::
   Share α (Set k) %1 ->
   BO α (Ur Bool)
 {-# INLINE member #-}
-member key set = askRaw (Raw.member key) set
+member key = askRaw (Raw.member key)
 
 toList :: (Keyed k) => Borrow bk α (Set k) %1 -> BO α [k]
 {-# INLINE toList #-}

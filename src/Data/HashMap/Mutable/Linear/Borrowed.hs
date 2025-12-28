@@ -1,5 +1,6 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
@@ -14,11 +15,9 @@ module Data.HashMap.Mutable.Linear.Borrowed (
   fromList,
   insert,
   delete,
-  shrinkToFit,
   alter,
   alterF,
   size,
-  capacity,
   lookup,
   lookups,
   member,
@@ -32,17 +31,21 @@ module Data.HashMap.Mutable.Linear.Borrowed (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (coerce)
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear (Keyed)
 import Data.HashMap.Mutable.Linear qualified as Raw
+import Data.HashMap.Mutable.Linear.Borrowed.Internal
 import Data.HashMap.Mutable.Linear.Witness qualified as Raw
 import Data.HashSet qualified as IHS
 import Data.Linear.Witness.Compat (fromPB)
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import GHC.Base (noinline)
+import GHC.Base qualified as GHC
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
@@ -61,20 +64,23 @@ instance Consumable (HashMap k v) where
   consume = \(HM ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
 
-instance Dupable (HashMap k v) where
-  dup2 = Unsafe.toLinear \(HM ref) -> DataFlow.do
-    (lin, ref) <- withLinearly ref
-    (ref, ref2) <- Unsafe.toLinear (\ref -> let (!_, !ref2) = dup $ freeRef ref in (ref, ref2)) ref
-    (HM ref, HM $ Ref.new ref2 lin)
-  {-# INLINE dup2 #-}
+instance (Dupable k, Dupable v) => Dupable (HashMap k v) where
+  -- NOTE: we need to duplicate underlying array deeply, to dup the inner mutable arrays properly.
+  -- otherwise, the duplicated cells would be 'consume'd earlier and can (and actually) cause SEGV.
+  dup2 = noinline $ Unsafe.toLinear \(HM !ref) -> DataFlow.do
+    (lin, !ref) <- withLinearly ref
+    (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, freeRef ref)) ref
+    hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ deepCloneHashMap hm
+    (HM ref, HM $ Ref.new hm' lin)
+  {-# NOINLINE dup2 #-}
 
 empty :: forall k v. (Keyed k) => Int -> Linearly %1 -> HashMap k v
-{-# INLINE empty #-}
+{-# NOINLINE empty #-}
 empty size l =
   dup l & \(l, l'') -> HM $ Ref.new (Raw.emptyL size $ fromPB l) l''
 
 fromList :: (Keyed k) => [(k, v)] %1 -> Linearly %1 -> HashMap k v
-{-# INLINE fromList #-}
+{-# NOINLINE fromList #-}
 fromList = Unsafe.toLinear \keys -> \l ->
   dup l & \(l, l') ->
     HM $ Ref.new (Raw.fromListL keys $ fromPB l) l'
@@ -87,7 +93,7 @@ insert ::
   Mut α (HashMap k v) %1 ->
   BO α (Maybe v, Mut α (HashMap k v))
 {-# NOINLINE insert #-}
-insert key = Unsafe.toLinear2 \v dic -> Control.do
+insert key = noinline $ Unsafe.toLinear2 \v dic -> Control.do
   (mold, dic) <- delete key dic
   dic <- modifyRef (\dic -> Raw.insert key v dic) (coerceBor dic)
   Control.pure (mold, recoerceBor dic)
@@ -96,7 +102,7 @@ insert key = Unsafe.toLinear2 \v dic -> Control.do
 delete ::
   (Keyed k) => k -> Mut α (HashMap k v) %1 -> BO α (Maybe v, Mut α (HashMap k v))
 {-# NOINLINE delete #-}
-delete key dic = Control.do
+delete = noinline \key dic -> Control.do
   (mval, dic) <-
     updateRef
       ( \dic -> case Raw.lookup key dic of
@@ -107,14 +113,10 @@ delete key dic = Control.do
       (coerceBor dic)
   Control.pure (mval, recoerceBor dic)
 
-shrinkToFit ::
-  forall k v α.
-  (Keyed k) => Mut α (HashMap k v) %1 -> BO α (Mut α (HashMap k v))
-{-# INLINE shrinkToFit #-}
-shrinkToFit =
-  Control.fmap recoerceBor
-    . modifyRef Raw.shrinkToFit
-    . coerceBor
+forceMay :: Maybe a %1 -> Maybe a
+forceMay = \case
+  Nothing -> Nothing
+  Just !x -> Just x
 
 alter ::
   (Keyed k) =>
@@ -125,7 +127,7 @@ alter ::
 {-# INLINE alter #-}
 alter f k =
   Control.fmap recoerceBor
-    . modifyRef (Raw.alter (Unsafe.toLinear f) k)
+    . modifyRef (Raw.alter (Unsafe.toLinear $ forceMay . f . forceMay) k)
     . coerceBor
 
 alterF ::
@@ -139,7 +141,7 @@ alterF f key dic = Control.do
   ((), dic) <-
     updateRef
       ( Control.fmap ((),)
-          . Raw.alterF (Control.fmap (Unsafe.toLinear Ur) . Unsafe.toLinear f) key
+          . Raw.alterF (Control.fmap (Unsafe.toLinear Ur . forceMay) . Unsafe.toLinear f . forceMay) key
       )
       (coerceBor dic)
   Control.pure $ recoerceBor dic
@@ -148,28 +150,27 @@ askRaw ::
   (Raw.HashMap k v %1 -> (a, Raw.HashMap k v)) %1 ->
   Borrow bk α (HashMap k v) %1 ->
   BO α a
-{-# INLINE askRaw #-}
-askRaw f dic = case share dic of
+{-# NOINLINE askRaw #-}
+askRaw = GHC.noinline \f dic -> case share dic of
   Ur dic -> Control.do
     UnsafeAlias dic <- readSharedRef (coerceBor dic)
     case f dic of
-      (!res, !dic) -> dic `lseq` Control.pure res
+      -- NOTE: This @dic@ is RAW memory block,
+      -- so we MUST NOT 'consume' it here, and instead just intentionally leak it.
+      -- This leakage won't cause memory leak, because Lender will eventually free the whole block.
+      (!res, !dic) -> unsafeLeak dic `lseq` Control.pure res
 
 size :: Borrow bk α (HashMap k v) %1 -> BO α (Ur Int)
 {-# INLINE size #-}
 size = askRaw Raw.size
-
-capacity :: Borrow bk α (HashMap k v) %1 -> BO α (Ur Int)
-{-# INLINE capacity #-}
-capacity = askRaw Raw.capacity
 
 lookup ::
   (Keyed k) =>
   k ->
   Borrow bk α (HashMap k v) %1 ->
   BO α (Maybe (Borrow bk α v))
-{-# INLINE lookup #-}
-lookup key dic = Control.do
+{-# NOINLINE lookup #-}
+lookup key = GHC.noinline \dic ->
   Data.fmap UnsafeAlias . unur Control.<$> askRaw (Raw.lookup key) dic
 
 lookups ::
@@ -177,8 +178,8 @@ lookups ::
   [k] ->
   Borrow bk α (HashMap k v) %1 ->
   BO α [(Ur k, (Maybe (Borrow bk α v)))]
-{-# INLINE lookups #-}
-lookups keys0 = Unsafe.toLinear \dic -> Control.do
+{-# NOINLINE lookups #-}
+lookups keys0 = GHC.noinline $ Unsafe.toLinear \dic -> Control.do
   let keys = P.map Ur $ IHS.toList $ IHS.fromList keys0
   Data.forM keys (\(Ur !key) -> lookup key dic Control.<&> \ !v -> (Ur key, v))
 
@@ -190,8 +191,8 @@ askRaw_ ::
   (Raw.HashMap k v %1 -> Ur a) %1 ->
   Borrow bk α (HashMap k v) %1 ->
   BO α a
-{-# INLINE askRaw_ #-}
-askRaw_ f dic = case share dic of
+{-# NOINLINE askRaw_ #-}
+askRaw_ = GHC.noinline \f dic -> case share dic of
   Ur dic -> Control.do
     UnsafeAlias dic <- readSharedRef (coerceBor dic)
     case f dic of

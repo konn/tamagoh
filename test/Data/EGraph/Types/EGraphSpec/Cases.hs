@@ -22,7 +22,6 @@ module Data.EGraph.Types.EGraphSpec.Cases (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Orphans
-import Control.Syntax.DataFlow qualified as DataFlow
 import Data.EGraph.Types
 import Data.Fix (Fix (..))
 import Data.Functor.Classes
@@ -133,11 +132,3 @@ case1 egraph = Control.do
   (Ur abacEqAfterMerge, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph abNode acNode
   egraph `lseq` Control.pure (Ur Case1Result {..})
-
-withNewEGraph ::
-  (forall α. Mut α (EGraph Expr) %1 -> BO α (Ur a)) %1 ->
-  Linearly %1 ->
-  a
-withNewEGraph f lin = DataFlow.do
-  (v, graph) <- modifyLinearOnlyBO (new lin) f
-  graph `lseq` unur v

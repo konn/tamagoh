@@ -110,6 +110,7 @@ unsafeUnion k1 k2 uf = Control.do
 equivalent ::
   forall k α.
   Key -> Key -> Borrow k α UnionFind %1 -> BO α (Ur (Maybe Bool))
+{-# NOINLINE equivalent #-}
 equivalent k1 k2 (UnsafeAlias uf) = Control.do
   let %1 borRef = coerceUF (UnsafeAlias uf :: Mut α _)
   (r, uf) <- updateRef (Control.pure . Raw.equivalent k1 k2) borRef
@@ -123,6 +124,7 @@ so we provide it in for _any_ 'Borrow's (in particular, for 'Share's)  unrestric
 unsafeEquivalent ::
   forall k α.
   Key -> Key -> Borrow k α UnionFind %1 -> BO α (Ur Bool)
+{-# NOINLINE unsafeEquivalent #-}
 unsafeEquivalent k1 k2 (UnsafeAlias uf) = Control.do
   let %1 borRef = coerceUF (UnsafeAlias uf :: Mut α _)
   (r, uf) <- updateRef (Control.pure . Raw.unsafeEquivalent k1 k2) borRef

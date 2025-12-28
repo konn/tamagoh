@@ -11,7 +11,8 @@ module Data.EGraph.Types.EGraphSpec (
   module Data.EGraph.Types.EGraphSpec,
 ) where
 
-import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure (linearly)
+import Data.EGraph.TestUtils
 import Data.EGraph.Types.EGraphSpec.Cases
 import Data.Unrestricted.Linear (Ur (..))
 import Test.Tasty
@@ -20,6 +21,6 @@ import Prelude as P
 
 test_case1 :: TestTree
 test_case1 = testCase "EGraph case 1" $ do
-  let Ur Case1Result {..} = linearly (withNewEGraph case1)
+  let Ur (Ur Case1Result {..}) = linearly do withNewEGraph case1
   assertBool ("(a + b) /= (a + c) at first, but got: " <> show abacEqAtFirst) (abacEqAtFirst == Just False)
   assertBool ("(a + b) == (a + c) after merge, but got: " <> show abacEqAfterMerge) (abacEqAfterMerge == Just True)

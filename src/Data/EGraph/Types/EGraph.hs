@@ -28,6 +28,7 @@ module Data.EGraph.Types.EGraph (
   unsafeFind,
   canonicalize,
   addNode,
+  merges,
   merge,
   rebuild,
   Term,
@@ -40,6 +41,7 @@ import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Control.Monad.Borrow.Pure.Orphans (Movable1)
+import Control.Monad.Borrow.Pure.Utils
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Coerce (Coercible, coerce)
 import Data.Coerce.Directed (upcast)
@@ -49,6 +51,8 @@ import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.ENode
 import Data.EGraph.Types.Language
 import Data.Fix (foldFixM)
+import Data.Foldable1 (Foldable1, foldlM1)
+import Data.Functor.Classes (Show1)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
@@ -62,6 +66,7 @@ import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.UnionFind.Linear.Borrowed qualified as UFB
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear qualified as Ur
+import Debug.Trace.Linear qualified as DT
 import GHC.Generics (Generic, Generically (..))
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
@@ -84,7 +89,7 @@ hashconsL :: RecordLabel (EGraph l) "hashcons" (HashMap (ENode l) EClassId)
 hashconsL = #hashcons
 
 fromTerm ::
-  (P.Traversable l, Hashable1 l) =>
+  (P.Traversable l, Hashable1 l, Show1 l) =>
   Mut α (EGraph l) %1 ->
   Term l ->
   BO α (Ur (ENode l), Ur EClassId, Mut α (EGraph l))
@@ -172,25 +177,31 @@ coerceLin :: (Coercible a b) => a %1 -> b
 coerceLin = Unsafe.toLinear coerce
 
 addNode ::
-  (P.Traversable l, Hashable1 l) =>
+  (P.Traversable l, Hashable1 l, Show1 l) =>
   Mut α (EGraph l) %1 ->
   ENode l ->
   BO α (Ur EClassId, Mut α (EGraph l))
 addNode egraph enode = Control.do
+  () <- DT.trace ("Adding node: " <> show enode) $ Control.pure ()
   (Ur mid, egraph) <- sharing egraph \egraph ->
     lookup enode egraph
+  () <- DT.trace (" looked eid: " <> show mid) $ Control.pure ()
   case mid of
     Just eid -> Control.pure (Ur eid, egraph)
     Nothing -> Control.do
+      () <- DT.trace "Node is new, creating new EClassId" $ Control.pure ()
       (Ur eid, egraph) <- reborrowing egraph \egraph -> Control.do
         (eid, uf) <- UFB.fresh (egraph .# #unionFind)
         Control.pure $ uf `lseq` Ur.lift EClassId eid
+      () <- DT.trace (" created eid: " <> show eid) $ Control.pure ()
       egraph <- reborrowing_ egraph \egraph -> Control.do
         let %1 !classes = egraph .# #classes
         (Ur _, classes) <- EC.insertIfNew eid enode classes
         Control.pure $ consume classes
+      () <- DT.trace " inserted into classes" $ Control.pure ()
       egraph <- reborrowing_ egraph \egraph -> Control.do
         Control.void $ HMB.insert enode eid (egraph .# #hashcons)
+      () <- DT.trace " inserted into hashcons" $ Control.pure ()
 
       Control.pure (Ur eid, egraph)
 
@@ -218,6 +229,16 @@ merge eid1 eid2 egraph = Control.do
             Control.void $ Set.insert eid (egraph .# #worklist)
 
           Control.pure (Ur (Just eid), egraph)
+
+merges ::
+  (Foldable1 t) =>
+  t EClassId ->
+  Mut α (EGraph l) %1 ->
+  BO α (Ur (Maybe EClassId), Mut α (EGraph l))
+merges eids egraph = flip runStateT egraph
+  $ runUrT
+  $ runMaybeT do
+    foldlM1 (\id1 id2 -> MaybeT $ UrT $ StateT $ merge id1 id2) eids
 
 rebuild ::
   forall α l.
@@ -278,57 +299,3 @@ repair egraph eid parents = Control.do
     egraph `lseq` newPs `lseq` Control.pure (\end -> reclaim newPsLend (upcast end))
 
   void $ setParents eid newParents (egraph .# #classes)
-
-forRebor ::
-  (Data.Traversable t) =>
-  Mut α a %1 ->
-  t b %1 ->
-  (forall β. Mut (β /\ α) a %1 -> b %1 -> BO (β /\ α) c) ->
-  BO α (t c, Mut α a)
-{-# INLINE forRebor #-}
-forRebor bor tb k = flip runStateT bor Control.do
-  Data.forM tb \b -> StateT \bor -> Control.do
-    reborrowing bor \bor -> Control.do
-      k bor b
-
-forRebor2 ::
-  (Data.Traversable t) =>
-  Mut α a %1 ->
-  Mut α b %1 ->
-  t c %1 ->
-  ( forall β.
-    Mut (β /\ α) a %1 ->
-    Mut (β /\ α) b %1 ->
-    c %1 ->
-    BO (β /\ α) d
-  ) ->
-  BO α (t d, (Mut α a, Mut α b))
-{-# INLINE forRebor2 #-}
-forRebor2 bor bor' tb k = flip runStateT (bor, bor') Control.do
-  Data.forM tb \b -> StateT \(bor, bor') -> Control.do
-    (\((a, b), c) -> (a, (c, b))) Control.<$> reborrowing bor \bor -> Control.do
-      reborrowing bor' \bor' -> assocRBO $ k (assocBorrowL $ upcast bor) (assocBorrowL $ upcast bor') b
-
-forRebor_ ::
-  (Data.Traversable t, Consumable (t ())) =>
-  Mut α a %1 ->
-  t b %1 ->
-  (forall β. Mut (β /\ α) a %1 -> b %1 -> BO (β /\ α) ()) ->
-  BO α (Mut α a)
-{-# INLINE forRebor_ #-}
-forRebor_ bor tb k = Control.fmap (uncurry lseq) $ forRebor bor tb k
-
-forRebor2_ ::
-  (Data.Traversable t, Consumable (t ())) =>
-  Mut α a %1 ->
-  Mut α b %1 ->
-  t c %1 ->
-  ( forall β.
-    Mut (β /\ α) a %1 ->
-    Mut (β /\ α) b %1 ->
-    c %1 ->
-    BO (β /\ α) ()
-  ) ->
-  BO α (Mut α a, Mut α b)
-{-# INLINE forRebor2_ #-}
-forRebor2_ bor bor' tb k = Control.fmap (uncurry lseq) $ forRebor2 bor bor' tb k

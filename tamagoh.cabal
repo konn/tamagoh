@@ -52,6 +52,7 @@ library
     dlist,
     fmlist,
     hashable,
+    heaps,
     indexed-traversable,
     linear-generics,
     linear-witness,
@@ -64,11 +65,13 @@ library
   -- cabal-gild: discover src --exclude=src/**/Internal.hs
   exposed-modules:
     Control.Monad.Borrow.Pure.Orphans
+    Control.Monad.Borrow.Pure.Utils
     Data.EGraph.EMatch.Backtrack
     Data.EGraph.EMatch.Relational
     Data.EGraph.EMatch.Relational.Database
     Data.EGraph.EMatch.Relational.Query
     Data.EGraph.EMatch.Types
+    Data.EGraph.Saturation
     Data.EGraph.Types
     Data.EGraph.Types.EClassId
     Data.EGraph.Types.EClasses
@@ -79,14 +82,13 @@ library
     Data.HasField.Linear
     Data.HashMap.Mutable.Linear.Borrowed
     Data.Linear.Witness.Compat
-    Data.MRef.Linear.Borrowed
     Data.Set.Mutable.Linear.Borrowed
     Data.Trie
     Data.UnionFind.Linear
     Data.UnionFind.Linear.Borrowed
 
   -- cabal-gild: discover src --include=src/**/Internal.hs
-  other-modules:
+  other-modules: Data.HashMap.Mutable.Linear.Borrowed.Internal
 
 executable tamagoh-exe
   import: defaults
@@ -114,6 +116,9 @@ test-suite tamagoh-test
 
   -- cabal-gild: discover test --exclude=test/Main.hs
   other-modules:
+    Data.EGraph.EMatch.RelationalCases
+    Data.EGraph.EMatch.RelationalSpec
+    Data.EGraph.TestUtils
     Data.EGraph.Types.EGraphSpec
     Data.EGraph.Types.EGraphSpec.Cases
     Data.UnionFind.Linear.BorrowedSpec

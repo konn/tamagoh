@@ -163,7 +163,7 @@ insertIfNew eid enode clss = Control.do
           mapMaybe (\(Ur _, e) -> e)
             Control.<$> HMB.lookups (children enode) clss
         void $ Data.forM chss \ch -> addParent eid enode ch
-      consume mop `lseq` Control.pure (Ur True, coerceLin clss)
+      mop `lseq` Control.pure (Ur True, coerceLin clss)
 
 -- | Returns 'False' if the classes were already merged and no change will be made.
 merge ::

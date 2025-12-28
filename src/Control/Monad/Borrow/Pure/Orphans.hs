@@ -27,39 +27,32 @@ module Control.Monad.Borrow.Pure.Orphans (
 ) where
 
 import Control.Applicative (Const)
-import Control.Monad.Borrow.Pure.Internal
+import Control.Functor.Linear qualified as Control
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Functor.Linear qualified as Data
-import Data.HashMap.Internal.Strict (HashMap)
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HashSet
 import Data.Hashable (Hashable)
 import Data.Kind (Constraint, Type)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Proxy (Proxy)
 import GHC.Base (Multiplicity (..))
+import GHC.Exts (noinline)
 import Prelude.Linear
 import Prelude.Linear.Generically qualified as GLC
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
-
-instance (Copyable a) => Copyable (HashSet a) where
-  copy = \(UnsafeAlias hs) -> hs
-  {-# INLINE copy #-}
-
-instance (Copyable k, Copyable v) => Copyable (HashMap k v) where
-  copy = \(UnsafeAlias hs) -> hs
-  {-# INLINE copy #-}
 
 instance (Consumable a) => Consumable (HashSet a) where
   consume = consume . Unsafe.toLinear HashSet.toList
   {-# INLINE consume #-}
 
 instance (Dupable a, Hashable a) => Dupable (HashSet a) where
-  dup2 hs = DataFlow.do
+  dup2 = noinline \hs -> DataFlow.do
     hs <- Unsafe.toLinear HashSet.toList hs
     (hs1, hs2) <- dup hs
     (Unsafe.toLinear HashSet.fromList hs1, Unsafe.toLinear HashSet.fromList hs2)
-  {-# INLINE dup2 #-}
+  {-# NOINLINE dup2 #-}
 
 class Movable1 f where
   liftMove :: (a %1 -> Ur a) -> f a %1 -> Ur (f a)
@@ -140,3 +133,11 @@ deriving via
   GLC.Generically1 Maybe
   instance
     Movable1 Maybe
+
+instance Data.Functor NonEmpty where
+  fmap f (x :| xs) = f x :| Data.fmap f xs
+  {-# INLINE fmap #-}
+
+instance Data.Traversable NonEmpty where
+  traverse f (x :| xs) = (:|) Control.<$> f x Control.<*> Data.traverse f xs
+  {-# INLINE traverse #-}
