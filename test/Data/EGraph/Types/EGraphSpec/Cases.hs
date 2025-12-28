@@ -24,6 +24,7 @@ import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Orphans
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.EGraph.Types
+import Data.Fix (Fix (..))
 import Data.Functor.Classes
 import Data.Hashable
 import Data.Hashable.Lifted
@@ -55,16 +56,16 @@ deriveShow1 ''Expr
 deriving via GLC.Generically1 Expr instance Movable1 Expr
 
 add :: Term Expr %1 -> Term Expr %1 -> Term Expr
-add x y = wrapTerm $ Add x y
+add x y = Fix $ Add x y
 
 mul :: Term Expr %1 -> Term Expr %1 -> Term Expr
-mul x y = wrapTerm $ Mul x y
+mul x y = Fix $ Mul x y
 
 lit :: Int %1 -> Term Expr
-lit = wrapTerm . Lit
+lit = Fix . Lit
 
 var :: String %1 -> Term Expr
-var = wrapTerm . Var
+var = Fix . Var
 
 instance Additive (Term Expr) where
   (+) = add

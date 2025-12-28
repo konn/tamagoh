@@ -20,6 +20,7 @@ module Data.EGraph.Types.EClasses (
   EClasses (),
   EClass (),
   new,
+  nodes,
   parents,
   setParents,
   addParent,
@@ -43,6 +44,8 @@ import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.Hashable.Lifted (Hashable1)
+import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
 import GHC.Generics qualified as GHC
@@ -83,6 +86,21 @@ parents clss0 eid = Control.do
   case mclass of
     Nothing -> Control.pure (Ur [])
     Just eclass -> move Control.<$> HMB.toList (eclass .# #parents)
+
+nodes ::
+  forall bk α l.
+  (Movable1 l, Hashable1 l) =>
+  Borrow bk α (EClasses l) %1 ->
+  EClassId ->
+  BO α (Ur (Maybe (NonEmpty (ENode l))))
+nodes clss0 eid = Control.do
+  let %1 clss = coerceLin clss0 :: Borrow bk α (Raw l)
+  mclass <- HMB.lookup eid clss
+  case mclass of
+    Nothing -> Control.pure (Ur Nothing)
+    Just eclass -> Control.do
+      Ur ns <- move Control.<$> Set.toList (eclass .# #nodes)
+      Control.pure $ Ur (NonEmpty.nonEmpty ns)
 
 setParents ::
   forall l α.

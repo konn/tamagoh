@@ -45,11 +45,16 @@ common defaults
 library
   import: defaults
   build-depends:
+    containers,
     data-fix,
+    deriving-compat,
+    dlist,
+    fmlist,
     hashable,
     linear-generics,
     linear-witness,
     recursion-schemes,
+    strict,
     transformers,
     unordered-containers,
 
@@ -57,17 +62,24 @@ library
   -- cabal-gild: discover src --exclude=src/**/Internal.hs
   exposed-modules:
     Control.Monad.Borrow.Pure.Orphans
+    Data.EGraph.EMatch.Backtrack
+    Data.EGraph.EMatch.Relational
+    Data.EGraph.EMatch.Relational.Build
+    Data.EGraph.EMatch.Relational.Types
+    Data.EGraph.EMatch.Types
     Data.EGraph.Types
     Data.EGraph.Types.EClassId
     Data.EGraph.Types.EClasses
     Data.EGraph.Types.EGraph
     Data.EGraph.Types.ENode
+    Data.EGraph.Types.Language
     Data.EGraph.Types.Pattern
     Data.HasField.Linear
     Data.HashMap.Mutable.Linear.Borrowed
     Data.Linear.Witness.Compat
     Data.MRef.Linear.Borrowed
     Data.Set.Mutable.Linear.Borrowed
+    Data.Trie
     Data.UnionFind.Linear
     Data.UnionFind.Linear.Borrowed
 
@@ -105,6 +117,7 @@ test-suite tamagoh-test
     Data.UnionFind.Linear.BorrowedSpec
 
   build-depends:
+    data-fix,
     deriving-compat,
     falsify,
     hashable,

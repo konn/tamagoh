@@ -19,20 +19,20 @@
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Data.EGraph.Types.EGraph (
-  EGraph,
+  EGraph (..),
   new,
   find,
   fromTerm,
   lookup,
+  lookupEClass,
   unsafeFind,
   canonicalize,
   addNode,
   merge,
   rebuild,
-  Language,
   Term,
-  wrapTerm,
   Equatable (..),
+  hashconsL,
 ) where
 
 import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
@@ -47,12 +47,14 @@ import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.EClasses (EClasses, parents, setParents)
 import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.ENode
-import Data.Fix (Fix (..), foldFixM)
+import Data.EGraph.Types.Language
+import Data.Fix (foldFixM)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.Hashable.Lifted (Hashable1)
+import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe (fromJust)
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
@@ -78,9 +80,8 @@ deriveGeneric ''EGraph
 
 deriving via Generically (EGraph l) instance Consumable (EGraph l)
 
-type Language l = (Hashable1 l, Movable1 l, P.Traversable l)
-
-type Term l = Fix l
+hashconsL :: RecordLabel (EGraph l) "hashcons" (HashMap (ENode l) EClassId)
+hashconsL = #hashcons
 
 fromTerm ::
   (P.Traversable l, Hashable1 l) =>
@@ -101,9 +102,6 @@ fromTerm egraph term = Control.do
         term
   (Ur eid, egraph) <- addNode egraph node
   Control.pure (Ur node, Ur eid, egraph)
-
-wrapTerm :: l (Term l) %1 -> Term l
-wrapTerm = Fix
 
 instance LinearOnly (EGraph l) where
   linearOnly :: LinearOnlyWitness (EGraph l)
@@ -127,6 +125,15 @@ lookup enode egraph =
   move egraph & \(Ur egraph) -> runUrT $ runMaybeT do
     enode <- MaybeT $ UrT (canonicalize egraph enode)
     MaybeT $ UrT $ move . Data.fmap copy Control.<$> HMB.lookup enode (egraph .# #hashcons)
+
+lookupEClass ::
+  (Hashable1 l, Movable1 l) =>
+  EClassId ->
+  Borrow k α (EGraph l) %1 ->
+  BO α (Ur (Maybe (NonEmpty (ENode l))))
+lookupEClass eid egraph = Control.do
+  let %1 clss = egraph .# #classes
+  EC.nodes clss eid
 
 class Equatable l a where
   equivalent :: Share α (EGraph l) -> a -> a -> BO α (Ur (Maybe Bool))
