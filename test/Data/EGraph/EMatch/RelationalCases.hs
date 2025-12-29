@@ -81,9 +81,10 @@ mkCase1 n egraph = Control.do
   () <- DT.trace ("added gs nodes: " <> show (Data.fmap unur gs)) $ Control.pure ()
   (Ur _, egraph) <- merges (unur Data.<$> gs) egraph
   let fs = NE.zipWith (\(Ur nid) (Ur gid) -> ENode $ F nid gid) ns gs
-  (fs, egraph) <- forRebor egraph fs \egraph node -> Control.do
-    (Ur feid, egraph) <- addNode egraph node
-    Control.pure $ egraph `lseq` feid
+  (fs, egraph) <- forRebor egraph fs \egraph node ->
+    move node & \(Ur node) -> Control.do
+      (Ur feid, egraph) <- addNode egraph node
+      Control.pure $ egraph `lseq` feid
   Ur fs <- Control.pure $ move fs
   (Ur _, egraph) <- merges fs egraph
   egraph <- rebuild egraph
