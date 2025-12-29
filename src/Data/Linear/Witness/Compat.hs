@@ -7,8 +7,8 @@ module Data.Linear.Witness.Compat (fromPB, fromLE) where
 
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal (LinearOnly (..), LinearOnlyWitness (..))
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal qualified as PB
-import Linear.Witness.Token.Internal qualified as LE
-import Linear.Witness.Token.Unsafe (HasLinearWitness)
+import Linear.Token.Linearly.Internal qualified as LE
+import Linear.Token.Linearly.Unsafe (HasLinearWitness)
 import Unsafe.Linear qualified as Unsafe
 
 instance LinearOnly LE.Linearly where
@@ -18,8 +18,8 @@ instance HasLinearWitness PB.Linearly
 
 fromPB :: PB.Linearly %1 -> LE.Linearly
 {-# INLINE fromPB #-}
-fromPB = Unsafe.toLinear \_ -> LE.Linearly
+fromPB = Unsafe.toLinear \PB.UnsafeLinearly -> LE.Linearly
 
 fromLE :: LE.Linearly %1 -> PB.Linearly
 {-# INLINE fromLE #-}
-fromLE = Unsafe.toLinear \_ -> PB.UnsafeLinearly
+fromLE = Unsafe.toLinear \LE.Linearly -> PB.UnsafeLinearly
