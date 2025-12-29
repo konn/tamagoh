@@ -41,7 +41,6 @@ import GHC.Exts (noinline)
 import Prelude.Linear
 import Prelude.Linear.Generically qualified as GLC
 import Unsafe.Linear qualified as Unsafe
-import Prelude qualified as P
 
 instance (Consumable a) => Consumable (HashSet a) where
   consume = consume . Unsafe.toLinear HashSet.toList
@@ -91,7 +90,7 @@ instance GMovable1 (GLC.V1 @Type) where
   {-# INLINE gliftMove #-}
 
 instance (GMovable1 f, GMovable1 g) => GMovable1 (f GLC.:*: g) where
-  gliftMove f (x GLC.:*: y) = (GLC.:*:) P.<$> gliftMove f x P.<*> gliftMove f y
+  gliftMove f (x GLC.:*: y) = (GLC.:*:) Data.<$> gliftMove f x Data.<*> gliftMove f y
   {-# INLINE gliftMove #-}
 
 instance (GMovable1 f, GMovable1 g) => GMovable1 (f GLC.:+: g) where
