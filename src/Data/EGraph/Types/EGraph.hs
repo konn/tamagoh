@@ -258,7 +258,9 @@ rebuild = loop
             todos <- Set.take_ (egraph .# #worklist)
             Control.pure $ Set.toListUnborrowed todos
           (todos, egraph) <- sharing egraph \egraph -> Control.do
-            todos <- mapMaybe unur Control.<$> Data.mapM (\k -> find egraph k) todos
+            todos <-
+              mapMaybe unur
+                Control.<$> Data.mapM (\k -> move k & \(Ur k) -> find egraph k) todos
             Data.mapM (\k -> move k & \(Ur k) -> (Ur k,) Control.<$> parents (egraph .# #classes) k) todos
           egraph <- forRebor_ egraph todos \egraph (Ur eid, Ur ps) ->
             repair egraph eid ps
@@ -292,7 +294,9 @@ repair egraph eid parents = Control.do
           (mem, newPs) <- sharing newPs \newPs ->
             Data.fmap copy Control.<$> HMB.lookup (fromJust p_node) newPs
           case mem of
-            Just class' -> void $ merge p_class class' egraph
+            Just class' ->
+              move class' & \(Ur class') ->
+                void $ merge p_class class' egraph
             Nothing -> Control.pure $ consume egraph
           Control.pure $ consume newPs
 

@@ -61,7 +61,8 @@ inner :: HashMap k v %1 -> Ref (Raw.HashMap k v)
 inner = Unsafe.toLinear coerce
 
 instance Consumable (HashMap k v) where
-  consume = \(HM ref) -> consume $ freeRef ref
+  -- FIXME: stop leaking
+  consume = Unsafe.toLinear \_ -> () -- \(HM ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
 
 instance (Dupable k, Dupable v) => Dupable (HashMap k v) where

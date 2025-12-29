@@ -106,7 +106,7 @@ setParents ::
   forall l α.
   (Hashable1 l) =>
   EClassId ->
-  HashMap (ENode l) EClassId ->
+  HashMap (ENode l) EClassId %1 ->
   Mut α (EClasses l) %1 ->
   BO α (Mut α (EClasses l))
 setParents eid ps clss = Control.do
@@ -114,7 +114,7 @@ setParents eid ps clss = Control.do
     let %1 !clss = coerceLin clss0 :: Mut _ (Raw l)
     mclass <- HMB.lookup eid clss
     case mclass of
-      Nothing -> Control.pure ()
+      Nothing -> Control.pure $ consume ps
       Just eclass -> Control.do
         void $ HMB.swap ps (eclass .# #parents)
 

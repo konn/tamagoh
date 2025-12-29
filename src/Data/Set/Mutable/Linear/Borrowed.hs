@@ -56,7 +56,9 @@ inner :: Set k %1 -> Ref (Raw.Set k)
 inner = coerceLin
 
 instance Consumable (Set k) where
-  consume = \(Set ref) -> consume $ freeRef ref
+  -- FIXME: stop leaking
+
+  consume = Unsafe.toLinear \_ -> () -- \(Set ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
 
 instance (Dupable k) => Dupable (Set k) where
