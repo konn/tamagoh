@@ -28,20 +28,25 @@ module Data.HashMap.Mutable.Linear.Borrowed (
   union,
 ) where
 
+import Control.Functor.Linear (StateT (..), runStateT)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
-import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
+import Control.Monad.Borrow.Pure.Utils (deepCloneArray', swapTuple, unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
+import Data.Array.Mutable.Linear qualified as Array
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (coerce)
+import Data.Function qualified as P
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear (Keyed)
 import Data.HashMap.Mutable.Linear qualified as Raw
 import Data.HashMap.Mutable.Linear.Borrowed.Internal
+import Data.HashMap.Mutable.Linear.Internal qualified as Raw
 import Data.HashMap.Mutable.Linear.Witness qualified as Raw
 import Data.HashSet qualified as IHS
 import Data.Linear.Witness.Compat (fromPB)
+import Data.Maybe qualified as P
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import GHC.Base (noinline)
@@ -57,12 +62,12 @@ newtype HashMap k v = HM (Ref (Raw.HashMap k v))
   deriving newtype (LinearOnly)
 
 inner :: HashMap k v %1 -> Ref (Raw.HashMap k v)
-{-# INLINE inner #-}
-inner = Unsafe.toLinear coerce
+{-# NOINLINE inner #-}
+inner = noinline $ Unsafe.toLinear \ !a -> coerce a
 
 instance Consumable (HashMap k v) where
   -- FIXME: stop leaking
-  consume = Unsafe.toLinear \_ -> () -- \(HM ref) -> consume $ freeRef ref
+  consume = Unsafe.toLinear \ !_ -> () -- \(HM ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
 
 instance (Dupable k, Dupable v) => Dupable (HashMap k v) where
@@ -77,16 +82,15 @@ instance (Dupable k, Dupable v) => Dupable (HashMap k v) where
 
 empty :: forall k v. (Keyed k) => Int -> Linearly %1 -> HashMap k v
 {-# NOINLINE empty #-}
-empty size l =
+empty = noinline \size l ->
   dup l & \(l, l'') -> HM $ Ref.new (Raw.emptyL size $ fromPB l) l''
 
 fromList :: (Keyed k) => [(k, v)] %1 -> Linearly %1 -> HashMap k v
 {-# NOINLINE fromList #-}
-fromList = Unsafe.toLinear \keys -> \l ->
+fromList = noinline $ Unsafe.toLinear \ !keys -> \l ->
   dup l & \(l, l') ->
-    HM $ Ref.new (Raw.fromListL keys $ fromPB l) l'
+    HM $! Ref.new (Raw.fromListL keys $ fromPB l) l'
 
--- TODO: more efficient implementation
 insert ::
   (Keyed k) =>
   k ->
@@ -94,22 +98,27 @@ insert ::
   Mut α (HashMap k v) %1 ->
   BO α (Maybe v, Mut α (HashMap k v))
 {-# NOINLINE insert #-}
-insert key = noinline $ Unsafe.toLinear2 \v dic -> Control.do
-  (mold, dic) <- delete key dic
-  dic <- modifyRef (\dic -> Raw.insert key v dic) (coerceBor dic)
-  Control.pure (mold, recoerceBor dic)
+insert key = noinline $ Unsafe.toLinear2 \ !v !dic -> Control.do
+  (mval, dic) <-
+    updateRef
+      ( \dic ->
+          Control.fmap swapTuple
+            $ flip runStateT (Just v)
+            $ Raw.alterF (\may -> StateT \ !s -> Control.pure (Unsafe.toLinear Ur s, may)) key dic
+      )
+      (coerceBor dic)
+  Control.pure (mval, recoerceBor dic)
 
--- TODO: more efficient implementation
 delete ::
   (Keyed k) => k -> Mut α (HashMap k v) %1 -> BO α (Maybe v, Mut α (HashMap k v))
 {-# NOINLINE delete #-}
 delete = noinline \key dic -> Control.do
   (mval, dic) <-
     updateRef
-      ( \dic -> case Raw.lookup key dic of
-          (!(Ur !(Just !v)), !dic) -> case Raw.delete key dic of
-            !dic -> Control.pure (Just v, dic)
-          (!(Ur Nothing), !dic) -> Control.pure (Nothing, dic)
+      ( \dic ->
+          Control.fmap swapTuple
+            $ flip runStateT Nothing
+            $ Raw.alterF (\may -> StateT \s -> Control.pure (Unsafe.toLinear Ur s, may)) key dic
       )
       (coerceBor dic)
   Control.pure (mval, recoerceBor dic)
@@ -125,8 +134,8 @@ alter ::
   k ->
   Mut α (HashMap k v) %1 ->
   BO α (Mut α (HashMap k v))
-{-# INLINE alter #-}
-alter f k =
+{-# NOINLINE alter #-}
+alter = noinline \f k ->
   Control.fmap recoerceBor
     . modifyRef (Raw.alter (Unsafe.toLinear $ forceMay . f . forceMay) k)
     . coerceBor
@@ -137,8 +146,8 @@ alterF ::
   k ->
   Mut α (HashMap k v) %1 ->
   BO α (Mut α (HashMap k v))
-{-# INLINE alterF #-}
-alterF f key dic = Control.do
+{-# NOINLINE alterF #-}
+alterF = noinline \f key dic -> Control.do
   ((), dic) <-
     updateRef
       ( Control.fmap ((),)
@@ -153,8 +162,8 @@ askRaw ::
   BO α a
 {-# NOINLINE askRaw #-}
 askRaw = GHC.noinline \f dic -> case share dic of
-  Ur dic -> Control.do
-    UnsafeAlias dic <- readSharedRef (coerceBor dic)
+  Ur !dic -> Control.do
+    UnsafeAlias !dic <- readSharedRef (coerceBor dic)
     case f dic of
       -- NOTE: This @dic@ is RAW memory block,
       -- so we MUST NOT 'consume' it here, and instead just intentionally leak it.
@@ -162,8 +171,8 @@ askRaw = GHC.noinline \f dic -> case share dic of
       (!res, !dic) -> unsafeLeak dic `lseq` Control.pure res
 
 size :: Borrow bk α (HashMap k v) %1 -> BO α (Ur Int)
-{-# INLINE size #-}
-size = askRaw Raw.size
+{-# NOINLINE size #-}
+size = noinline $ askRaw Raw.size
 
 lookup ::
   (Keyed k) =>
@@ -171,7 +180,7 @@ lookup ::
   Borrow bk α (HashMap k v) %1 ->
   BO α (Maybe (Borrow bk α v))
 {-# NOINLINE lookup #-}
-lookup key = GHC.noinline \dic ->
+lookup !key = GHC.noinline \ !dic ->
   Data.fmap UnsafeAlias . unur Control.<$> askRaw (Raw.lookup key) dic
 
 lookups ::
@@ -180,71 +189,84 @@ lookups ::
   Borrow bk α (HashMap k v) %1 ->
   BO α [(Ur k, (Maybe (Borrow bk α v)))]
 {-# NOINLINE lookups #-}
-lookups keys0 = GHC.noinline $ Unsafe.toLinear \dic -> Control.do
+lookups keys0 = GHC.noinline $ Unsafe.toLinear \ !dic -> Control.do
   let keys = P.map Ur $ IHS.toList $ IHS.fromList keys0
   Data.forM keys (\(Ur !key) -> lookup key dic Control.<&> \ !v -> (Ur key, v))
 
 member :: (Keyed k) => k -> Borrow bk α (HashMap k v) %1 -> BO α (Ur Bool)
-{-# INLINE member #-}
-member key = askRaw (Raw.member key)
+{-# NOINLINE member #-}
+member key = noinline $ askRaw (Raw.member key)
 
 askRaw_ ::
-  (Raw.HashMap k v %1 -> Ur a) %1 ->
+  (Movable a) =>
+  (Raw.HashMap k v %1 -> a) %1 ->
   Borrow bk α (HashMap k v) %1 ->
   BO α a
 {-# NOINLINE askRaw_ #-}
-askRaw_ = GHC.noinline \f dic -> case share dic of
-  Ur dic -> Control.do
-    UnsafeAlias dic <- readSharedRef (coerceBor dic)
-    case f dic of
+askRaw_ = GHC.noinline \ !f !dic -> case share dic of
+  Ur !dic -> Control.do
+    UnsafeAlias !dic <- readSharedRef (coerceBor dic)
+    case move (f dic) of
       Ur !res -> Control.pure res
 
-toList :: Borrow bk α (HashMap k v) %1 -> BO α [(k, v)]
-{-# INLINE toList #-}
-toList = askRaw_ Raw.toList
+toList ::
+  (Movable k, Movable v) =>
+  Borrow bk α (HashMap k v) %1 -> BO α (Ur [(k, v)])
+{-# NOINLINE toList #-}
+toList =
+  askRaw_
+    ( GHC.noinline \(Raw.HashMap _ _ !robinArr) ->
+        deepCloneArray' dupRobinVal robinArr & Unsafe.toLinear \(_, !robinArr) ->
+          Array.toList robinArr
+            & \(Ur elems) ->
+              elems
+                P.& P.catMaybes
+                P.& P.map (\(Raw.RobinVal _ !k !v) -> (k, v))
+                P.& Ur
+    )
 
 coerceBor ::
   forall k v bk α.
   Borrow bk α (HashMap k v) %1 ->
   Borrow bk α (Ref (Raw.HashMap k v))
 {-# INLINE coerceBor #-}
-coerceBor = Unsafe.toLinear coerce
+coerceBor = Unsafe.toLinear \ !a -> coerce a
 
 recoerceBor ::
   forall k v bk α.
   Borrow bk α (Ref (Raw.HashMap k v)) %1 ->
   Borrow bk α (HashMap k v)
 {-# INLINE recoerceBor #-}
-recoerceBor = Unsafe.toLinear coerce
+recoerceBor = Unsafe.toLinear \ !a -> coerce a
 
 swap ::
   forall k v α.
   HashMap k v %1 ->
   Mut α (HashMap k v) %1 ->
   BO α (HashMap k v, Mut α (HashMap k v))
-{-# INLINE swap #-}
-swap keys dic = withLinearlyBO \lin -> Control.do
+{-# NOINLINE swap #-}
+swap = noinline \keys dic -> withLinearlyBO \lin -> Control.do
   Bi.second recoerceBor
-    Control.<$> updateRef (\old -> Control.pure (HM $ Ref.new old lin, freeRef $ inner keys)) (coerceBor dic)
+    Control.<$> updateRef (\ !old -> Control.pure (HM $ Ref.new old lin, freeRef $ inner keys)) (coerceBor dic)
 
 -- | Takes all elements from the set, leaving it empty.
 take :: forall k v α. (Keyed k) => Mut α (HashMap k v) %1 -> BO α (HashMap k v, Mut α (HashMap k v))
-{-# INLINE take #-}
-take set = Control.do
-  Bi.second recoerceBor Control.<$> updateRef go (coerceBor set)
+{-# NOINLINE take #-}
+take = noinline \dic -> Control.do
+  Bi.second recoerceBor Control.<$> updateRef go (coerceBor dic)
   where
     go :: Raw.HashMap k v %1 -> BO α (HashMap k v, Raw.HashMap k v)
-    {-# INLINE go #-}
-    go = \s -> withLinearlyBO \lin ->
+    {-# NOINLINE go #-}
+    go = noinline \s -> withLinearlyBO \lin ->
       dup lin & \(lin, lin') -> Control.do
-        Control.pure (HM $ Ref.new s lin, Raw.emptyL 16 $ fromPB lin')
+        Control.pure (HM $! Ref.new s lin, Raw.emptyL 16 $! fromPB lin')
 
 take_ :: forall k v α. (Keyed k) => Mut α (HashMap k v) %1 -> BO α (HashMap k v)
 {-# INLINE take_ #-}
 take_ set = Control.fmap (uncurry $ flip lseq) $ take set
 
 union :: (Keyed k) => HashMap k v %1 -> HashMap k v %1 -> HashMap k v
-{-# INLINE union #-}
-union (HM ref1) (HM ref2) = DataFlow.do
+{-# NOINLINE union #-}
+union = noinline \(HM ref1) (HM ref2) -> DataFlow.do
   (l, ref1) <- withLinearly ref1
-  HM $ Ref.new (Raw.union (freeRef ref1) (freeRef ref2)) l
+  HM $! Ref.new (Raw.union (freeRef ref1) (freeRef ref2)) l

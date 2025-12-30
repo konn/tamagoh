@@ -34,7 +34,6 @@ module Data.EGraph.Types.EClasses (
 import Control.Functor.Linear (void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Orphans (Movable1)
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.ENode
@@ -48,6 +47,7 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
+import Data.Unrestricted.Linear.Lifted (Movable1)
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear
@@ -85,11 +85,11 @@ parents clss0 eid = Control.do
   mclass <- HMB.lookup eid clss
   case mclass of
     Nothing -> Control.pure (Ur [])
-    Just eclass -> move Control.<$> HMB.toList (eclass .# #parents)
+    Just eclass -> HMB.toList (eclass .# #parents)
 
 nodes ::
   forall bk α l.
-  (Movable1 l, Hashable1 l) =>
+  (Movable1 l) =>
   Borrow bk α (EClasses l) %1 ->
   EClassId ->
   BO α (Ur (Maybe (NonEmpty (ENode l))))
@@ -215,4 +215,4 @@ unsafeMerge eid1 eid2 clss = Control.do
   Control.pure clss
 
 coerceLin :: (Coercible a b) => a %1 -> b
-coerceLin = Unsafe.toLinear coerce
+coerceLin = Unsafe.toLinear \ !a -> coerce a

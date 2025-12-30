@@ -33,7 +33,7 @@ instance (HasField field r a, field ~ field') => IsLabel field (RecordLabel r fi
   Borrow k α r %1 ->
   RecordLabel r field a ->
   Borrow k α a
-{-# INLINE (.#) #-}
-UnsafeAlias r .# _ = UnsafeAlias $ Unsafe.toLinear (getField @field @r @a) r
+{-# NOINLINE (.#) #-}
+UnsafeAlias !r .# _ = UnsafeAlias $! Unsafe.toLinear (getField @field @r @a) r
 
 infixl 9 .#

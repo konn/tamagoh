@@ -19,7 +19,7 @@ module Data.EGraph.EMatch.Relational (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Orphans (Movable1)
+import Control.Monad.Borrow.Pure.Utils (nubHash)
 import Data.EGraph.EMatch.Relational.Database
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types
@@ -31,6 +31,7 @@ import Data.List.NonEmpty qualified as NE
 import Data.Maybe (mapMaybe)
 import Data.Trie (project)
 import Data.Unrestricted.Linear (Ur (..))
+import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear qualified as PL
 
 ematch ::
@@ -51,14 +52,6 @@ ematchDb pat db =
         _ -> Nothing
     )
     $ query (compile pat) db
-
-nubHash :: (Hashable a) => [a] -> [a]
-nubHash = go mempty
-  where
-    go !_ [] = []
-    go !s (x : xs)
-      | HS.member x s = go s xs
-      | otherwise = x : go (HS.insert x s) xs
 
 query ::
   forall l v.

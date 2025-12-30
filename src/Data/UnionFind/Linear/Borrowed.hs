@@ -28,6 +28,7 @@ import Control.Functor.Linear (asks, runReader)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (Coercible, coerce)
 import Data.Ref.Linear (freeRef)
@@ -60,7 +61,7 @@ recoerceUF = coerceLin
 
 coerceLin :: (Coercible a b) => a %1 -> b
 {-# INLINE coerceLin #-}
-coerceLin = Unsafe.toLinear coerce
+coerceLin = Unsafe.toLinear \ !a -> coerce a
 
 {- | Find the representative key of the set containing the given key.
 
@@ -74,15 +75,15 @@ find ::
 {-# NOINLINE find #-}
 find key (UnsafeAlias bor) = Control.do
   let %1 borRef = coerceUF (UnsafeAlias bor :: Mut α _)
-  (key, UnsafeAlias !a) <- updateRef (Control.pure . Raw.find key) borRef
-  Control.pure $ freeRef a `lseq` key
+  (!key, UnsafeAlias !a) <- updateRef (Control.pure . Raw.find key) borRef
+  Control.pure $ unsafeLeak a `lseq` key
 
 unsafeFind :: forall k α. Key -> Borrow k α UnionFind %1 -> BO α (Ur Key)
 {-# NOINLINE unsafeFind #-}
 unsafeFind key (UnsafeAlias bor) = Control.do
   let %1 borRef = coerceUF (UnsafeAlias bor :: Mut α _)
-  (key, UnsafeAlias !a) <- updateRef (Control.pure . Raw.unsafeFind key) borRef
-  Control.pure $ freeRef a `lseq` key
+  (!key, UnsafeAlias !a) <- updateRef (Control.pure . Raw.unsafeFind key) borRef
+  Control.pure $ unsafeLeak a `lseq` key
 
 fresh :: Mut α UnionFind %1 -> BO α (Ur Key, Mut α UnionFind)
 fresh uf = Control.do

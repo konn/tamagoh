@@ -86,6 +86,7 @@ library
     Data.Trie
     Data.UnionFind.Linear
     Data.UnionFind.Linear.Borrowed
+    Data.Unrestricted.Linear.Lifted
 
   -- cabal-gild: discover src --include=src/**/Internal.hs
   other-modules: Data.HashMap.Mutable.Linear.Borrowed.Internal
@@ -121,6 +122,10 @@ test-suite tamagoh-test
     Data.EGraph.TestUtils
     Data.EGraph.Types.EGraphSpec
     Data.EGraph.Types.EGraphSpec.Cases
+    Data.HashMap.Linear.BorrowedCases
+    Data.HashMap.Linear.BorrowedSpec
+    Data.Set.Linear.BorrowedCases
+    Data.Set.Linear.BorrowedSpec
     Data.UnionFind.Linear.BorrowedSpec
 
   build-depends:

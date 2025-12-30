@@ -22,7 +22,6 @@ module Data.EGraph.EMatch.RelationalCases (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Orphans (Movable1)
 import Control.Monad.Borrow.Pure.Utils
 import Data.EGraph.EMatch.Relational
 import Data.EGraph.EMatch.Relational.Database (HasDatabase)
@@ -33,6 +32,8 @@ import Data.Functor.Linear qualified as Data
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty qualified as NE
+import Data.Maybe (fromJust)
+import Data.Unrestricted.Linear.Lifted
 import Debug.Trace.Linear qualified as DT
 import GHC.Generics (Generically1 (..))
 import GHC.Generics qualified as GHC
@@ -64,11 +65,13 @@ GLC.deriveGenericAnd1 ''Lang1
 
 deriving via Generically1 Lang1 instance Movable1 Lang1
 
+deriving via Generically1 Lang1 instance Copyable1 Lang1
+
 mkCase1 :: Int -> Mut α (EGraph Lang1) %1 -> BO α (Ur [Substitution String])
 mkCase1 n egraph = Control.do
   (ns, egraph) <- forRebor egraph (NE.fromList [1 .. n]) \egraph i ->
     move i & \(Ur i) -> Control.do
-      (Ur _, eid, egraph) <- fromTerm egraph $ intT i
+      (Ur _, eid, egraph) <- addTerm egraph $ intT i
       Control.pure $ egraph `lseq` eid
   Ur ns <- Control.pure $ move ns
   () <- DT.trace ("added nodes: " <> show (Data.fmap unur ns)) $ Control.pure ()
@@ -76,7 +79,7 @@ mkCase1 n egraph = Control.do
     () <- DT.trace ("Adding g(" <> show eid <> ")") $ Control.pure ()
     (Ur geid, egraph) <- addNode egraph $ ENode $ G eid
     () <- DT.trace ("Added g node: " <> show geid) $ Control.pure ()
-    Control.pure $ egraph `lseq` Ur geid
+    Control.pure $ egraph `lseq` Ur (fromJust geid)
   Ur gs <- Control.pure $ move gs
   () <- DT.trace ("added gs nodes: " <> show (Data.fmap unur gs)) $ Control.pure ()
   (Ur _, egraph) <- merges (unur Data.<$> gs) egraph
@@ -84,7 +87,7 @@ mkCase1 n egraph = Control.do
   (fs, egraph) <- forRebor egraph fs \egraph node ->
     move node & \(Ur node) -> Control.do
       (Ur feid, egraph) <- addNode egraph node
-      Control.pure $ egraph `lseq` feid
+      Control.pure $ egraph `lseq` fromJust feid
   Ur fs <- Control.pure $ move fs
   (Ur _, egraph) <- merges fs egraph
   egraph <- rebuild egraph

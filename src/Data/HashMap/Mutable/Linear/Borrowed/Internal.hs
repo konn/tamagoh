@@ -17,6 +17,7 @@ import Control.Syntax.DataFlow qualified as DataFlow
 import Data.HashMap.Mutable.Linear qualified as Raw
 import Data.HashMap.Mutable.Linear.Internal qualified as Raw
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
+import Unsafe.Linear qualified as Unsafe
 
 deepCloneHashMap :: (Dupable k, Dupable v) => Raw.HashMap k v %1 -> (Raw.HashMap k v, Raw.HashMap k v)
 deepCloneHashMap (Raw.HashMap !i !j !robinArr) = DataFlow.do
@@ -27,9 +28,10 @@ dupRobinVal ::
   (Dupable k, Dupable v) =>
   Maybe (Raw.RobinVal k v) %1 ->
   (Maybe (Raw.RobinVal k v), Maybe (Raw.RobinVal k v))
-dupRobinVal Nothing = (Nothing, Nothing)
-dupRobinVal (Just (Raw.RobinVal (Raw.PSL i) !k !v)) = DataFlow.do
-  (i, i') <- dup i
-  (k, k') <- dup k
-  (v, v') <- dup v
-  (Just (Raw.RobinVal (Raw.PSL i) k v), Just (Raw.RobinVal (Raw.PSL i') k' v'))
+dupRobinVal = Unsafe.toLinear \case
+  Nothing -> (Nothing, Nothing)
+  Just (Raw.RobinVal (Raw.PSL i) !k !v) -> DataFlow.do
+    !i' <- Unsafe.toLinear (\(_, !x) -> x) $ dup i
+    !k' <- Unsafe.toLinear (\(_, !x) -> x) $ dup k
+    !v' <- Unsafe.toLinear (\(_, !x) -> x) $ dup v
+    (Just (Raw.RobinVal (Raw.PSL i) k v), Just (Raw.RobinVal (Raw.PSL i') k' v'))

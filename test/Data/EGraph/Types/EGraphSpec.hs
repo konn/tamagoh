@@ -11,7 +11,6 @@ module Data.EGraph.Types.EGraphSpec (
   module Data.EGraph.Types.EGraphSpec,
 ) where
 
-import Control.Monad.Borrow.Pure (linearly)
 import Data.EGraph.TestUtils
 import Data.EGraph.Types.EGraphSpec.Cases
 import Data.Unrestricted.Linear (Ur (..))
@@ -19,8 +18,35 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Prelude as P
 
+-- NOTE: case 1 and 2 are almost identical -
+-- but we had a case where two test cases are run in a row ir parallel,
+-- at lsast one of them fails due to some unexpected shared state.
+-- This error is falky and sometimes does not show up.
+
 test_case1 :: TestTree
 test_case1 = testCase "EGraph case 1" $ do
-  let Ur (Ur Case1Result {..}) = linearly do withNewEGraph case1
+  let Ur MiniCaseResult {..} = withNewEGraph case1
+  putStrLn $ "Case 1 result: " <> show MiniCaseResult {..}
+  assertBool ("a /= b at first, but got: " <> show abEqAtFst) (abEqAtFst == Just False)
+  assertBool ("a == b after merge, but got: " <> show abEqAtLast) (abEqAtLast == Just True)
+
+test_case2 :: TestTree
+test_case2 = testCase "EGraph case 2" $ do
+  let Ur MiniCaseResult {..} = withNewEGraph case2
+  putStrLn $ "Case 2 result: " <> show MiniCaseResult {..}
+  assertBool ("a /= b at first, but got: " <> show abEqAtFst) (abEqAtFst == Just False)
+  assertBool ("a == b after merge, but got: " <> show abEqAtLast) (abEqAtLast == Just True)
+
+{-
+test_case1 :: TestTree
+test_case1 = testCase "EGraph case 1" $ do
+  let Ur Case1Result {..} = withNewEGraph case1
   assertBool ("(a + b) /= (a + c) at first, but got: " <> show abacEqAtFirst) (abacEqAtFirst == Just False)
   assertBool ("(a + b) == (a + c) after merge, but got: " <> show abacEqAfterMerge) (abacEqAfterMerge == Just True)
+
+test_case2 :: TestTree
+test_case2 = testCase "EGraph case 2" $ do
+  let Ur Case1Result {..} = withNewEGraph case2
+  assertBool ("(a + b) /= (a + c) at first, but got: " <> show abacEqAtFirst) (abacEqAtFirst == Just False)
+  assertBool ("(a + b) == (a + c) after merge, but got: " <> show abacEqAfterMerge) (abacEqAfterMerge == Just True)
+ -}

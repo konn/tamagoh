@@ -26,6 +26,8 @@ module Control.Monad.Borrow.Pure.Utils (
   unsafeLeak,
   deepCloneArray,
   deepCloneArray',
+  swapTuple,
+  nubHash,
 ) where
 
 import Control.Functor.Linear (StateT (..), runStateT)
@@ -36,8 +38,11 @@ import Data.Array.Mutable.Linear (Array)
 import Data.Array.Mutable.Linear qualified as Array
 import Data.Coerce.Directed (upcast)
 import Data.Functor.Linear qualified as Data
+import Data.HashSet qualified as HS
+import Data.Hashable (Hashable)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Unsafe.Linear qualified as Unsafe
+import Prelude qualified as P
 
 forRebor ::
   (Data.Traversable t) =>
@@ -103,18 +108,34 @@ deepCloneArray = deepCloneArray' dup
 
 deepCloneArray' :: forall a. (a %1 -> (a, a)) -> Array a %1 -> (Array a, Array a)
 deepCloneArray' clone arr =
-  Array.size arr & \(Ur size, arr) -> DataFlow.do
-    (old, new) <- Array.allocBeside size undefined arr
-    go 0 size old new
+  Array.size arr & \(Ur size, arr) ->
+    if size == 0
+      then Array.allocBeside 0 undefined arr
+      else DataFlow.do
+        (Ur a, arr) <- Array.read arr 0
+        (new, old) <- Array.allocBeside size a arr
+        go 0 size old new
   where
     go :: Int -> Int -> Array a %1 -> Array a %1 -> (Array a, Array a)
-    go !i !n old new
+    go !i !n !old !new
       | i < n =
           Array.read old i & \(Ur a, old) -> DataFlow.do
             -- It must be safe as long as the first argument is the original,
             -- and the latter is the new resource.
             let a' = Unsafe.toLinear (\(!_, !b) -> b) (clone a)
-            new <- Array.unsafeWrite new i a'
+            new <- Array.write new i a'
             go (i + 1) n old new
       | otherwise = (old, new)
 {-# INLINE deepCloneArray' #-}
+
+swapTuple :: (a, b) %1 -> (b, a)
+{-# INLINE swapTuple #-}
+swapTuple (!a, !b) = (b, a)
+
+nubHash :: (Hashable a) => [a] -> [a]
+nubHash = go P.mempty
+  where
+    go !_ [] = []
+    go !s (x : xs)
+      | HS.member x s = go s xs
+      | otherwise = x : go (HS.insert x s) xs

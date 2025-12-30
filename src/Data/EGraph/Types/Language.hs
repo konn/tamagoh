@@ -13,7 +13,6 @@ module Data.EGraph.Types.Language (
 ) where
 
 import Control.Monad (guard)
-import Control.Monad.Borrow.Pure.Orphans (Movable1)
 import Data.Coerce (coerce)
 import Data.FMList (FMList)
 import Data.FMList qualified as FML
@@ -21,6 +20,7 @@ import Data.Fix
 import Data.Hashable.Lifted (Hashable1)
 import Data.Kind
 import Data.Traversable qualified as P
+import Data.Unrestricted.Linear.Lifted (Movable1)
 import GHC.Generics
 import GHC.Generics qualified as GHC
 import Generics.Linear

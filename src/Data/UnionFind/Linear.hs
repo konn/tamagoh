@@ -126,7 +126,7 @@ keyToInt = Data.Coerce.coerce $ fromIntegral @Word @Int
 -- | Create an empty union-find structure.
 empty :: (UnionFind %1 -> Ur b) %1 -> Ur b
 {-# NOINLINE empty #-}
-empty f = Vector.empty \parent -> Vector.empty \rank ->
+empty = noinline \f -> Vector.empty \parent -> Vector.empty \rank ->
   f (UnionFind 0 parent rank)
 
 emptyL :: Linearly %1 -> UnionFind
@@ -147,15 +147,15 @@ unsafeFind x (UnionFind n parent rank) =
   where
     findRoot :: Key -> Vector Word %1 -> Vector Word %1 -> (Ur Key, UnionFind)
     findRoot i p r =
-      Vector.get (keyToInt i) p & \(Ur parentI, p') ->
+      Vector.get (keyToInt i) p & \(Ur parentI, p) ->
         let parentKey = Key parentI
          in if i == parentKey
-              then (Ur i, UnionFind n p' r)
+              then (Ur i, UnionFind n p r)
               else
-                findRoot parentKey p' r & \(Ur root, UnionFind _ p'' r') ->
-                  -- Path compression: make i point directly to root
-                  Vector.set (keyToInt i) (getKey root) p'' & \p''' ->
-                    (Ur root, UnionFind n p''' r')
+                findRoot parentKey p r {- & \(Ur root, UnionFind _ p'' r') ->
+                                        -- Path compression: make i point directly to root
+                                        Vector.set (keyToInt i) (getKey root) p'' & \p''' ->
+                                          (Ur root, UnionFind n p''' r') -}
 
 {- | Find the representative (root) of the set containing the given element,
 with path compression for efficiency.
@@ -165,7 +165,7 @@ find :: Key -> UnionFind %1 -> (Ur (Maybe Key), UnionFind)
 find (Key x) (UnionFind n parent rank)
   | x >= n = (Ur Nothing, UnionFind n parent rank)
   | otherwise =
-      unsafeFind (Key x) (UnionFind n parent rank) & \(root, uf') ->
+      unsafeFind (Key x) (UnionFind n parent rank) & \(!root, !uf') ->
         (Just Data.<$> root, uf')
 
 {- | Unite the sets containing the two given elements using union-by-rank.
@@ -176,32 +176,32 @@ __Unsafe__: Does not check bounds. Will crash if keys >= size.
 -}
 unsafeUnion :: Key -> Key -> UnionFind %1 -> (Ur Key, UnionFind)
 unsafeUnion x y uf =
-  unsafeFind x uf & \(Ur rootX, uf') ->
-    unsafeFind y uf' & \(Ur rootY, uf'') ->
+  unsafeFind x uf & \(Ur rootX, uf) ->
+    unsafeFind y uf & \(Ur rootY, uf) ->
       if rootX == rootY
-        then (Ur rootX, uf'') -- Already in same set, return the root
-        else unionRoots rootX rootY uf''
+        then (Ur rootX, uf) -- Already in same set, return the root
+        else unionRoots rootX rootY uf
   where
     unionRoots :: Key -> Key -> UnionFind %1 -> (Ur Key, UnionFind)
     unionRoots rx ry (UnionFind n parent rank) =
       Vector.get (keyToInt rx) rank & \(Ur rankX, rank') ->
-        Vector.get (keyToInt ry) rank' & \(Ur rankY, rank'') ->
+        Vector.get (keyToInt ry) rank' & \(Ur rankY, rank) ->
           if rankX < rankY
             then
               -- Make ry the parent of rx, ry becomes the root
               Vector.set (keyToInt rx) (getKey ry) parent & \parent' ->
-                (Ur ry, UnionFind n parent' rank'')
+                (Ur ry, UnionFind n parent' rank)
             else
               if rankX > rankY
                 then
                   -- Make rx the parent of ry, rx becomes the root
                   Vector.set (keyToInt ry) (getKey rx) parent & \parent' ->
-                    (Ur rx, UnionFind n parent' rank'')
+                    (Ur rx, UnionFind n parent' rank)
                 else
                   -- Equal ranks: make ry parent of rx and increment ry's rank, ry becomes the root
-                  Vector.set (keyToInt rx) (getKey ry) parent & \parent' ->
-                    Vector.set (keyToInt ry) (rankY + 1) rank'' & \rank''' ->
-                      (Ur ry, UnionFind n parent' rank''')
+                  Vector.set (keyToInt rx) (getKey ry) parent & \parent ->
+                    Vector.set (keyToInt ry) (rankY + 1) rank & \rank ->
+                      (Ur ry, UnionFind n parent rank)
 
 {- | Unite the sets containing the two given elements using union-by-rank.
 Returns Nothing if either key is out of bounds, otherwise returns Just the representative key of the unified set.
@@ -235,7 +235,7 @@ The new element starts in its own singleton set.
 fresh :: UnionFind %1 -> (Ur Key, UnionFind)
 fresh (UnionFind n parent rank) =
   let newIdx = n
-      newKey' = Key newIdx
+      newKey' = Key n
    in Vector.push newIdx parent & \parent' ->
         Vector.push 0 rank & \rank' ->
           (Ur newKey', UnionFind (n + 1) parent' rank')

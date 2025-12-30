@@ -15,7 +15,6 @@
 module Data.EGraph.Types.ENode (ENode (..), children) where
 
 import Control.Monad.Borrow.Pure (Copyable (..), DistributesAlias, Share, split)
-import Control.Monad.Borrow.Pure.Orphans (Movable1, move1)
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
 import Data.Foldable qualified as F
@@ -25,6 +24,7 @@ import Data.Hashable (Hashable (..))
 import Data.Hashable.Lifted (Hashable1, hashWithSalt1)
 import Data.Unrestricted.Linear (AsMovable)
 import Data.Unrestricted.Linear qualified as Ur
+import Data.Unrestricted.Linear.Lifted
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
@@ -45,8 +45,8 @@ instance (Movable1 l) => Movable (ENode l) where
   move (ENode l) = Ur.lift ENode (move1 l)
   {-# INLINE move #-}
 
-instance (DistributesAlias l, Data.Functor l) => Copyable (ENode l) where
-  copy = ENode . Data.fmap copy . split . coerceShr @_ @(l EClassId)
+instance (Copyable1 l) => Copyable (ENode l) where
+  copy = ENode . copy1 . coerceShr @_ @(l EClassId)
   {-# INLINE copy #-}
 
 instance (Hashable1 l) => Hashable (ENode l) where
@@ -66,7 +66,7 @@ instance (Ord1 l) => Ord (ENode l) where
   {-# INLINE compare #-}
 
 coerceShr :: (Coercible a b) => Share α a %1 -> Share α b
-coerceShr = Unsafe.toLinear coerce
+coerceShr = Unsafe.toLinear \ !a -> coerce a
 
 children :: (P.Foldable l) => ENode l -> [EClassId]
 children = F.toList P.. unwrap

@@ -3,6 +3,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE OverloadedLabels #-}
@@ -11,6 +12,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE NoFieldSelectors #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
@@ -21,13 +23,13 @@ module Data.EGraph.Types.EGraphSpec.Cases (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Orphans
 import Data.EGraph.Types
 import Data.Fix (Fix (..))
 import Data.Functor.Classes
 import Data.Hashable
 import Data.Hashable.Lifted
 import Data.Unrestricted.Linear (AsMovable (..))
+import Data.Unrestricted.Linear.Lifted
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH qualified as GLC
 import Prelude.Linear
@@ -53,6 +55,8 @@ GLC.deriveGenericAnd1 ''Expr
 deriveShow1 ''Expr
 
 deriving via GLC.Generically1 Expr instance Movable1 Expr
+
+deriving via GLC.Generically1 Expr instance Copyable1 Expr
 
 add :: Term Expr %1 -> Term Expr %1 -> Term Expr
 add x y = Fix $ Add x y
@@ -118,10 +122,58 @@ deriving via AsMovable Case1Result instance Dupable Case1Result
 
 deriving via GLC.Generically Case1Result instance Movable Case1Result
 
+data MiniCaseResult = MiniCaseResult
+  { abEqAtFst :: !(Maybe Bool)
+  , initAId :: !EClassId
+  , initBId :: !EClassId
+  , abEqAtLast :: !(Maybe Bool)
+  , unionedAorBId :: !(Maybe EClassId)
+  , lastAId :: !(Maybe EClassId)
+  , lastBId :: !(Maybe EClassId)
+  }
+  deriving (P.Show, P.Eq, GHC.Generic)
+
+GLC.deriveGeneric ''MiniCaseResult
+
+deriving via AsMovable MiniCaseResult instance Consumable MiniCaseResult
+
+deriving via AsMovable MiniCaseResult instance Dupable MiniCaseResult
+
+deriving via GLC.Generically MiniCaseResult instance Movable MiniCaseResult
+
+case1 :: Mut α (EGraph Expr) %1 -> BO α (Ur MiniCaseResult)
+case1 egraph = Control.do
+  (Ur aNode, Ur initAId, egraph) <- addTerm egraph a
+  (Ur bNode, Ur initBId, egraph) <- addTerm egraph b
+  (Ur abEqAtFst, egraph) <- sharing egraph \egraph -> Control.do
+    equivalent egraph aNode bNode
+  (Ur unionedAorBId, egraph) <- merge initAId initBId egraph
+  egraph <- rebuild egraph
+  (Ur abEqAtLast, egraph) <- sharing egraph \egraph -> Control.do
+    equivalent egraph aNode bNode
+  (Ur lastAId, egraph) <- addNode egraph aNode
+  (Ur lastBId, egraph) <- addNode egraph bNode
+  egraph `lseq` Control.pure (Ur MiniCaseResult {..})
+
+case2 :: Mut α (EGraph Expr) %1 -> BO α (Ur MiniCaseResult)
+case2 egraph = Control.do
+  (Ur aNode, Ur initAId, egraph) <- addTerm egraph a
+  (Ur bNode, Ur initBId, egraph) <- addTerm egraph 5
+  (Ur abEqAtFst, egraph) <- sharing egraph \egraph -> Control.do
+    equivalent egraph aNode bNode
+  (Ur unionedAorBId, egraph) <- merge initAId initBId egraph
+  egraph <- rebuild egraph
+  (Ur abEqAtLast, egraph) <- sharing egraph \egraph -> Control.do
+    equivalent egraph aNode bNode
+  (Ur lastAId, egraph) <- addNode egraph aNode
+  (Ur lastBId, egraph) <- addNode egraph bNode
+  egraph `lseq` Control.pure (Ur MiniCaseResult {..})
+
+{-
 case1 :: Mut α (EGraph Expr) %1 -> BO α (Ur Case1Result)
 case1 egraph = Control.do
-  (Ur abNode, Ur initABId, egraph) <- fromTerm egraph aPLUSb
-  (Ur acNode, Ur initACId, egraph) <- fromTerm egraph aPLUSc
+  (Ur abNode, Ur initABId, egraph) <- addTerm egraph $ a + b
+  (Ur acNode, Ur initACId, egraph) <- addTerm egraph $ a + c
   (Ur abacEqAtFirst, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph abNode acNode
   (Ur initAId, egraph) <- addNode egraph (ENode (Var "a"))
@@ -132,3 +184,19 @@ case1 egraph = Control.do
   (Ur abacEqAfterMerge, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph abNode acNode
   egraph `lseq` Control.pure (Ur Case1Result {..})
+
+case2 :: Mut α (EGraph Expr) %1 -> BO α (Ur Case1Result)
+case2 egraph = Control.do
+  (Ur abNode, Ur initABId, egraph) <- addTerm egraph $ a + b
+  (Ur acNode, Ur initACId, egraph) <- addTerm egraph $ a + 5
+  (Ur abacEqAtFirst, egraph) <- sharing egraph \egraph -> Control.do
+    equivalent egraph abNode acNode
+  (Ur initAId, egraph) <- addNode egraph (ENode (Var "a"))
+  (Ur initBId, egraph) <- addNode egraph (ENode (Var "b"))
+  (Ur initCId, egraph) <- addNode egraph (ENode (Lit 5))
+  (Ur unionedBorCId, egraph) <- merge initBId initCId egraph
+  egraph <- rebuild egraph
+  (Ur abacEqAfterMerge, egraph) <- sharing egraph \egraph -> Control.do
+    equivalent egraph abNode acNode
+  egraph `lseq` Control.pure (Ur Case1Result {..})
+ -}

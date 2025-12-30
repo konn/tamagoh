@@ -43,6 +43,7 @@ import Data.Trie (Trie)
 import Data.Trie qualified as Trie
 import Data.Unrestricted.Linear
 import Data.Unrestricted.Linear qualified as Ur
+import Data.Unrestricted.Linear.Lifted
 import GHC.Generics
 import Prelude.Linear qualified as PL
 
@@ -52,7 +53,7 @@ buildDatabase ::
   BO α (Ur (Database l))
 buildDatabase egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
-    nodes <- HMB.toList (egraph .# hashconsL)
+    Ur nodes <- HMB.toList (egraph .# hashconsL)
     Ur nodes <- Control.fmap move
       PL.$ Data.forM nodes \(enode, id) ->
         move (enode, id) PL.& \(Ur (enode, id)) ->

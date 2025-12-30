@@ -28,7 +28,7 @@ test_union =
               let %1 !(uf, lend) = borrowLinearOnly uf0
               (Ur key1, uf) <- fresh uf
               (Ur key2, uf) <- fresh uf
-              (Ur eql, uf) <- sharing uf \uf -> Control.do
+              (eql, uf) <- sharing uf \uf -> Control.do
                 Ur k1 <- find key1 uf
                 Ur k2 <- find key2 uf
                 Control.pure PL.$ move (isJust k1 && isJust k2, k1 PL./= k2)
@@ -37,7 +37,7 @@ test_union =
         assertBool "BothJust" bothJust
         assertBool "Nonequal" noneq
     , testCase "two unioned" do
-        let Ur (key1, key2, newKey, k1, k2) = linearly \l ->
+        let (key1, key2, newKey, k1, k2) = linearly \l ->
               runBO l Control.do
                 uf0 <- withLinearlyBO (Control.pure PL.. empty)
                 let %1 !(uf, lend) = borrowLinearOnly uf0
@@ -57,7 +57,7 @@ test_union =
         Just newKey @=? k1
         Just newKey @=? k2
     , testCase "two equal, one indep" do
-        let Ur ((key1, key2, key3), newKey, k1, k2, k3) = linearly \l ->
+        let ((key1, key2, key3), newKey, k1, k2, k3) = linearly \l ->
               runBO l Control.do
                 uf0 <- withLinearlyBO (Control.pure PL.. empty)
                 let %1 !(uf, lend) = borrowLinearOnly uf0
