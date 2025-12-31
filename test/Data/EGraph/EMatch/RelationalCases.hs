@@ -67,7 +67,7 @@ deriving via Generically1 Lang1 instance Movable1 Lang1
 
 deriving via Generically1 Lang1 instance Copyable1 Lang1
 
-mkCase1 :: Int -> Mut α (EGraph Lang1) %1 -> BO α (Ur [Substitution String])
+mkCase1 :: Int -> Mut α (EGraph Lang1) %1 -> BO α (Ur [(EClassId, Substitution String)])
 mkCase1 n egraph = Control.do
   (ns, egraph) <- forRebor egraph (NE.fromList [1 .. n]) \egraph i ->
     move i & \(Ur i) -> Control.do
