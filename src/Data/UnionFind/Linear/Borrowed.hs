@@ -47,7 +47,7 @@ newtype UnionFind = UF (Ref Raw.UnionFind)
   deriving newtype (LinearOnly)
 
 instance Display UnionFind where
-  displayPrec _ !ref = Control.do
+  displayPrec _ ref = Control.do
     let %1 borRef = coerceUF ref
     Ur (UnsafeAlias (Raw.UnionFind !n !parent !rank)) <- readSharedRef borRef
     let Ur ps = Vector.toList parent

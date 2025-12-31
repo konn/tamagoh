@@ -66,7 +66,7 @@ inner = coerceLin
 instance Consumable (Set k) where
   -- FIXME: stop leaking
 
-  consume = Unsafe.toLinear \ !_ -> () -- \(Set ref) -> consume $ freeRef ref
+  consume = \(Set ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
 
 instance (Dupable k) => Dupable (Set k) where
@@ -165,7 +165,7 @@ instance (Display k) => Display (Set k) where
       foldr (Ur.lift2 (P..)) (Ur id)
         . List.intersperse (Ur $ showString ", ")
         Control.<$> Data.mapM (\x -> move x & \(Ur x) -> displayPrec 0 x) lst
-    Control.pure $ Ur $ showString "[" P.. lst P.. showString "]"
+    Control.pure $ Ur $ showString "{" P.. lst P.. showString "}"
 
 toListBor :: Borrow bk α (Set k) %1 -> BO α [Borrow bk α k]
 {-# NOINLINE toListBor #-}

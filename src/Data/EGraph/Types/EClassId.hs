@@ -14,7 +14,7 @@ import Prelude.Linear qualified as PL
 import Text.Show.Borrowed (AsCopyableShow (..), Display)
 
 newtype EClassId = EClassId {getKey :: Key}
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Generic)
   deriving newtype
     ( PL.Eq
     , PL.Ord
@@ -22,6 +22,7 @@ newtype EClassId = EClassId {getKey :: Key}
     , PL.Consumable
     , PL.Dupable
     , PL.Movable
+    , Show
     , Copyable
     )
   deriving (Display) via AsCopyableShow EClassId

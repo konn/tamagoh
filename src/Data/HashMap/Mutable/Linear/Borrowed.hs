@@ -71,11 +71,11 @@ inner = noinline $ Unsafe.toLinear \ !a -> coerce a
 
 instance Consumable (HashMap k v) where
   -- FIXME: stop leaking
-  consume = Unsafe.toLinear \ !_ -> () -- \(HM ref) -> consume $ freeRef ref
+  consume = \(HM ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
 
 instance (Show k, Display v) => Display (HashMap k v) where
-  displayPrec d bor = Control.do
+  displayPrec _ bor = Control.do
     lst <- toListBor bor
     Ur lst <-
       foldr (Ur.lift2 (P..)) (Ur id)
@@ -84,10 +84,10 @@ instance (Show k, Display v) => Display (HashMap k v) where
           ( \(Ur !k, v) ->
               share v & \(Ur v) -> Control.do
                 Ur sv <- displayPrec 0 v
-                Control.pure $ Ur $ showsPrec 0 k P.. showString " = " P.. sv
+                Control.pure $ Ur $ showChar '(' P.. showsPrec 0 k P.. showString ", " P.. sv P.. showChar ')'
           )
           lst
-    Control.pure $ Ur $ showParen (d > 10) $ showString "fromList [" P.. lst P.. showString "]"
+    Control.pure $ Ur $ showString "{" P.. lst P.. showString "}"
 
 instance (Dupable k, Dupable v) => Dupable (HashMap k v) where
   -- NOTE: we need to duplicate underlying array deeply, to dup the inner mutable arrays properly.
