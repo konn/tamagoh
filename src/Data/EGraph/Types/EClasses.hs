@@ -82,7 +82,7 @@ deriveGeneric ''EClass
 
 deriving via Generically (EClass l) instance Consumable (EClass l)
 
-deriving via Generically (EClass l) instance (Movable1 l) => Dupable (EClass l)
+deriving via Generically (EClass l) instance Dupable (EClass l)
 
 deriving via Generically (EClass l) instance (Copyable1 l, Show1 l) => Display (EClass l)
 
