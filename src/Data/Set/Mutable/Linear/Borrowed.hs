@@ -18,6 +18,7 @@ module Data.Set.Mutable.Linear.Borrowed (
   null,
   size,
   toList,
+  toBorrowList,
   toListUnborrowed,
   take,
   take_,
@@ -35,79 +36,45 @@ import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (Coercible, coerce)
 import Data.Function qualified as P
 import Data.Functor.Linear qualified as Data
-import Data.HashMap.Mutable.Linear.Borrowed.Internal
+import Data.HashMap.Mutable.Linear.Borrowed.Internal (dupRobinVal)
 import Data.HashMap.Mutable.Linear.Internal qualified as RawHM
 import Data.Linear.Witness.Compat (fromPB)
-import Data.List.Linear qualified as List
 import Data.Maybe qualified as P
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear (Keyed)
+import Data.Set.Mutable.Linear.Borrowed.Internal
 import Data.Set.Mutable.Linear.Internal qualified as Raw
 import Data.Set.Mutable.Linear.Witness qualified as Raw
-import Data.Unrestricted.Linear qualified as Ur
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, null, take)
-import Text.Show.Borrowed (Display (..))
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
-
--- NOTE: we need indirection here, because 'Raw.Set' uses Array behind the scenes,
--- and regrows new array. If the our 'Set' is stored in another mutable borrows,
--- then just threading through 'Raw.Set' would discard the change to the outer borrow.
-newtype Set k = Set (Ref (Raw.Set k))
-  deriving newtype (LinearOnly)
 
 inner :: Set k %1 -> Ref (Raw.Set k)
 {-# INLINE inner #-}
 inner = coerceLin
-
-instance Consumable (Set k) where
-  consume = \(Set ref) -> consume $ freeRef ref
-  {-# INLINE consume #-}
-
-instance (Dupable k) => Dupable (Set k) where
-  -- NOTE: we need to duplicate underlying array deeply, to dup the inner mutable arrays properly.
-  -- otherwise, the duplicated cells would be 'consume'd earlier and can (and actually) cause SEGV.
-  dup2 = Unsafe.toLinear \(Set !ref) -> DataFlow.do
-    (lin, !ref) <- withLinearly ref
-    (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, freeRef ref)) ref
-    case hm of
-      Raw.Set hm -> DataFlow.do
-        !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ deepCloneHashMap hm
-        (Set ref, Set $! Ref.new (Raw.Set hm') lin)
-
-instance (Dupable k) => Copyable (Set k) where
-  -- NOTE: we need to duplicate underlying array deeply, to dup the inner mutable arrays properly.
-  -- otherwise, the duplicated cells would be 'consume'd earlier and can (and actually) cause SEGV.
-  copy = Unsafe.toLinear \(UnsafeAlias (Set !ref)) -> DataFlow.do
-    (lin, !ref) <- withLinearly ref
-    !hm <- freeRef ref
-    case hm of
-      Raw.Set hm -> DataFlow.do
-        !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ deepCloneHashMap hm
-        Set $! Ref.new (Raw.Set hm') lin
 
 empty :: (Keyed k) => Int -> Linearly %1 -> Set k
 empty size l =
   dup l & \(l, l') ->
     Set $ Ref.new (Raw.emptyL size $ fromPB l) l'
 
-singleton :: (Keyed k) => k %1 -> Linearly %1 -> Set k
-singleton = Unsafe.toLinear \ !key !l ->
+singleton :: (Keyed k) => k -> Linearly %1 -> Set k
+singleton !key l =
   dup l & \(l, l') ->
     Set $! Ref.new (Raw.fromListL [key] $ fromPB l) l'
 
-fromList :: (Keyed k) => [k] %1 -> Linearly %1 -> Set k
+fromList :: (Keyed k) => [k] -> Linearly %1 -> Set k
 fromList = Unsafe.toLinear \ !keys -> \l ->
   dup l & \(l, l') ->
     Set $! Ref.new (Raw.fromListL keys $ fromPB l) l'
 
-insert :: (Keyed k) => k %1 -> Mut α (Set k) %1 -> BO α (Mut α (Set k))
+insert :: (Keyed k) => k -> Mut α (Set k) %1 -> BO α (Mut α (Set k))
 insert = Unsafe.toLinear \ !key -> \ !set -> Control.do
   set <- modifyRef (\ !s -> Raw.insert key s) (coerceBor set)
   Control.pure $! recoerceBor set
 
-inserts :: (Keyed k) => [k] %1 -> Mut α (Set k) %1 -> BO α (Mut α (Set k))
+inserts :: (Keyed k) => [k] -> Mut α (Set k) %1 -> BO α (Mut α (Set k))
 {-# INLINE inserts #-}
 inserts [] old = Control.pure old
 inserts (k : ks) old = Control.do
@@ -127,16 +94,6 @@ askRaw f dic = case share dic of
       -- This leakage won't cause memory leak, because Lender will eventually free the whole block.
       (!res, !dic) -> unsafeLeak dic `lseq` Control.pure res
 
-askRaw_ ::
-  (Raw.Set k %1 -> a) %1 ->
-  Borrow bk α (Set k) %1 ->
-  BO α a
-askRaw_ f dic = case share dic of
-  Ur dic -> Control.do
-    Ur (UnsafeAlias dic) <- readSharedRef (coerceBor dic)
-    case f dic of
-      !res -> Control.pure res
-
 member ::
   forall k α.
   (Keyed k) =>
@@ -145,27 +102,7 @@ member ::
   BO α (Ur Bool)
 member key = askRaw (Raw.member key)
 
-instance (Display k) => Display (Set k) where
-  displayPrec _ bor = Control.do
-    lst <- toListBor bor
-    Ur lst <-
-      foldr (Ur.lift2 (P..)) (Ur id)
-        . List.intersperse (Ur $ showString ", ")
-        Control.<$> Data.mapM (\x -> move x & \(Ur x) -> displayPrec 0 x) lst
-    Control.pure $ Ur $ showString "{" P.. lst P.. showString "}"
-
-toListBor :: Borrow bk α (Set k) %1 -> BO α [Borrow bk α k]
-toListBor =
-  askRaw_
-    ( \(Raw.Set (RawHM.HashMap _ _ robinArr)) ->
-        Array.toList robinArr
-          & \(Ur elems) ->
-            elems
-              P.& P.catMaybes
-              P.& P.map (\(RawHM.RobinVal _ !k ()) -> UnsafeAlias k)
-    )
-
-toList :: (Dupable k) => Borrow bk α (Set k) %1 -> BO α [k]
+toList :: Borrow bk α (Set k) %1 -> BO α [k]
 toList =
   askRaw_
     ( \(Raw.Set (RawHM.HashMap _ _ robinArr)) ->
@@ -179,20 +116,6 @@ toList =
 
 toListUnborrowed :: (Keyed k) => Set k %1 -> [k]
 toListUnborrowed (Set ref) = unur $ Raw.toList (freeRef ref)
-
-coerceBor ::
-  forall k bk α.
-  Borrow bk α (Set k) %1 ->
-  Borrow bk α (Ref (Raw.Set k))
-{-# INLINE coerceBor #-}
-coerceBor = Unsafe.toLinear \ !a -> coerce a
-
-recoerceBor ::
-  forall k bk α.
-  Borrow bk α (Ref (Raw.Set k)) %1 ->
-  Borrow bk α (Set k)
-{-# INLINE recoerceBor #-}
-recoerceBor = Unsafe.toLinear \ !a -> coerce a
 
 null :: (Keyed k) => Borrow bk α (Set k) %1 -> BO α (Ur Bool)
 {-# INLINE null #-}

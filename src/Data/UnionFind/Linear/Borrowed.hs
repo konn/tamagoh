@@ -11,14 +11,20 @@
 module Data.UnionFind.Linear.Borrowed (
   Key,
   UnionFind,
-  -- Constructors,
+  freeze,
+  thaw,
+
+  -- * Constructors,
   empty,
-  -- operations
+
+  -- * operations
   find,
   fresh,
   union,
   equivalent,
-  -- unsafe ops
+
+  -- * unsafe operations
+  unsafeThaw,
   unsafeFind,
   unsafeUnion,
   unsafeEquivalent,
@@ -34,6 +40,7 @@ import Data.Ref.Linear qualified as Ref
 import Data.UnionFind.Linear (Key)
 import Data.UnionFind.Linear qualified as Raw
 import Data.UnionFind.Linear.Borrowed.Internal
+import Data.UnionFind.Linear.Immutable (freeze, thaw, unsafeThaw)
 import Prelude.Linear hiding (find)
 
 empty :: Linearly %1 -> UnionFind
