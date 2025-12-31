@@ -93,10 +93,10 @@ unsafeFind x (UnionFind n parent rank) =
          in if i == parentKey
               then (Ur i, UnionFind n p r)
               else
-                findRoot parentKey p r {- & \(Ur root, UnionFind _ p'' r') ->
-                                        -- Path compression: make i point directly to root
-                                        Vector.set (keyToInt i) (getKey root) p'' & \p''' ->
-                                          (Ur root, UnionFind n p''' r') -}
+                findRoot parentKey p r & \(Ur root, UnionFind _ p'' r') ->
+                  -- Path compression: make i point directly to root
+                  Vector.set (keyToInt i) (getKey root) p'' & \p''' ->
+                    (Ur root, UnionFind n p''' r')
 
 {- | Find the representative (root) of the set containing the given element,
 with path compression for efficiency.
