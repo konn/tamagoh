@@ -86,6 +86,8 @@ deriving via Generically (EClass l) instance Dupable (EClass l)
 
 deriving via Generically (EClass l) instance (Copyable1 l, Show1 l) => Display (EClass l)
 
+deriving newtype instance Dupable (EClasses l)
+
 deriving via Raw l instance (Copyable1 l, Show1 l) => Display (EClasses l)
 
 parents ::

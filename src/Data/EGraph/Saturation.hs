@@ -15,10 +15,12 @@
 
 module Data.EGraph.Saturation (
   saturate,
+  SaturationConfig (..),
+  SaturationError (..),
   Rule (..),
+  (==>),
   CompiledRule,
   compileRule,
-  (==>),
 ) where
 
 import Control.Exception (Exception)

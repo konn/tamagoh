@@ -112,6 +112,8 @@ deriving via
 
 deriving via Generically (EGraph l) instance Consumable (EGraph l)
 
+deriving via Generically (EGraph l) instance (Movable1 l) => Dupable (EGraph l)
+
 hashconsL :: RecordLabel (EGraph l) "hashcons" (HashMap (ENode l) EClassId)
 hashconsL = #hashcons
 

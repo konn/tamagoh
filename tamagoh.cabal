@@ -74,6 +74,7 @@ library
     Data.EGraph.EMatch.Relational.Database
     Data.EGraph.EMatch.Relational.Query
     Data.EGraph.EMatch.Types
+    Data.EGraph.Immutable
     Data.EGraph.Saturation
     Data.EGraph.Types
     Data.EGraph.Types.EClassId
