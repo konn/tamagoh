@@ -60,11 +60,7 @@ instance Num (Pattern Expr v) where
   signum _ = error "signum is not supported"
 
 graph1 :: EGraph Expr
-graph1 = fromList [(a + b) * c]
-  where
-    a = var "a"
-    b = var "b"
-    c = var "c"
+graph1 = empty
 
 ringRules :: [Rule Expr String]
 ringRules =
@@ -92,18 +88,55 @@ test_saturate =
   testGroup
     "saturate"
     [ testCaseSteps "(a + b) * c == c * b + a * c" \step -> do
+        step "Checking term polution..."
+        let lhs = (a + b) * c
+            rhs = c * b + a * c
+        lookupTerm lhs graph1 @?= Nothing
+        lookupTerm rhs graph1 @?= Nothing
         step "Adding terms..."
         let Ur graph =
               modify
                 ( \eg -> Control.do
-                    (Ur _, Ur _, eg) <- MEG.addTerm eg ((a + b) * c)
-                    (Ur _, Ur _, eg) <- MEG.addTerm eg (c * b + a * c)
+                    (Ur _, Ur _, eg) <- MEG.addTerm eg lhs
+                    (Ur _, Ur _, eg) <- MEG.addTerm eg rhs
                     Control.pure (consume eg)
                 )
                 graph1
-            lhs = lookupTerm ((a + b) * c) graph
-            rhs = lookupTerm (c * b + a * c) graph
-        case (lhs, rhs) of
+            lid = lookupTerm lhs graph
+            rid = lookupTerm rhs graph
+        case (lid, rid) of
+          (Nothing, Nothing) -> assertFailure "Terms not found"
+          (Just _, Nothing) -> assertFailure "RHS term not found"
+          (Nothing, Just _) -> assertFailure "LHS term not found"
+          (Just l, Just r) -> do
+            step "Checking (non-)equivalence before saturation..."
+            equivalent graph l r @?= Just False
+            step "Saturating..."
+            let result = saturate SaturationConfig {maxIterations = Nothing} ringRules graph
+            step "Checking equivalence after saturation"
+            case result of
+              Left err -> assertFailure $ "saturation failed: " <> show err
+              Right graph' -> equivalent graph' l r @?= Just True
+    , testCaseSteps "(a + 0 + b) * c == c * b + a * c" \step -> do
+        step "Checking term polution..."
+        let lhs = ((a + 0 + b) * c)
+            rhs = (c * b + a * c)
+            lid = lookupTerm lhs graph1
+            rid = lookupTerm rhs graph1
+        lid @?= Nothing
+        rid @?= Nothing
+        step "Adding terms..."
+        let Ur graph =
+              modify
+                ( \eg -> Control.do
+                    (Ur _, Ur _, eg) <- MEG.addTerm eg lhs
+                    (Ur _, Ur _, eg) <- MEG.addTerm eg rhs
+                    Control.pure (consume eg)
+                )
+                graph1
+            lid = lookupTerm lhs graph
+            rid = lookupTerm rhs graph
+        case (lid, rid) of
           (Nothing, Nothing) -> assertFailure "Terms not found"
           (Just _, Nothing) -> assertFailure "RHS term not found"
           (Nothing, Just _) -> assertFailure "LHS term not found"
