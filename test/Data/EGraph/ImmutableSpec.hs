@@ -75,6 +75,9 @@ ringRules =
   , named "*-assoc-r" $ (a * b) * c ==> a * (b * c)
   , named "*-assoc-l" $ a * (b * c) ==> (a * b) * c
   , named "distrib" $ a * (b + c) ==> a * b + a * c
+  , named "add-zero" $ a + 0 ==> a
+  , named "mul-one" $ a * 1 ==> a
+  , named "mul-zero" $ 0 * a ==> 0
   ]
   where
     pvar :: String -> Pattern Expr String
@@ -88,7 +91,8 @@ test_saturate :: TestTree
 test_saturate =
   testGroup
     "saturate"
-    [ testCase "(a + b) * c == c * b + a * c" do
+    [ testCaseSteps "(a + b) * c == c * b + a * c" \step -> do
+        step "Adding terms..."
         let Ur graph =
               modify
                 ( \eg -> Control.do
@@ -104,8 +108,11 @@ test_saturate =
           (Just _, Nothing) -> assertFailure "RHS term not found"
           (Nothing, Just _) -> assertFailure "LHS term not found"
           (Just l, Just r) -> do
+            step "Checking (non-)equivalence before saturation..."
             equivalent graph l r @?= Just False
+            step "Saturating..."
             let result = saturate SaturationConfig {maxIterations = Nothing} ringRules graph
+            step "Checking equivalence after saturation"
             case result of
               Left err -> assertFailure $ "saturation failed: " <> show err
               Right graph' -> equivalent graph' l r @?= Just True
