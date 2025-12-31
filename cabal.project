@@ -2,6 +2,7 @@ packages: **.cabal
 tests: True
 benchmarks: True
 write-ghc-environment-files: always
+optimization: 2
 
 source-repository-package
   type: git
@@ -14,7 +15,7 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/SoftwareFoundationGroupAtKyotoU/pure-borrow.git
-  tag: d6c7772a24d6a0bda7c7860ff557631b2425a9f9
+  tag: 604a1cbd57514d0e8b3ad855ada2a2222ec19668
 
 allow-newer:
   falsify:*

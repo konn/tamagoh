@@ -112,12 +112,6 @@ test-suite tamagoh-test
   type: exitcode-stdio-1.0
   hs-source-dirs: test
   main-is: Main.hs
-  ghc-options:
-    -threaded
-    -rtsopts
-    -O2
-    -with-rtsopts=-N
-
   -- cabal-gild: discover test --exclude=test/Main.hs
   other-modules:
     Data.EGraph.EMatch.RelationalCases
@@ -142,6 +136,10 @@ test-suite tamagoh-test
     tasty-hunit,
 
   build-tool-depends: tasty-discover:tasty-discover
+  ghc-options:
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
 
 test-suite tamagoh-doctest
   import: defaults

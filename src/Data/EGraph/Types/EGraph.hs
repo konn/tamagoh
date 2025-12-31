@@ -128,7 +128,7 @@ getOriginalNode egraph eid =
     maybe (Ur Nothing) (move . Just . copy) Control.<$> HMB.lookup eid (egraph .# #nodes)
 
 addTerm ::
-  (P.Traversable l, Hashable1 l, Movable1 l, Show1 l) =>
+  (P.Traversable l, Hashable1 l, Movable1 l) =>
   Mut α (EGraph l) %1 ->
   Term l ->
   BO α (Ur (ENode l), Ur EClassId, Mut α (EGraph l))
@@ -152,8 +152,7 @@ instance LinearOnly (EGraph l) where
   linearOnly = UnsafeLinearOnly
 
 new :: (Hashable1 l) => Linearly %1 -> EGraph l
-{-# NOINLINE new #-}
-new = GHC.noinline runReader Control.do
+new = runReader Control.do
   unionFind <- asks UFB.empty
   classes <- asks $ EC.new
   nodes <- asks $ HMB.empty 16
@@ -237,7 +236,7 @@ coerceLin :: (Coercible a b) => a %1 -> b
 coerceLin = Unsafe.toLinear \ !a -> coerce a
 
 addNode ::
-  (P.Traversable l, Hashable1 l, Movable1 l, Show1 l) =>
+  (P.Traversable l, Hashable1 l, Movable1 l) =>
   Mut α (EGraph l) %1 ->
   ENode l ->
   BO α (Ur (Maybe EClassId), Mut α (EGraph l))
@@ -249,35 +248,28 @@ addNode egraph node = Control.do
       Bi.first (Ur.lift Just) Control.<$> addCanonicalNode egraph enode
 
 addCanonicalNode ::
-  (P.Traversable l, Hashable1 l, Movable1 l, Show1 l) =>
+  (P.Traversable l, Hashable1 l, Movable1 l) =>
   Mut α (EGraph l) %1 ->
   ENode l ->
   BO α (Ur EClassId, Mut α (EGraph l))
 addCanonicalNode egraph enode = Control.do
-  () <- DT.trace ("Adding node: " <> show enode) $ Control.pure ()
   (Ur mid, egraph) <- sharing egraph \egraph ->
     lookup enode egraph
-  () <- DT.trace (" looked eid: " <> show mid) $ Control.pure ()
   case mid of
     Just eid -> Control.pure (Ur eid, egraph)
     Nothing -> Control.do
-      () <- DT.trace "Node is new, creating new EClassId" $ Control.pure ()
       (Ur eid, egraph) <- reborrowing egraph \egraph -> Control.do
         (eid, uf) <- UFB.fresh (egraph .# #unionFind)
         Control.pure $ uf `lseq` Ur.lift EClassId eid
-      () <- DT.trace (" created eid: " <> show eid) $ Control.pure ()
       egraph <- reborrowing_ egraph \egraph -> Control.do
         let %1 !classes = egraph .# #classes
         (Ur _, classes) <- EC.insertIfNew eid enode classes
         Control.pure $ consume classes
-      () <- DT.trace " inserted into classes" $ Control.pure ()
       egraph <- reborrowing_ egraph \egraph -> Control.do
         Control.void $ HMB.insert enode eid (egraph .# #hashcons)
-      () <- DT.trace " inserted into hashcons" $ Control.pure ()
       egraph <- reborrowing_ egraph \egraph -> Control.do
         !dic <- HMB.insert eid enode (egraph .# #nodes)
         Control.pure $! consume dic
-      () <- DT.trace " worklist updated" $ Control.pure ()
 
       Control.pure (Ur eid, egraph)
 
@@ -294,19 +286,15 @@ merge eid1 eid2 egraph = Control.do
     Control.pure $ Ur $ (,) P.<$> eid1 P.<*> eid2
   case eids of
     Nothing -> Control.do
-      () <- DT.trace "One of the EClassIds not found during merge" $ Control.pure ()
       Control.pure (Ur Nothing, egraph)
     Just (eid1, eid2) -> Control.do
-      () <- DT.trace ("Found eids: " <> show (eid1, eid2)) $ Control.pure ()
       if eid1 == eid2
         then Control.do
-          () <- DT.trace "Already equal. No-op." $ Control.pure ()
           Control.pure (Ur (Just eid1), egraph)
         else Control.do
           (Ur eid, egraph) <- reborrowing egraph \egraph -> Control.do
             (eid, uf) <- UFB.union (coerce eid1) (coerce eid2) (egraph .# #unionFind)
             Control.pure $ uf `lseq` Ur.lift EClassId (fromMaybe (error "union failed in EGraph.merge") Data.<$> eid)
-          () <- DT.trace ("Merged to new eid: " <> show eid) $ Control.pure ()
 
           -- Recover Hashcons invariant. This is not mentioned in the original egg paper,
           -- but seems necessary to keep the hashcons invariant correct.
@@ -324,7 +312,6 @@ merge eid1 eid2 egraph = Control.do
           egraph <- reborrowing_ egraph \egraph -> Control.do
             !set <- Set.inserts [eid] (egraph .# #worklist)
             Control.pure $! consume set
-          () <- DT.trace "worklist updated" $ Control.pure ()
 
           Control.pure (Ur (Just eid), egraph)
 
@@ -340,7 +327,7 @@ merges eids egraph = flip runStateT egraph
 
 rebuild ::
   forall α l.
-  (Hashable1 l, Movable1 l, P.Traversable l, Copyable1 l, Show1 l) =>
+  (Hashable1 l, Movable1 l, P.Traversable l, Copyable1 l) =>
   Mut α (EGraph l) %1 ->
   BO α (Mut α (EGraph l))
 rebuild = loop
@@ -350,14 +337,11 @@ rebuild = loop
       (Ur isNull, egraph) <- sharing egraph \e -> Set.null $ e .# #worklist
       if isNull
         then Control.do
-          () <- DT.trace "Rebuild complete, worklist is empty." $ Control.pure ()
           Control.pure egraph
         else Control.do
-          () <- DT.trace "Rebuilding..." $ Control.pure ()
           (Ur todos, egraph) <- reborrowing egraph \egraph -> Control.do
             todos <- Set.take_ (egraph .# #worklist)
             Control.pure $ move $ Set.toListUnborrowed todos
-          () <- DT.trace ("Processing todos: " <> show todos) $ Control.pure ()
           (todos, egraph) <- sharing egraph \egraph -> Control.do
             Ur todos <-
               Ur.lift nubHash
@@ -375,18 +359,12 @@ rebuild = loop
           loop egraph
 
 repair ::
-  (Hashable1 l, Movable1 l, P.Traversable l, Copyable1 l, Show1 l) =>
+  (Hashable1 l, Movable1 l, P.Traversable l, Copyable1 l) =>
   Mut α (EGraph l) %1 ->
   EClassId ->
   [(ENode l, EClassId)] ->
   BO α ()
 repair egraph eid parents = Control.do
-  () <- DT.trace ("Repairing: " <> show eid <> "; with parents = " <> show parents) $ Control.pure ()
-  -- NOTE: Although egg's original paper lacks the hashcons repairing step for eid,
-  -- but it seems that actual impl of egg does that; and without this step,
-  -- the hashcons invariant on the eid itself (not its parents) breaks.
-  (Ur (fromJust -> node), egraph) <- sharing egraph $ \egraph ->
-    getOriginalNode egraph eid
   Ur parents <- Control.pure $ move $ map move parents
   egraph <- forRebor_ egraph parents $ \egraph (Ur (p_node, p_class)) -> Control.do
     egraph <- reborrowing_ egraph \egraph ->

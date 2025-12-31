@@ -29,6 +29,7 @@ module Data.UnionFind.Linear.Internal (
 
 import Control.Monad.Borrow.Pure (Copyable)
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
+import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Data.Hashable (Hashable)
 import Data.Ord.Linear qualified as Linear
 import Data.Vector.Mutable.Linear.Unboxed (Vector)
@@ -83,6 +84,7 @@ data UnionFind where
   UnionFind :: !Word -> !(Vector Word) %1 -> !(Vector Word) %1 -> UnionFind
 
 instance Consumable UnionFind where
+  -- TODO: stop leaking
   consume (UnionFind _ p r) = consume p `lseq` consume r
 
 instance LinearOnly UnionFind where

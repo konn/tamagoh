@@ -58,7 +58,6 @@ import Data.Linear.Witness.Compat (fromPB)
 import Data.UnionFind.Linear.Internal
 import Data.Vector.Mutable.Linear.Unboxed (Vector)
 import Data.Vector.Mutable.Linear.Unboxed qualified as Vector
-import GHC.Base (noinline)
 import Prelude.Linear hiding (Eq (..), Num (..), Ord (..), find, (+), (-))
 import Prelude (Eq (..), Num (..), Ord (..))
 
@@ -68,14 +67,12 @@ keyToInt :: Key -> Int
 keyToInt = Data.Coerce.coerce $ fromIntegral @Word @Int
 
 -- | Create an empty union-find structure.
-empty :: (UnionFind %1 -> Ur b) %1 -> Ur b
-{-# NOINLINE empty #-}
-empty = noinline \f -> Vector.empty \parent -> Vector.empty \rank ->
+empty :: (Movable b) => (UnionFind %1 -> b) %1 -> b
+empty f = Vector.empty \parent -> Vector.empty \rank ->
   f (UnionFind 0 parent rank)
 
 emptyL :: Linearly %1 -> UnionFind
-{-# NOINLINE emptyL #-}
-emptyL = noinline $ \lin -> flip runReader lin Control.do
+emptyL lin = flip runReader lin Control.do
   parents <- asks $ Vector.emptyL . fromPB
   ranks <- asks $ Vector.emptyL . fromPB
   Control.pure $ UnionFind 0 parents ranks

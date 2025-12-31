@@ -27,15 +27,13 @@ import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.Hashable (Hashable)
-import GHC.Base (noinline)
 import Prelude.Linear
 
 withNewHashMap ::
   (Hashable k) =>
   (forall α. Mut α (HashMap k v) %1 -> BO α (Ur a)) %1 ->
   Ur a
-{-# NOINLINE withNewHashMap #-}
-withNewHashMap = noinline \f ->
+withNewHashMap f =
   linearly \lin -> DataFlow.do
     (v, graph) <- modifyLinearOnlyBO (HMB.empty 16 lin) f
     graph `lseq` v
