@@ -90,7 +90,6 @@ deriving via Raw l instance (Copyable1 l, Show1 l) => Display (EClasses l)
 
 parents ::
   forall bk α l.
-  (Movable1 l) =>
   Borrow bk α (EClasses l) %1 ->
   EClassId ->
   BO α (Ur [(ENode l, EClassId)])

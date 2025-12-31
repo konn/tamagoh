@@ -29,22 +29,18 @@ test_unions =
     "EGraph union test cases"
     [ testCase "union a b" $ do
         let Ur MiniCaseResult {..} = withNewEGraph caseABUnion
-        putStrLn $ "Case 1 result: " <> show MiniCaseResult {..}
         assertBool ("a /= b at first, but got: " <> show abEqAtFst) (abEqAtFst == Just False)
         assertBool ("a == b after merge, but got: " <> show abEqAtLast) (abEqAtLast == Just True)
     , testCase "union a 5" $ do
         let Ur MiniCaseResult {..} = withNewEGraph caseA5Union
-        putStrLn $ "Case 2 result: " <> show MiniCaseResult {..}
         assertBool ("a /= 5 at first, but got: " <> show abEqAtFst) (abEqAtFst == Just False)
         assertBool ("a == 5 after merge, but got: " <> show abEqAtLast) (abEqAtLast == Just True)
     , testCase "a + b vs a + c" $ do
         let Ur Case1Result {..} = withNewEGraph caseABvsAC
-        putStrLn $ "Case 3 result: " <> show Case1Result {..}
         assertBool ("(a + b) /= (a + c) at first, but got: " <> show abacEqAtFirst) (abacEqAtFirst == Just False)
         assertBool ("(a + b) == (a + c) after merge, but got: " <> show abacEqAfterMerge) (abacEqAfterMerge == Just True)
     , testCase "a + b vs a + 5" $ do
         let Ur Case1Result {..} = withNewEGraph caseABvsA5
-        putStrLn $ "Case 4 result: " <> show Case1Result {..}
         assertBool ("(a + b) /= (a + 5) at first, but got: " <> show abacEqAtFirst) (abacEqAtFirst == Just False)
         assertBool ("(a + b) == (a + 5) after merge, but got: " <> show abacEqAfterMerge) (abacEqAfterMerge == Just True)
     ]
