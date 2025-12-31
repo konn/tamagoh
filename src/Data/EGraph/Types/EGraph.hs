@@ -68,9 +68,7 @@ import Data.UnionFind.Linear.Borrowed qualified as UFB
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
-import Debug.Trace.Linear qualified as DT
-import GHC.Base qualified as GHC
-import GHC.Generics (Generic, Generically (..), Generically1)
+import GHC.Generics (Generic, Generically (..))
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Text.Show.Borrowed (Display)
@@ -172,7 +170,7 @@ lookup enode egraph =
     MaybeT $ UrT $ move . Data.fmap copy Control.<$> HMB.lookup enode (egraph .# #hashcons)
 
 lookupEClass ::
-  (Hashable1 l, Movable1 l) =>
+  (Movable1 l) =>
   EClassId ->
   Borrow k α (EGraph l) %1 ->
   BO α (Ur (Maybe (NonEmpty (ENode l))))
