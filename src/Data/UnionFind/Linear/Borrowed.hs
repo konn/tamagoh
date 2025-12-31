@@ -30,59 +30,16 @@ import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
 import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Data.Bifunctor.Linear qualified as Bi
-import Data.Coerce (Coercible, coerce)
-import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.UnionFind.Linear (Key)
 import Data.UnionFind.Linear qualified as Raw
-import Data.UnionFind.Linear.Internal qualified as Raw
-import Data.Vector.Mutable.Linear.Unboxed qualified as Vector
+import Data.UnionFind.Linear.Borrowed.Internal
 import Prelude.Linear hiding (find)
-import Text.Show.Borrowed
-import Unsafe.Linear qualified as Unsafe
-import Prelude qualified as P
-
--- | UnionFind which can be borrowed mutably, using indirection.
-newtype UnionFind = UF (Ref Raw.UnionFind)
-  deriving newtype (LinearOnly)
-
-instance Display UnionFind where
-  displayPrec _ ref = Control.do
-    let %1 borRef = coerceUF ref
-    Ur (UnsafeAlias (Raw.UnionFind !n !parent !rank)) <- readSharedRef borRef
-    let Ur ps = Vector.toList parent
-        Ur rs = Vector.toList rank
-    Control.pure
-      $ Ur
-      $ showString "UnionFind "
-      P.. showString "{ size = "
-      P.. shows n
-      P.. showString ", parents = "
-      P.. shows ps
-      P.. showString ", ranks = "
-      P.. shows rs
-      P.. showString " }"
-
-instance Consumable UnionFind where
-  consume (UF ref) = consume $ freeRef ref
-  {-# INLINE consume #-}
 
 empty :: Linearly %1 -> UnionFind
 empty = runReader Control.do
   uf <- asks Raw.emptyL
   asks $ UF . Ref.new uf
-
-coerceUF :: Borrow k α UnionFind %1 -> Borrow k α (Ref Raw.UnionFind)
-{-# INLINE coerceUF #-}
-coerceUF = coerceLin
-
-recoerceUF :: Borrow k α (Ref Raw.UnionFind) %1 -> Borrow k α UnionFind
-{-# INLINE recoerceUF #-}
-recoerceUF = coerceLin
-
-coerceLin :: (Coercible a b) => a %1 -> b
-{-# INLINE coerceLin #-}
-coerceLin = Unsafe.toLinear \ !a -> coerce a
 
 {- | Find the representative key of the set containing the given key.
 

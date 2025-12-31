@@ -86,6 +86,12 @@ instance Consumable UnionFind where
   -- TODO: stop leaking
   consume (UnionFind _ p r) = consume p `lseq` consume r
 
+instance Dupable UnionFind where
+  dup2 (UnionFind n p r) =
+    let %1 !(p1, p2) = dup p
+        %1 !(r1, r2) = dup r
+     in (UnionFind n p1 r1, UnionFind n p2 r2)
+
 instance LinearOnly UnionFind where
   linearOnly :: LinearOnlyWitness UnionFind
   linearOnly = UnsafeLinearOnly

@@ -28,6 +28,7 @@ module Control.Monad.Borrow.Pure.Utils (
   deepCloneArray',
   swapTuple,
   nubHash,
+  coerceLin,
 ) where
 
 import Control.Functor.Linear (StateT (..), runStateT)
@@ -36,6 +37,7 @@ import Control.Monad.Borrow.Pure
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear (Array)
 import Data.Array.Mutable.Linear qualified as Array
+import Data.Coerce (Coercible, coerce)
 import Data.Coerce.Directed (upcast)
 import Data.Functor.Linear qualified as Data
 import Data.HashSet qualified as HS
@@ -139,3 +141,7 @@ nubHash = go P.mempty
     go !s (x : xs)
       | HS.member x s = go s xs
       | otherwise = x : go (HS.insert x s) xs
+
+coerceLin :: (Coercible a b) => a %1 -> b
+{-# INLINE coerceLin #-}
+coerceLin = Unsafe.toLinear \ !a -> coerce a

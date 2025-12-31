@@ -37,11 +37,13 @@ module Data.UnionFind.Linear (
 
   -- * Core operations (safe - bounds checked)
   find,
+  findMut,
   union,
   equivalent,
 
   -- * Core operations (unsafe - fast)
   unsafeFind,
+  unsafeFindMut,
   unsafeUnion,
   unsafeEquivalent,
 
@@ -82,8 +84,8 @@ with path compression for efficiency.
 
 __Unsafe__: Does not check bounds. Will crash if key >= size.
 -}
-unsafeFind :: Key -> UnionFind %1 -> (Ur Key, UnionFind)
-unsafeFind x (UnionFind n parent rank) =
+unsafeFindMut :: Key -> UnionFind %1 -> (Ur Key, UnionFind)
+unsafeFindMut x (UnionFind n parent rank) =
   findRoot x parent rank
   where
     findRoot :: Key -> Vector Word %1 -> Vector Word %1 -> (Ur Key, UnionFind)
@@ -100,6 +102,33 @@ unsafeFind x (UnionFind n parent rank) =
 
 {- | Find the representative (root) of the set containing the given element,
 with path compression for efficiency.
+Returns Nothing if the key is out of bounds.
+-}
+findMut :: Key -> UnionFind %1 -> (Ur (Maybe Key), UnionFind)
+findMut (Key x) (UnionFind n parent rank)
+  | x >= n = (Ur Nothing, UnionFind n parent rank)
+  | otherwise =
+      unsafeFindMut (Key x) (UnionFind n parent rank) & \(!root, !uf') ->
+        (Just Data.<$> root, uf')
+
+{- |
+Find the representative (root) of the set containing the given element.
+
+__Unsafe__: Does not check bounds. Will crash if key >= size.
+-}
+unsafeFind :: Key -> UnionFind %1 -> (Ur Key, UnionFind)
+unsafeFind x (UnionFind n parent rank) =
+  findRoot x parent rank
+  where
+    findRoot :: Key -> Vector Word %1 -> Vector Word %1 -> (Ur Key, UnionFind)
+    findRoot i p r =
+      Vector.get (keyToInt i) p & \(Ur parentI, p) ->
+        let parentKey = Key parentI
+         in if i == parentKey
+              then (Ur i, UnionFind n p r)
+              else findRoot parentKey p r
+
+{- | Find the representative (root) of the set containing the given element.
 Returns Nothing if the key is out of bounds.
 -}
 find :: Key -> UnionFind %1 -> (Ur (Maybe Key), UnionFind)

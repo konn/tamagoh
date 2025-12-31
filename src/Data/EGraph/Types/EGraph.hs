@@ -44,7 +44,7 @@ import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Control.Monad.Borrow.Pure.Utils
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Bifunctor.Linear qualified as Bi
-import Data.Coerce (Coercible, coerce)
+import Data.Coerce (coerce)
 import Data.Coerce.Directed (upcast)
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.EClasses (EClasses, parents, setParents)
@@ -72,7 +72,6 @@ import GHC.Generics (Generic, Generically (..))
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Text.Show.Borrowed (Display)
-import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
 
 {- | Invariant: all the 'EClassId's appearing somewhere in this structure
@@ -229,9 +228,6 @@ unsafeFind :: Borrow k α (EGraph f) %1 -> EClassId -> BO α (Ur EClassId)
 unsafeFind egraph (EClassId k) = Control.do
   let uf = egraph .# #unionFind
   coerceLin Data.<$> UFB.unsafeFind k uf
-
-coerceLin :: (Coercible a b) => a %1 -> b
-coerceLin = Unsafe.toLinear \ !a -> coerce a
 
 addNode ::
   (P.Traversable l, Hashable1 l, Movable1 l) =>
