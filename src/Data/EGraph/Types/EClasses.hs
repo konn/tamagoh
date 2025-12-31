@@ -47,13 +47,11 @@ import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.Hashable.Lifted (Hashable1)
-import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe.Linear
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
-import Data.Traversable qualified as P
 import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.UnionFind.Linear.Borrowed qualified as UF
 import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
@@ -63,7 +61,6 @@ import Prelude.Linear
 import Prelude.Linear.Internal.Generically
 import Text.Show.Borrowed (Display)
 import Unsafe.Linear qualified as Unsafe
-import Prelude qualified as P
 
 newtype EClasses l = EClasses (Raw l)
   deriving newtype (Consumable)

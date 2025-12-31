@@ -29,7 +29,6 @@ module Data.UnionFind.Linear.Internal (
 
 import Control.Monad.Borrow.Pure (Copyable)
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
-import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Data.Hashable (Hashable)
 import Data.Ord.Linear qualified as Linear
 import Data.Vector.Mutable.Linear.Unboxed (Vector)
