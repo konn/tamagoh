@@ -28,6 +28,7 @@ import Data.Fix (Fix (..))
 import Data.Functor.Classes
 import Data.Hashable
 import Data.Hashable.Lifted
+import Data.Maybe (fromJust)
 import Data.Unrestricted.Linear (AsMovable (..))
 import Data.Unrestricted.Linear.Lifted
 import GHC.Generics qualified as GHC
@@ -105,9 +106,9 @@ aPLUSc = a + c
 data Case1Result = Case1Result
   { abacEqAtFirst :: !(Maybe Bool)
   , abacEqAfterMerge :: !(Maybe Bool)
-  , initAId :: !EClassId
-  , initBId :: !EClassId
-  , initCId :: !EClassId
+  , initAId :: !(Maybe EClassId)
+  , initBId :: !(Maybe EClassId)
+  , initCId :: !(Maybe EClassId)
   , initABId :: !EClassId
   , initACId :: !EClassId
   , unionedBorCId :: !(Maybe EClassId)
@@ -169,9 +170,8 @@ case2 egraph = Control.do
   (Ur lastBId, egraph) <- addNode egraph bNode
   egraph `lseq` Control.pure (Ur MiniCaseResult {..})
 
-{-
-case1 :: Mut α (EGraph Expr) %1 -> BO α (Ur Case1Result)
-case1 egraph = Control.do
+case3 :: Mut α (EGraph Expr) %1 -> BO α (Ur Case1Result)
+case3 egraph = Control.do
   (Ur abNode, Ur initABId, egraph) <- addTerm egraph $ a + b
   (Ur acNode, Ur initACId, egraph) <- addTerm egraph $ a + c
   (Ur abacEqAtFirst, egraph) <- sharing egraph \egraph -> Control.do
@@ -179,14 +179,14 @@ case1 egraph = Control.do
   (Ur initAId, egraph) <- addNode egraph (ENode (Var "a"))
   (Ur initBId, egraph) <- addNode egraph (ENode (Var "b"))
   (Ur initCId, egraph) <- addNode egraph (ENode (Var "c"))
-  (Ur unionedBorCId, egraph) <- merge initBId initCId egraph
+  (Ur unionedBorCId, egraph) <- merge (fromJust initBId) (fromJust initCId) egraph
   egraph <- rebuild egraph
   (Ur abacEqAfterMerge, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph abNode acNode
   egraph `lseq` Control.pure (Ur Case1Result {..})
 
-case2 :: Mut α (EGraph Expr) %1 -> BO α (Ur Case1Result)
-case2 egraph = Control.do
+case4 :: Mut α (EGraph Expr) %1 -> BO α (Ur Case1Result)
+case4 egraph = Control.do
   (Ur abNode, Ur initABId, egraph) <- addTerm egraph $ a + b
   (Ur acNode, Ur initACId, egraph) <- addTerm egraph $ a + 5
   (Ur abacEqAtFirst, egraph) <- sharing egraph \egraph -> Control.do
@@ -194,9 +194,8 @@ case2 egraph = Control.do
   (Ur initAId, egraph) <- addNode egraph (ENode (Var "a"))
   (Ur initBId, egraph) <- addNode egraph (ENode (Var "b"))
   (Ur initCId, egraph) <- addNode egraph (ENode (Lit 5))
-  (Ur unionedBorCId, egraph) <- merge initBId initCId egraph
+  (Ur unionedBorCId, egraph) <- merge (fromJust initBId) (fromJust initCId) egraph
   egraph <- rebuild egraph
   (Ur abacEqAfterMerge, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph abNode acNode
   egraph `lseq` Control.pure (Ur Case1Result {..})
- -}

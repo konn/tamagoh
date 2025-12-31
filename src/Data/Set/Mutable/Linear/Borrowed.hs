@@ -38,15 +38,18 @@ import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Borrowed.Internal
 import Data.HashMap.Mutable.Linear.Internal qualified as RawHM
 import Data.Linear.Witness.Compat (fromPB)
+import Data.List.Linear qualified as List
 import Data.Maybe qualified as P
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear (Keyed)
 import Data.Set.Mutable.Linear.Internal qualified as Raw
 import Data.Set.Mutable.Linear.Witness qualified as Raw
+import Data.Unrestricted.Linear qualified as Ur
 import GHC.Base (noinline)
 import GHC.Base qualified as GHC
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, null, take)
+import Text.Show.Borrowed (Display (..))
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
 
@@ -128,7 +131,7 @@ askRaw ::
 {-# NOINLINE askRaw #-}
 askRaw = GHC.noinline \f dic -> case share dic of
   Ur dic -> Control.do
-    UnsafeAlias dic <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias dic) <- readSharedRef (coerceBor dic)
     case f dic of
       -- NOTE: This @dic@ is RAW memory block,
       -- so we MUST NOT 'consume' it here, and instead just intentionally leak it.
@@ -142,7 +145,7 @@ askRaw_ ::
 {-# NOINLINE askRaw_ #-}
 askRaw_ = GHC.noinline \f dic -> case share dic of
   Ur dic -> Control.do
-    UnsafeAlias dic <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias dic) <- readSharedRef (coerceBor dic)
     case f dic of
       !res -> Control.pure res
 
@@ -154,6 +157,28 @@ member ::
   BO α (Ur Bool)
 {-# NOINLINE member #-}
 member key = GHC.noinline $ askRaw (Raw.member key)
+
+instance (Display k) => Display (Set k) where
+  displayPrec _ bor = Control.do
+    lst <- toListBor bor
+    Ur lst <-
+      foldr (Ur.lift2 (P..)) (Ur id)
+        . List.intersperse (Ur $ showString ", ")
+        Control.<$> Data.mapM (\x -> move x & \(Ur x) -> displayPrec 0 x) lst
+    Control.pure $ Ur $ showString "[" P.. lst P.. showString "]"
+
+toListBor :: Borrow bk α (Set k) %1 -> BO α [Borrow bk α k]
+{-# NOINLINE toListBor #-}
+toListBor =
+  GHC.noinline
+    $ askRaw_
+      ( GHC.noinline \(Raw.Set (RawHM.HashMap _ _ robinArr)) ->
+          Array.toList robinArr
+            & \(Ur elems) ->
+              elems
+                P.& P.catMaybes
+                P.& P.map (\(RawHM.RobinVal _ !k ()) -> UnsafeAlias k)
+      )
 
 toList :: (Dupable k) => Borrow bk α (Set k) %1 -> BO α [k]
 {-# NOINLINE toList #-}

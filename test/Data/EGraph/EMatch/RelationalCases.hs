@@ -22,6 +22,7 @@ module Data.EGraph.EMatch.RelationalCases (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Borrow.Pure.Utils
 import Data.EGraph.EMatch.Relational
 import Data.EGraph.EMatch.Relational.Database (HasDatabase)

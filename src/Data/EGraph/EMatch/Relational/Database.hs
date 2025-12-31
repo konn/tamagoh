@@ -27,7 +27,6 @@ module Data.EGraph.EMatch.Relational.Database (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Orphans
 import Data.Coerce (coerce)
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.Types

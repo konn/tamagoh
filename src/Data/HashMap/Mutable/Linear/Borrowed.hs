@@ -22,6 +22,7 @@ module Data.HashMap.Mutable.Linear.Borrowed (
   lookups,
   member,
   toList,
+  toListBor,
   swap,
   take,
   take_,
@@ -46,12 +47,15 @@ import Data.HashMap.Mutable.Linear.Internal qualified as Raw
 import Data.HashMap.Mutable.Linear.Witness qualified as Raw
 import Data.HashSet qualified as IHS
 import Data.Linear.Witness.Compat (fromPB)
+import Data.List.Linear qualified as List
 import Data.Maybe qualified as P
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import Data.Unrestricted.Linear qualified as Ur
 import GHC.Base (noinline)
 import GHC.Base qualified as GHC
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
+import Text.Show.Borrowed (Display (..))
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
 
@@ -69,6 +73,21 @@ instance Consumable (HashMap k v) where
   -- FIXME: stop leaking
   consume = Unsafe.toLinear \ !_ -> () -- \(HM ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
+
+instance (Show k, Display v) => Display (HashMap k v) where
+  displayPrec d bor = Control.do
+    lst <- toListBor bor
+    Ur lst <-
+      foldr (Ur.lift2 (P..)) (Ur id)
+        . List.intersperse (Ur $ showString ", ")
+        Control.<$> Data.mapM
+          ( \(Ur !k, v) ->
+              share v & \(Ur v) -> Control.do
+                Ur sv <- displayPrec 0 v
+                Control.pure $ Ur $ showsPrec 0 k P.. showString " = " P.. sv
+          )
+          lst
+    Control.pure $ Ur $ showParen (d > 10) $ showString "fromList [" P.. lst P.. showString "]"
 
 instance (Dupable k, Dupable v) => Dupable (HashMap k v) where
   -- NOTE: we need to duplicate underlying array deeply, to dup the inner mutable arrays properly.
@@ -163,7 +182,7 @@ askRaw ::
 {-# NOINLINE askRaw #-}
 askRaw = GHC.noinline \f dic -> case share dic of
   Ur !dic -> Control.do
-    UnsafeAlias !dic <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
     case f dic of
       -- NOTE: This @dic@ is RAW memory block,
       -- so we MUST NOT 'consume' it here, and instead just intentionally leak it.
@@ -205,9 +224,26 @@ askRaw_ ::
 {-# NOINLINE askRaw_ #-}
 askRaw_ = GHC.noinline \ !f !dic -> case share dic of
   Ur !dic -> Control.do
-    UnsafeAlias !dic <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
     case move (f dic) of
       Ur !res -> Control.pure res
+
+toListBor ::
+  Borrow bk α (HashMap k v) %1 ->
+  BO α [(Ur k, (Borrow bk α v))]
+{-# NOINLINE toListBor #-}
+toListBor = GHC.noinline \ref ->
+  share ref & \(Ur dic) -> Control.do
+    Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
+    Unsafe.toLinear
+      ( \(Raw.HashMap _ _ !robinArr) ->
+          Array.toList robinArr
+            & \(Ur elems) ->
+              Control.pure
+                $! P.map (\(Raw.RobinVal _ !k !v) -> (Ur k, UnsafeAlias v))
+                $! P.catMaybes elems
+      )
+      dic
 
 toList ::
   (Movable k, Movable v) =>

@@ -70,9 +70,10 @@ import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
 import Debug.Trace.Linear qualified as DT
 import GHC.Base qualified as GHC
-import GHC.Generics (Generic, Generically (..))
+import GHC.Generics (Generic, Generically (..), Generically1)
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
+import Text.Show.Borrowed (Display)
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
 
@@ -83,16 +84,23 @@ data EGraph l = EGraph
   { unionFind :: !UnionFind
   -- ^ A union-find structure on e-class ids.
   , classes :: !(EClasses l)
-  -- ^ A mapping from EClassId to EClass.
+  {- ^ A mapping from EClassId to EClass.
+
+  Invariant: only the canonical EClassIds resides in the e-class.
+  -}
   , nodes :: !(HashMap EClassId (ENode l))
-  {- ^ A map from eclass-id to the _original_, possibly non-canonical enode.
+  {- ^ A map from eclass-id to the _original_ enode.
+  Associated e-node MUST BE canonical AFTER rebuilding.
 
   NOTE: this field is not mentioned in the original egg paper,
   but it is needed to recover the hashcons invariant on the nodes
   that are being unioned.
   -}
   , hashcons :: !(HashMap (ENode l) EClassId)
-  -- ^ A map from _canonical_ enodes to eclass-ids.
+  {- ^
+  A map from _canonical_ enodes to eclass-ids.
+  Keys MUST BE canonical AFTER rebuilding.
+  -}
   , worklist :: !(Set EClassId)
   -- ^ A set of eclass-ids that need to be repaired.
   }
@@ -100,22 +108,24 @@ data EGraph l = EGraph
 
 deriveGeneric ''EGraph
 
+deriving via
+  Generically (EGraph l)
+  instance
+    (Copyable1 l, Show1 l) => Display (EGraph l)
+
 deriving via Generically (EGraph l) instance Consumable (EGraph l)
 
 hashconsL :: RecordLabel (EGraph l) "hashcons" (HashMap (ENode l) EClassId)
 hashconsL = #hashcons
 
 getOriginalNode ::
-  (P.Traversable l, Copyable1 l, Movable1 l) =>
+  (Copyable1 l, Movable1 l) =>
   Borrow k α (EGraph l) %1 ->
   EClassId ->
   BO α (Ur (Maybe (ENode l)))
 getOriginalNode egraph eid =
   share egraph & \(Ur egraph) -> Control.do
-    node <- HMB.lookup eid (egraph .# #nodes)
-    maybe (Ur Nothing) (Ur.lift Just) Control.<$> Data.forM node \n ->
-      copy n & move & \(Ur n) ->
-        unsafeCanonicalize egraph n
+    maybe (Ur Nothing) (move . Just . copy) Control.<$> HMB.lookup eid (egraph .# #nodes)
 
 addTerm ::
   (P.Traversable l, Hashable1 l, Movable1 l, Show1 l) =>
@@ -167,9 +177,14 @@ lookupEClass ::
   EClassId ->
   Borrow k α (EGraph l) %1 ->
   BO α (Ur (Maybe (NonEmpty (ENode l))))
-lookupEClass eid egraph = Control.do
-  let %1 clss = egraph .# #classes
-  EC.nodes clss eid
+lookupEClass eid egraph =
+  share egraph & \(Ur egraph) -> Control.do
+    Ur eid <- find egraph eid
+    case eid of
+      Nothing -> Control.pure $ Ur Nothing
+      Just eid -> Control.do
+        let %1 clss = egraph .# #classes
+        EC.nodes clss eid
 
 class Equatable l a where
   equivalent :: Share α (EGraph l) -> a -> a -> BO α (Ur (Maybe Bool))
@@ -182,8 +197,8 @@ instance Equatable l EClassId where
 
 instance (P.Traversable l, Hashable1 l) => Equatable l (ENode l) where
   equivalent egraph enode1 enode2 = Control.do
-    Ur meid1 <- canonicalize egraph enode1
-    Ur meid2 <- canonicalize egraph enode2
+    Ur meid1 <- lookup enode1 egraph
+    Ur meid2 <- lookup enode2 egraph
     Control.pure $ Ur $ (P.==) P.<$> meid1 P.<*> meid2
 
 canonicalize :: (P.Traversable l) => Share α (EGraph l) %1 -> ENode l -> BO α (Ur (Maybe (ENode l)))
@@ -267,6 +282,7 @@ addCanonicalNode egraph enode = Control.do
       Control.pure (Ur eid, egraph)
 
 merge ::
+  (Copyable1 l, Movable1 l, Hashable1 l, P.Traversable l) =>
   EClassId ->
   EClassId ->
   Mut α (EGraph l) %1 ->
@@ -292,15 +308,28 @@ merge eid1 eid2 egraph = Control.do
             Control.pure $ uf `lseq` Ur.lift EClassId (fromMaybe (error "union failed in EGraph.merge") Data.<$> eid)
           () <- DT.trace ("Merged to new eid: " <> show eid) $ Control.pure ()
 
+          -- Recover Hashcons invariant. This is not mentioned in the original egg paper,
+          -- but seems necessary to keep the hashcons invariant correct.
+          -- Incorporating this into rebuild seems possible, but for simplicity,
+          -- we do it here for now.
+          let outdatedId
+                | eid == eid1 = eid2
+                | otherwise = eid1
           egraph <- reborrowing_ egraph \egraph -> Control.do
-            !set <- Set.inserts [eid1, eid2] (egraph .# #worklist)
+            (Ur node, egraph) <- sharing egraph \egraph -> Control.do
+              Ur node <- getOriginalNode egraph outdatedId
+              unsafeCanonicalize egraph $ fromJust node
+            void $ HMB.insert node eid (egraph .# #hashcons)
+
+          egraph <- reborrowing_ egraph \egraph -> Control.do
+            !set <- Set.inserts [eid] (egraph .# #worklist)
             Control.pure $! consume set
           () <- DT.trace "worklist updated" $ Control.pure ()
 
           Control.pure (Ur (Just eid), egraph)
 
 merges ::
-  (Foldable1 t) =>
+  (Foldable1 t, Copyable1 l, Movable1 l, Hashable1 l, P.Traversable l) =>
   t EClassId ->
   Mut α (EGraph l) %1 ->
   BO α (Ur (Maybe EClassId), Mut α (EGraph l))
@@ -356,7 +385,8 @@ repair egraph eid parents = Control.do
   -- NOTE: Although egg's original paper lacks the hashcons repairing step for eid,
   -- but it seems that actual impl of egg does that; and without this step,
   -- the hashcons invariant on the eid itself (not its parents) breaks.
-  (Ur node, egraph) <- sharing egraph $ \egraph -> getOriginalNode egraph eid
+  (Ur (fromJust -> node), egraph) <- sharing egraph $ \egraph ->
+    getOriginalNode egraph eid
   Ur parents <- Control.pure $ move $ map move parents
   egraph <- forRebor_ egraph parents $ \egraph (Ur (p_node, p_class)) -> Control.do
     egraph <- reborrowing_ egraph \egraph ->

@@ -87,9 +87,12 @@ library
     Data.UnionFind.Linear
     Data.UnionFind.Linear.Borrowed
     Data.Unrestricted.Linear.Lifted
+    Text.Show.Borrowed
 
   -- cabal-gild: discover src --include=src/**/Internal.hs
-  other-modules: Data.HashMap.Mutable.Linear.Borrowed.Internal
+  other-modules:
+    Data.HashMap.Mutable.Linear.Borrowed.Internal
+    Data.UnionFind.Linear.Internal
 
 executable tamagoh-exe
   import: defaults
