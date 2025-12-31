@@ -111,10 +111,10 @@ deepCloneArray' clone arr =
   Array.size arr & \(Ur size, arr) ->
     if size == 0
       then Array.allocBeside 0 undefined arr
-      else DataFlow.do
-        (Ur a, arr) <- Array.read arr 0
-        (new, old) <- Array.allocBeside size a arr
-        go 0 size old new
+      else
+        Array.read arr 0 & \(Ur a, arr) ->
+          Array.allocBeside size a arr & \(new, old) ->
+            go 0 size old new
   where
     go :: Int -> Int -> Array a %1 -> Array a %1 -> (Array a, Array a)
     go !i !n !old !new
