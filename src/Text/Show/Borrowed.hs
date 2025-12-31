@@ -33,7 +33,7 @@ import Data.Int
 import Data.List.Linear qualified as List
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Word
-import GHC.Exts (Any)
+import GHC.Exts (Any, Multiplicity (..))
 import Generics.Linear qualified as GLC
 import Prelude.Linear
 import Prelude.Linear.Generically qualified as GLC
@@ -151,7 +151,7 @@ instance (GDisplay f, GDisplay g) => GDisplay (f GLC.:*: g) where
     let UnsafeAlias (!borF GLC.:*: !borG) = bor
     Ur shownF <- gdisplayPrec ty d $ UnsafeAlias borF
     Ur shownG <- gdisplayPrec ty d $ UnsafeAlias borG
-    let sep = case ty of
+    let %'Many sep = case ty of
           Named -> showString ", "
           Unnamed -> showString " "
     Control.pure $ Ur $ shownF P.. sep P.. shownG
