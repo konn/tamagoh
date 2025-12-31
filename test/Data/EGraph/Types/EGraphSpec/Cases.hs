@@ -17,7 +17,6 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
-{-# OPTIONS_GHC -ddump-prep -ddump-to-file -ddump-rules -dsuppress-idinfo -dsuppress-coercions -dsuppress-type-applications -dsuppress-module-prefixes -dsuppress-type-signatures -dsuppress-uniques #-}
 
 module Data.EGraph.Types.EGraphSpec.Cases (
   module Data.EGraph.Types.EGraphSpec.Cases,
