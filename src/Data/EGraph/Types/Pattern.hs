@@ -29,16 +29,13 @@ import Data.Foldable qualified as F
 import Data.Functor.Classes (Eq1, Ord1, Show1)
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
-import Data.List.NonEmpty (NonEmpty)
 import Data.Unrestricted.Linear (UrT (..), runUrT)
-import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted (Movable1)
 import GHC.Generics (Generically1)
 import GHC.Generics qualified as GHC
 import Prelude.Linear (Ur)
 import Prelude.Linear qualified as PL
 import Text.Show.Deriving (deriveShow1)
-import Validation (Validation)
 import Prelude as P
 
 data Pattern l v = Metavar v | PNode (l (Pattern l v))
