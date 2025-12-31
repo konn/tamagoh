@@ -18,6 +18,7 @@ module Data.UnionFind.Linear.Borrowed (
   empty,
 
   -- * operations
+  member,
   find,
   fresh,
   union,
@@ -41,7 +42,9 @@ import Data.UnionFind.Linear (Key)
 import Data.UnionFind.Linear qualified as Raw
 import Data.UnionFind.Linear.Borrowed.Internal
 import Data.UnionFind.Linear.Immutable (freeze, thaw, unsafeThaw)
+import Data.UnionFind.Linear.Internal qualified as Raw
 import Prelude.Linear hiding (find)
+import Prelude qualified as P
 
 empty :: Linearly %1 -> UnionFind
 empty = runReader Control.do
@@ -61,6 +64,15 @@ find key (UnsafeAlias bor) = Control.do
   let %1 borRef = coerceUF (UnsafeAlias bor :: Mut α _)
   (!key, UnsafeAlias !a) <- updateRef (Control.pure . Raw.find key) borRef
   Control.pure $ unsafeLeak a `lseq` key
+
+member ::
+  forall k α.
+  Key -> Borrow k α UnionFind %1 -> BO α (Ur Bool)
+member key bor =
+  share bor & \(Ur bor) -> Control.do
+    let %1 borRef = coerceUF bor
+    Ur (UnsafeAlias (Raw.UnionFind n _ _)) <- readSharedRef borRef
+    Control.pure $ Ur (Raw.getKey key P.< n)
 
 unsafeFind :: forall k α. Key -> Borrow k α UnionFind %1 -> BO α (Ur Key)
 unsafeFind key (UnsafeAlias bor) = Control.do

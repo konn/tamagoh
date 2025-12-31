@@ -161,7 +161,7 @@ caseABUnion egraph = Control.do
   (Ur bNode, Ur initBId, egraph) <- addTerm egraph b
   (Ur abEqAtFst, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph aNode bNode
-  (Ur unionedAorBId, egraph) <- merge initAId initBId egraph
+  (Ur (P.fmap getMergedId -> unionedAorBId), egraph) <- merge initAId initBId egraph
   egraph <- rebuild egraph
   (Ur abEqAtLast, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph aNode bNode
@@ -177,7 +177,7 @@ caseA5Union egraph = Control.do
   (Ur bNode, Ur initBId, egraph) <- addTerm egraph 5
   (Ur abEqAtFst, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph aNode bNode
-  (Ur unionedAorBId, egraph) <- merge initAId initBId egraph
+  (Ur (P.fmap getMergedId -> unionedAorBId), egraph) <- merge initAId initBId egraph
   egraph <- rebuild egraph
   (Ur abEqAtLast, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph aNode bNode
@@ -196,7 +196,7 @@ caseABvsAC egraph = Control.do
   (Ur initAId, egraph) <- addNode egraph (ENode (Var "a"))
   (Ur initBId, egraph) <- addNode egraph (ENode (Var "b"))
   (Ur initCId, egraph) <- addNode egraph (ENode (Var "c"))
-  (Ur unionedBorCId, egraph) <- merge (fromJust initBId) (fromJust initCId) egraph
+  (Ur (P.fmap getMergedId -> unionedBorCId), egraph) <- merge (fromJust initBId) (fromJust initCId) egraph
   egraph <- rebuild egraph
   (Ur abacEqAfterMerge, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph abNode acNode
@@ -213,7 +213,7 @@ caseABvsA5 egraph = Control.do
   (Ur initAId, egraph) <- addNode egraph (ENode (Var "a"))
   (Ur initBId, egraph) <- addNode egraph (ENode (Var "b"))
   (Ur initCId, egraph) <- addNode egraph (ENode (Lit 5))
-  (Ur unionedBorCId, egraph) <- merge (fromJust initBId) (fromJust initCId) egraph
+  (Ur (P.fmap getMergedId -> unionedBorCId), egraph) <- merge (fromJust initBId) (fromJust initCId) egraph
   egraph <- rebuild egraph
   (Ur abacEqAfterMerge, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph abNode acNode

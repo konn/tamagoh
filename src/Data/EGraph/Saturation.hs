@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
@@ -19,6 +20,7 @@ module Data.EGraph.Saturation (
   SaturationError (..),
   Rule (..),
   (==>),
+  named,
   CompiledRule,
   compileRule,
 ) where
@@ -26,8 +28,9 @@ module Data.EGraph.Saturation (
 import Control.Exception (Exception)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Utils (forRebor_)
+import Control.Monad.Borrow.Pure.Utils (forRebor2_)
 import Control.Monad.Trans.Writer.CPS (execWriter, tell)
+import Data.Coerce.Directed (upcast)
 import Data.Deriving (deriveShow1)
 import Data.EGraph.EMatch.Relational (ematchDb)
 import Data.EGraph.EMatch.Relational.Database (Database, HasDatabase, buildDatabase)
@@ -41,10 +44,12 @@ import Data.Functor.Classes
 import Data.HashSet qualified as HashSet
 import Data.Hashable
 import Data.Hashable.Lifted (Hashable1)
+import Data.Ref.Linear (freeRef)
+import Data.Ref.Linear qualified as Ref
 import Data.Strict qualified as St
 import GHC.Generics (Generic)
 import GHC.Generics qualified as GHC
-import Prelude.Linear (Consumable (consume), Ur (..), consume)
+import Prelude.Linear (Consumable (consume), Ur (..), consume, lseq)
 import Prelude.Linear qualified as PL
 import Validation (Validation (..))
 
@@ -58,6 +63,9 @@ data Rule l v = Rule
   deriving anyclass (Hashable, Hashable1)
 
 deriveShow1 ''Rule
+
+named :: String -> Rule l v -> Rule l v
+named name Rule {lhs, rhs} = Rule {..}
 
 infix 5 ==>
 
@@ -99,7 +107,7 @@ data SaturationConfig = SaturationConfig
 
 saturate ::
   forall l v α.
-  (Language l, HasDatabase l, Hashable v) =>
+  (Language l, HasDatabase l, Show1 l, Hashable v, Show v) =>
   SaturationConfig ->
   [CompiledRule l v] ->
   Mut α (EGraph l) %1 ->
@@ -115,9 +123,12 @@ saturate config rules = go (St.toStrict config.maxIterations)
       if null results
         then Control.pure egraph
         else Control.do
-          egraph <- substitute egraph results
-          egraph <- rebuild egraph
-          go (subtract 1 <$> remaining) egraph
+          (progress, egraph) <- substitute egraph results
+          if progress
+            then Control.do
+              egraph <- rebuild egraph
+              go (subtract 1 <$> remaining) egraph
+            else Control.pure egraph
 
     collect :: Database l -> [Ur (EClassId, Substitution v, CompiledRule l v)]
     collect db = FML.toList $ execWriter do
@@ -128,17 +139,22 @@ saturate config rules = go (St.toStrict config.maxIterations)
     substitute ::
       Mut α (EGraph l) %1 ->
       [Ur (EClassId, Substitution v, CompiledRule l v)] %1 ->
-      BO α (Mut α (EGraph l))
-    substitute egraph results = forRebor_
-      egraph
-      results
-      \egraph (Ur (eid, subs, CompiledRule {..})) ->
-        case substPattern subs rhs of
-          Failure _ -> Control.pure PL.$ consume egraph
-          Success pat -> Control.do
-            (Ur meid, egraph) <- addPattern pat egraph
-            meid PL.& \case
-              Nothing -> Control.pure PL.$ consume egraph
-              Just newEid -> Control.do
-                (Ur _, egraph) <- merge eid newEid egraph
-                Control.pure PL.$ consume egraph
+      BO α (Bool, Mut α (EGraph l))
+    substitute egraph results = Control.do
+      reborrowing' egraph \egraph -> Control.do
+        !(var, lend) <- withLinearlyBO \lin ->
+          Control.pure (borrowLinearOnly (Ref.new False lin))
+        (var, egraph) <- forRebor2_ var egraph results \var egraph (Ur (eid, subs, CompiledRule {..})) ->
+          case substPattern subs rhs of
+            Failure _ -> Control.pure (var `lseq` consume egraph)
+            Success pat -> Control.do
+              (Ur meid, egraph) <- addPattern pat egraph
+              meid PL.& \case
+                Nothing -> Control.pure (var `lseq` consume egraph)
+                Just newEid -> Control.do
+                  (Ur resl, egraph) <- unsafeMerge eid newEid egraph
+                  case resl of
+                    Merged {} -> Control.void (modifyRef (`lseq` True) var)
+                    AlreadyMerged {} -> Control.pure PL.$ consume var
+                  Control.pure (consume egraph)
+        Control.pure \end -> var `lseq` egraph `lseq` freeRef (reclaim lend (upcast end))

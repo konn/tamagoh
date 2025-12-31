@@ -31,6 +31,9 @@ module Data.EGraph.Types.EGraph (
   addNode,
   merges,
   merge,
+  unsafeMerge,
+  MergeResult (..),
+  getMergedId,
   rebuild,
   Term,
   Equatable (..),
@@ -269,57 +272,84 @@ addCanonicalNode egraph enode = Control.do
 
       Control.pure (Ur eid, egraph)
 
+data MergeResult = Merged {-# UNPACK #-} !EClassId | AlreadyMerged {-# UNPACK #-} !EClassId
+  deriving (P.Show, P.Eq, P.Ord, Generic)
+
+instance P.Semigroup MergeResult where
+  Merged eid <> AlreadyMerged {} = Merged eid
+  AlreadyMerged {} <> Merged eid = Merged eid
+  AlreadyMerged _ <> AlreadyMerged eid2 = AlreadyMerged eid2
+  Merged _ <> Merged eid2 = Merged eid2
+
+getMergedId :: MergeResult -> EClassId
+getMergedId (Merged eid) = eid
+getMergedId (AlreadyMerged eid) = eid
+
 merge ::
   (Copyable1 l, Movable1 l, Hashable1 l, P.Traversable l) =>
   EClassId ->
   EClassId ->
   Mut α (EGraph l) %1 ->
-  BO α (Ur (Maybe EClassId), Mut α (EGraph l))
+  BO α (Ur (Maybe MergeResult), Mut α (EGraph l))
 merge eid1 eid2 egraph = Control.do
-  (Ur eids, egraph) <- sharing egraph \egraph -> Control.do
-    Ur eid1 <- find egraph eid1
-    Ur eid2 <- find egraph eid2
-    Control.pure $ Ur $ (,) P.<$> eid1 P.<*> eid2
-  case eids of
-    Nothing -> Control.do
-      Control.pure (Ur Nothing, egraph)
-    Just (eid1, eid2) -> Control.do
-      if eid1 == eid2
-        then Control.do
-          Control.pure (Ur (Just eid1), egraph)
-        else Control.do
-          (Ur eid, egraph) <- reborrowing egraph \egraph -> Control.do
-            (eid, uf) <- UFB.union (coerce eid1) (coerce eid2) (egraph .# #unionFind)
-            Control.pure $ uf `lseq` Ur.lift EClassId (fromMaybe (error "union failed in EGraph.merge") Data.<$> eid)
+  (eidsThere, egraph) <- sharing egraph \egraph -> Control.do
+    let uf = egraph .# #unionFind
+    Ur eid1 <- UFB.member (coerce eid1) uf
+    Ur eid2 <- UFB.member (coerce eid2) uf
+    Control.pure $ eid1 && eid2
+  if not eidsThere
+    then Control.pure (Ur Nothing, egraph)
+    else Control.do
+      (Ur !resl, !egraph) <- unsafeMerge eid1 eid2 egraph
+      Control.pure (Ur (Just resl), egraph)
 
-          -- Recover Hashcons invariant. This is not mentioned in the original egg paper,
-          -- but seems necessary to keep the hashcons invariant correct.
-          -- Incorporating this into rebuild seems possible, but for simplicity,
-          -- we do it here for now.
-          let outdatedId
-                | eid == eid1 = eid2
-                | otherwise = eid1
-          egraph <- reborrowing_ egraph \egraph -> Control.do
-            (Ur node, egraph) <- sharing egraph \egraph -> Control.do
-              Ur node <- getOriginalNode egraph outdatedId
-              unsafeCanonicalize egraph $ fromJust node
-            void $ HMB.insert node eid (egraph .# #hashcons)
+unsafeMerge ::
+  (Copyable1 l, Movable1 l, Hashable1 l, P.Traversable l) =>
+  EClassId ->
+  EClassId ->
+  Mut α (EGraph l) %1 ->
+  BO α (Ur MergeResult, Mut α (EGraph l))
+unsafeMerge eid1 eid2 egraph = Control.do
+  (Ur (eid1, eid2), egraph) <- sharing egraph \egraph -> Control.do
+    Ur eid1 <- unsafeFind egraph eid1
+    Ur eid2 <- unsafeFind egraph eid2
+    Control.pure $ Ur (eid1, eid2)
+  if eid1 == eid2
+    then Control.do
+      Control.pure (Ur (AlreadyMerged eid1), egraph)
+    else Control.do
+      (Ur eid, egraph) <- reborrowing egraph \egraph -> Control.do
+        (eid, uf) <- UFB.union (coerce eid1) (coerce eid2) (egraph .# #unionFind)
+        Control.pure $ uf `lseq` Ur.lift EClassId (fromMaybe (error "union failed in EGraph.merge") Data.<$> eid)
 
-          egraph <- reborrowing_ egraph \egraph -> Control.do
-            !set <- Set.inserts [eid] (egraph .# #worklist)
-            Control.pure $! consume set
+      -- Recover Hashcons invariant. This is not mentioned in the original egg paper,
+      -- but seems necessary to keep the hashcons invariant correct.
+      -- Incorporating this into rebuild seems possible, but for simplicity,
+      -- we do it here for now.
+      let outdatedId
+            | eid == eid1 = eid2
+            | otherwise = eid1
+      egraph <- reborrowing_ egraph \egraph -> Control.do
+        (Ur node, egraph) <- sharing egraph \egraph -> Control.do
+          Ur node <- getOriginalNode egraph outdatedId
+          unsafeCanonicalize egraph $ fromJust node
+        void $ HMB.insert node eid (egraph .# #hashcons)
 
-          Control.pure (Ur (Just eid), egraph)
+      egraph <- reborrowing_ egraph \egraph -> Control.do
+        !set <- Set.inserts [eid] (egraph .# #worklist)
+        Control.pure $! consume set
+
+      Control.pure (Ur (Merged eid), egraph)
 
 merges ::
-  (Foldable1 t, Copyable1 l, Movable1 l, Hashable1 l, P.Traversable l) =>
+  (Foldable1 t, P.Functor t, Copyable1 l, Movable1 l, Hashable1 l, P.Traversable l) =>
   t EClassId ->
   Mut α (EGraph l) %1 ->
-  BO α (Ur (Maybe EClassId), Mut α (EGraph l))
+  BO α (Ur (Maybe MergeResult), Mut α (EGraph l))
 merges eids egraph = flip runStateT egraph
   $ runUrT
   $ runMaybeT do
-    foldlM1 (\id1 id2 -> MaybeT $ UrT $ StateT $ merge id1 id2) eids
+    foldlM1 (\id1 id2 -> P.fmap (id1 P.<>) $ MaybeT $ UrT $ StateT $ merge (getMergedId id1) (getMergedId id2)) $ P.fmap AlreadyMerged eids
 
 rebuild ::
   forall α l.

@@ -36,6 +36,7 @@ module Data.EGraph.Immutable (
   Language,
   Rule (..),
   (==>),
+  named,
 
   -- * Re-exports
   ENode (..),
@@ -60,6 +61,7 @@ import Data.EGraph.Types.EGraph qualified as Raw
 import Data.EGraph.Types.Pattern (Pattern (..))
 import Data.Fix (foldFixM)
 import Data.Foldable (for_)
+import Data.Functor.Classes (Show1)
 import Data.Functor.Linear qualified as PL
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
@@ -194,7 +196,7 @@ lookupTerm t =
     )
 
 saturate ::
-  (Hashable v, Language l, HasDatabase l) =>
+  (Hashable v, Language l, Show1 l, HasDatabase l, Show v) =>
   SaturationConfig ->
   [Rule l v] ->
   EGraph l ->

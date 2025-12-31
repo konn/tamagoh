@@ -25,18 +25,22 @@ import Data.EGraph.EMatch.Relational.Database
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types
 import Data.EGraph.Types
+import Data.Foldable qualified as F
 import Data.Foldable1 (foldl1')
+import Data.Functor.Classes (Show1)
+import Data.Functor.Compose (Compose (Compose))
+import Data.Functor.Product (Product (..))
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromJust, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Trie (project)
 import Data.Unrestricted.Linear (Ur (..))
 import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear qualified as PL
 
 ematch ::
-  (Hashable v, Traversable l, HasDatabase l, Movable1 l) =>
+  (Hashable v, Show v, Show1 l, Traversable l, HasDatabase l, Movable1 l) =>
   Pattern l v -> Borrow k α (EGraph l) %1 -> BO α (Ur [(EClassId, Substitution v)])
 ematch pat egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
@@ -44,13 +48,13 @@ ematch pat egraph =
     Control.pure PL.$ Ur $ ematchDb (compile pat) db
 
 ematchDb ::
-  (Hashable v, Traversable l, HasDatabase l) =>
+  (Hashable v, Show v, Show1 l, Traversable l, HasDatabase l) =>
   PatternQuery l v -> Database l -> [(EClassId, Substitution v)]
 ematchDb PatternQuery {..} db =
   map
     ( \subs ->
         let subs' = mapMaybeVar \case { PVar v -> Just v; _ -> Nothing } subs
-            rootId = fromJust $ lookupVar root subs
+            rootId = fromMaybe (error $ "ematchDB: var not found: " <> show (patQuery, root, subs)) $ lookupVar root subs
          in (rootId, subs')
     )
     $ query patQuery db
@@ -70,7 +74,7 @@ genericJoin ::
   ConjunctiveQuery l v ->
   Database l ->
   [Substitution v]
-genericJoin (hd :- qs) db = go (nubHash hd) mempty
+genericJoin (hd :- qs) db = go (nubHash $ F.toList $ Pair hd (Compose qs)) mempty
   where
     -- TODO: consider some selection strategy
     go :: [v] -> Substitution v -> [Substitution v]

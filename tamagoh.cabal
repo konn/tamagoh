@@ -123,6 +123,7 @@ test-suite tamagoh-test
   other-modules:
     Data.EGraph.EMatch.RelationalCases
     Data.EGraph.EMatch.RelationalSpec
+    Data.EGraph.ImmutableSpec
     Data.EGraph.TestUtils
     Data.EGraph.Types.EGraphSpec
     Data.EGraph.Types.EGraphSpec.Cases
