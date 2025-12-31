@@ -6,6 +6,7 @@
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
@@ -28,7 +29,7 @@ import Data.Foldable1 (foldl1')
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromJust, mapMaybe)
 import Data.Trie (project)
 import Data.Unrestricted.Linear (Ur (..))
 import Data.Unrestricted.Linear.Lifted (Movable1)
@@ -36,22 +37,23 @@ import Prelude.Linear qualified as PL
 
 ematch ::
   (Hashable v, Traversable l, HasDatabase l, Movable1 l) =>
-  Pattern l v -> Borrow k α (EGraph l) %1 -> BO α (Ur [Substitution v])
+  Pattern l v -> Borrow k α (EGraph l) %1 -> BO α (Ur [(EClassId, Substitution v)])
 ematch pat egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
     Ur db <- buildDatabase egraph
-    Control.pure PL.$ Ur $ ematchDb pat db
+    Control.pure PL.$ Ur $ ematchDb (compile pat) db
 
 ematchDb ::
   (Hashable v, Traversable l, HasDatabase l) =>
-  Pattern l v -> Database l -> [Substitution v]
-ematchDb pat db =
+  PatternQuery l v -> Database l -> [(EClassId, Substitution v)]
+ematchDb PatternQuery {..} db =
   map
-    ( mapMaybeVar \case
-        PVar v -> Just v
-        _ -> Nothing
+    ( \subs ->
+        let subs' = mapMaybeVar \case { PVar v -> Just v; _ -> Nothing } subs
+            rootId = fromJust $ lookupVar root subs
+         in (rootId, subs')
     )
-    $ query (compile pat) db
+    $ query patQuery db
 
 query ::
   forall l v.

@@ -57,9 +57,11 @@ library
     linear-generics,
     linear-witness,
     recursion-schemes,
+    selective,
     strict,
     transformers,
     unordered-containers,
+    validation-selective,
 
   hs-source-dirs: src
   -- cabal-gild: discover src --exclude=src/**/Internal.hs

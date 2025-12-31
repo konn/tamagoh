@@ -4,6 +4,7 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
@@ -14,6 +15,7 @@ module Data.EGraph.EMatch.Relational.Query (
   ConjunctiveQuery (..),
   EClassIdOrVar (..),
   CompiledVar (..),
+  PatternQuery (..),
   compile,
   findVars,
 ) where
@@ -116,16 +118,25 @@ fresh = FreshM $ do
 runFreshM :: forall a. FreshM a -> a
 runFreshM = coerce $ flip (evalState @Word @a) (0 :: Word)
 
+data PatternQuery l v = PatternQuery
+  { root :: !(CompiledVar v)
+  , patQuery :: !(Query l (CompiledVar v))
+  }
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic, Generic1)
+  deriving anyclass (Hashable, Hashable1)
+  deriving (Eq1, Ord1) via Generically1 (PatternQuery l)
+
 compile ::
   forall l v.
   (Hashable v, Traversable l) =>
-  Pattern l v -> Query l (CompiledVar v)
+  Pattern l v -> PatternQuery l v
 compile = \pat0 ->
   let (root, atms) = runFreshM (aux pat0)
       vs = HashSet.toList $ foldMap' (HashSet.singleton . PVar) pat0
-   in case NE.nonEmpty $ DL.toList atms of
+      patQuery = case NE.nonEmpty $ DL.toList atms of
         Nothing -> SelectAll root
         Just atms' -> Conj $ vs :- atms'
+   in PatternQuery {..}
   where
     aux :: Pattern l v -> FreshM (CompiledVar v, DL.DList (Atom l (CompiledVar v)))
     aux (PNode l) = do

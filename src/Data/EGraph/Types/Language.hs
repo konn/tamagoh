@@ -20,12 +20,12 @@ import Data.Fix
 import Data.Hashable.Lifted (Hashable1)
 import Data.Kind
 import Data.Traversable qualified as P
-import Data.Unrestricted.Linear.Lifted (Movable1)
+import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
 import GHC.Generics
 import GHC.Generics qualified as GHC
 import Generics.Linear
 
-type Language l = (Hashable1 l, Movable1 l, P.Traversable l, Matchable l)
+type Language l = (Hashable1 l, Movable1 l, P.Traversable l, Matchable l, Copyable1 l)
 
 type Term l = Fix l
 

@@ -7,15 +7,21 @@ module Data.EGraph.EMatch.Types (
   lookupVar,
   insertVar,
   singletonVar,
+  substPattern,
 ) where
 
+import Data.Bifunctor qualified as Bi
 import Data.Coerce (coerce)
+import Data.DList.DNonEmpty qualified as DLNE
 import Data.EGraph.Types (EClassId)
+import Data.EGraph.Types.Pattern
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
+import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe (mapMaybe)
 import GHC.Generics (Generic)
+import Validation
 
 newtype Substitution v = Substitution {substitution :: HashMap v EClassId}
   deriving (Eq, Ord, Show, Generic)
@@ -39,3 +45,15 @@ insertVar = coerce $ HM.insert @v @EClassId
 singletonVar :: forall v. (Hashable v) => v -> EClassId -> Substitution v
 {-# INLINE singletonVar #-}
 singletonVar = coerce $ HM.singleton @v @EClassId
+
+substPattern ::
+  (Traversable l, Hashable v) =>
+  Substitution v ->
+  Pattern l v ->
+  Validation (NonEmpty v) (Pattern l EClassId)
+substPattern sub = Bi.first DLNE.toNonEmpty . go
+  where
+    go (Metavar v) = case lookupVar v sub of
+      Just eclassId -> pure $ Metavar eclassId
+      Nothing -> Failure $ DLNE.singleton v
+    go (PNode p) = PNode <$> traverse go p
