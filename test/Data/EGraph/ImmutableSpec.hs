@@ -4,25 +4,22 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# OPTIONS_GHC -Wno-partial-type-signatures #-}
 
 module Data.EGraph.ImmutableSpec (module Data.EGraph.ImmutableSpec) where
 
 import Control.Functor.Linear qualified as Control
-import Data.Deriving (deriveShow1)
 import Data.EGraph.Immutable
 import Data.EGraph.Types.EGraph qualified as MEG
-import Data.EGraph.Types.Language (Matchable)
-import Data.Functor.Classes (Eq1, Ord1)
+import Data.EGraph.Types.Language (deriveLanguage)
 import Data.Hashable (Hashable)
-import Data.Hashable.Lifted (Hashable1)
-import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
 import GHC.Generics hiding ((:*:))
-import Generics.Linear.TH qualified as GLC
 import Prelude.Linear (Consumable (..), Ur (..))
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -30,15 +27,9 @@ import Prelude hiding (lookup)
 
 data Expr a = a :+ a | a :* a | Lit Int | Var String
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic, Generic1)
-  deriving (Eq1, Ord1, HasDatabase, Matchable) via Generically1 Expr
-  deriving anyclass (Hashable, Hashable1)
+  deriving anyclass (Hashable)
 
-deriveShow1 ''Expr
-GLC.deriveGenericAnd1 ''Expr
-
-deriving via Generically1 Expr instance Movable1 Expr
-
-deriving via Generically1 Expr instance Copyable1 Expr
+deriveLanguage ''Expr
 
 var :: String -> Term Expr
 var = wrapTerm . Var

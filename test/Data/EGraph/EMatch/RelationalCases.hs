@@ -25,21 +25,14 @@ import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Borrow.Pure.Utils
 import Data.EGraph.EMatch.Relational
-import Data.EGraph.EMatch.Relational.Database (HasDatabase)
 import Data.EGraph.EMatch.Types
 import Data.EGraph.Types
-import Data.Functor.Classes
+import Data.EGraph.Types.Language (deriveLanguage)
 import Data.Functor.Linear qualified as Data
-import Data.Hashable (Hashable)
-import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (fromJust)
-import Data.Unrestricted.Linear.Lifted
-import GHC.Generics (Generically1 (..))
 import GHC.Generics qualified as GHC
-import Generics.Linear.TH qualified as GLC
 import Prelude.Linear
-import Text.Show.Deriving (deriveShow1)
 import Prelude qualified as P
 
 data Lang1 a = F !a !a | G !a | I !Int
@@ -50,22 +43,12 @@ data Lang1 a = F !a !a | G !a | I !Int
     , P.Functor
     , P.Foldable
     , P.Traversable
-    , GHC.Generic
-    , GHC.Generic1
     )
-  deriving anyclass (Hashable, Hashable1)
-  deriving (Eq1, Ord1, HasDatabase) via Generically1 Lang1
 
-deriveShow1 ''Lang1
+deriveLanguage ''Lang1
 
 intT :: Int -> Term Lang1
 intT i = wrapTerm $ I i
-
-GLC.deriveGenericAnd1 ''Lang1
-
-deriving via Generically1 Lang1 instance Movable1 Lang1
-
-deriving via Generically1 Lang1 instance Copyable1 Lang1
 
 mkCase1 :: Int -> Mut α (EGraph Lang1) %1 -> BO α (Ur [(EClassId, Substitution String)])
 mkCase1 n egraph = Control.do

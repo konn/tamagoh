@@ -12,6 +12,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE NoFieldSelectors #-}
 {-# LANGUAGE NoImplicitPrelude #-}
@@ -25,19 +26,15 @@ module Data.EGraph.Types.EGraphSpec.Cases (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Data.EGraph.Types
+import Data.EGraph.Types.Language (deriveLanguage)
 import Data.Fix (Fix (..))
-import Data.Functor.Classes
-import Data.Hashable
-import Data.Hashable.Lifted
 import Data.Maybe (fromJust)
 import Data.Unrestricted.Linear (AsMovable (..))
-import Data.Unrestricted.Linear.Lifted
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH qualified as GLC
 import Prelude.Linear
 import Prelude.Linear.Generically qualified as GLC
 import Text.Show.Borrowed (display)
-import Text.Show.Deriving (deriveShow1)
 import Prelude qualified as P
 
 data Expr l = Add l l | Mul l l | Lit Int | Var String
@@ -51,15 +48,8 @@ data Expr l = Add l l | Mul l l | Lit Int | Var String
     , P.Traversable
     , Show
     )
-  deriving (Eq1, Ord1) via GHC.Generically1 Expr
-  deriving anyclass (Hashable, Hashable1)
 
-GLC.deriveGenericAnd1 ''Expr
-deriveShow1 ''Expr
-
-deriving via GLC.Generically1 Expr instance Movable1 Expr
-
-deriving via GLC.Generically1 Expr instance Copyable1 Expr
+deriveLanguage ''Expr
 
 add :: Term Expr %1 -> Term Expr %1 -> Term Expr
 add x y = Fix $ Add x y
