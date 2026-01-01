@@ -30,12 +30,13 @@ import Data.Hashable (Hashable)
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (catMaybes, maybeToList)
 import Data.Unrestricted.Linear (Ur (..), UrT (..), runUrT)
+import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear ()
 import Prelude as P
 
 ematchBacktrack ::
   forall l v α.
-  (Language l, Hashable v) =>
+  (Movable1 l, Matchable l, Hashable v) =>
   Share α (EGraph l) ->
   Pattern l v ->
   EClassId ->
