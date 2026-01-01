@@ -130,7 +130,6 @@ test_saturate =
               modify
                 ( \eg -> Control.do
                     (Ur _, Ur _, eg) <- MEG.addTerm eg lhs
-                    (Ur _, Ur _, eg) <- MEG.addTerm eg rhs
                     Control.pure (consume eg)
                 )
                 graph1
@@ -138,17 +137,18 @@ test_saturate =
             rid = lookupTerm rhs graph
         case (lid, rid) of
           (Nothing, Nothing) -> assertFailure "Terms not found"
-          (Just _, Nothing) -> assertFailure "RHS term not found"
-          (Nothing, Just _) -> assertFailure "LHS term not found"
-          (Just l, Just r) -> do
-            step "Checking (non-)equivalence before saturation..."
-            equivalent graph l r @?= Just False
+          (_, Just _) -> assertFailure "RHS term should not be registered, but found!"
+          (Just l, Nothing) -> do
             step "Saturating..."
             let result = saturate SaturationConfig {maxIterations = Nothing} ringRules graph
             step "Checking equivalence after saturation"
             case result of
               Left err -> assertFailure $ "saturation failed: " <> show err
-              Right graph' -> equivalent graph' l r @?= Just True
+              Right graph' -> do
+                let rid = lookupTerm rhs graph'
+                case rid of
+                  Nothing -> assertFailure "RHS term not found after saturation"
+                  Just r -> equivalent graph' l r @?= Just True
     ]
   where
     a = var "a"
