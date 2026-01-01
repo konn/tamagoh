@@ -33,10 +33,11 @@ import Control.Monad.Trans.Writer.CPS (execWriter, tell)
 import Data.Coerce.Directed (upcast)
 import Data.Deriving (deriveShow1)
 import Data.EGraph.EMatch.Relational (ematchDb)
-import Data.EGraph.EMatch.Relational.Database (Database, HasDatabase, buildDatabase)
+import Data.EGraph.EMatch.Relational.Database (Database, buildDatabase)
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types (Substitution, substPattern)
 import Data.EGraph.Types
+import Data.EGraph.Types.Language
 import Data.FMList qualified as FML
 import Data.Foldable qualified as F
 import Data.Foldable qualified as P
@@ -107,7 +108,7 @@ data SaturationConfig = SaturationConfig
 
 saturate ::
   forall l v α.
-  (Language l, HasDatabase l, Show1 l, Hashable v, Show v) =>
+  (Language l, Show1 l, Hashable v, Show v) =>
   SaturationConfig ->
   [CompiledRule l v] ->
   Mut α (EGraph l) %1 ->

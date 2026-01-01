@@ -55,9 +55,10 @@ import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.EGraph.EMatch.Relational.Database (HasDatabase)
 import Data.EGraph.Saturation hiding (saturate)
 import Data.EGraph.Saturation qualified as Raw
-import Data.EGraph.Types (EClassId (..), ENode (..), Language, unwrapTerm, wrapTerm)
+import Data.EGraph.Types (EClassId (..), ENode (..), unwrapTerm, wrapTerm)
 import Data.EGraph.Types.EGraph (Term)
 import Data.EGraph.Types.EGraph qualified as Raw
+import Data.EGraph.Types.Language (Language)
 import Data.EGraph.Types.Pattern (Pattern (..))
 import Data.Fix (foldFixM)
 import Data.Foldable (for_)
@@ -196,7 +197,7 @@ lookupTerm t =
     )
 
 saturate ::
-  (Hashable v, Language l, Show1 l, HasDatabase l, Show v) =>
+  (Language l, Show1 l, Hashable v, Show v) =>
   SaturationConfig ->
   [Rule l v] ->
   EGraph l ->

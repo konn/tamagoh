@@ -83,6 +83,7 @@ library
     Data.EGraph.Types.ENode
     Data.EGraph.Types.Language
     Data.EGraph.Types.Pattern
+    Data.EGraph.Types.Term
     Data.HasField.Linear
     Data.HashMap.Mutable.Linear.Borrowed
     Data.Linear.Witness.Compat

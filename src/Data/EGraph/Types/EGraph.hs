@@ -53,7 +53,7 @@ import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.EClasses (EClasses, parents, setParents)
 import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.ENode
-import Data.EGraph.Types.Language
+import Data.EGraph.Types.Term
 import Data.Fix (foldFixM)
 import Data.Foldable1 (Foldable1, foldlM1)
 import Data.Functor.Classes (Show1)

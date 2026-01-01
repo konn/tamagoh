@@ -22,7 +22,7 @@ import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.EGraph (EGraph, addNode, find)
 import Data.EGraph.Types.ENode
-import Data.EGraph.Types.Language
+import Data.EGraph.Types.Term
 import Data.FMList qualified as FML
 import Data.Fix (Fix (unFix))
 import Data.Foldable qualified as F
