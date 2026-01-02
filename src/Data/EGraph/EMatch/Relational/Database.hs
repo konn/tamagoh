@@ -53,16 +53,16 @@ buildDatabase ::
 buildDatabase egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
     Ur nodes <- HMB.toList (egraph .# hashconsL)
-    Ur nodes <- Control.fmap move
-      PL.$ Data.forM nodes \(enode, id) ->
+    Ur nodes <- Control.fmap move PL.$
+      Data.forM nodes \(enode, id) ->
         move (enode, id) PL.& \(Ur (enode, id)) ->
           (,)
             Control.<$> (unur PL.. Ur.lift fromJust Control.<$> canonicalize egraph enode)
             Control.<*> (unur Control.<$> unsafeFind egraph id)
-    Control.pure
-      PL.$ Ur
-      $ fromRelations
-      $ PL.map (\(ENode args, id) -> MkRel {id, args}) nodes
+    Control.pure PL.$
+      Ur $
+        fromRelations $
+          PL.map (\(ENode args, id) -> MkRel {id, args}) nodes
 
 data Database l = Database
   { database :: !(Database_ l)

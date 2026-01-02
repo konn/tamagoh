@@ -52,19 +52,19 @@ case1 dic = Control.do
   dic <- Set.insert 1 dic
   (Ur finalAnswer, dic) <- sharing dic \dic -> Set.member 1 dic
   Ur finalEnts <- move Control.<$> Set.toList dic
-  Control.pure
-    $ move finalAnswer
-    & \(Ur finalAnswer) ->
-      Ur SetCaseResult {..}
+  Control.pure $
+    move finalAnswer
+      & \(Ur finalAnswer) ->
+        Ur SetCaseResult {..}
 
 case2 :: Mut α (Set Int) %1 -> BO α (Ur SetCaseResult)
 case2 dic = Control.do
   dic <- Set.insert 2 dic
   (Ur finalAnswer, dic) <- sharing dic \dic -> Set.member 2 dic
   Ur finalEnts <- move Control.<$> Set.toList dic
-  Control.pure
-    $ move finalAnswer
-    & \(Ur finalAnswer) -> Ur SetCaseResult {..}
+  Control.pure $
+    move finalAnswer
+      & \(Ur finalAnswer) -> Ur SetCaseResult {..}
 
 data SetDupResult = SetDupResult
   { initOrig :: ![Int]

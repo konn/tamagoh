@@ -10,6 +10,7 @@ license-file: LICENSE
 author: Hiromi ISHII
 maintainer: konn.jinro_at_gmail.com
 copyright: "2025 (c) Hiromi ISHII"
+tested-with: ghc ==9.10.3 || ==9.12.2 || ==9.12.3 || ==9.14.1
 extra-doc-files:
   CHANGELOG.md
   README.md
@@ -51,6 +52,7 @@ library
     deriving-compat,
     dlist,
     fmlist,
+    functor-combinators,
     hashable,
     heaps,
     indexed-traversable,
@@ -96,6 +98,7 @@ library
     Data.UnionFind.Linear.Borrowed
     Data.UnionFind.Linear.Immutable
     Data.Unrestricted.Linear.Lifted
+    Language.Egglog.Core
     Text.Show.Borrowed
 
   -- cabal-gild: discover src --include=src/**/Internal.hs

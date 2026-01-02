@@ -76,9 +76,9 @@ insert key !v !dic = Control.do
   (mval, dic) <-
     updateRef
       ( \dic ->
-          Control.fmap swapTuple
-            $ flip runStateT (Just v)
-            $ Raw.alterF (\may -> StateT \ !s -> Control.pure (Unsafe.toLinear Ur s, may)) key dic
+          Control.fmap swapTuple $
+            flip runStateT (Just v) $
+              Raw.alterF (\may -> StateT \ !s -> Control.pure (Unsafe.toLinear Ur s, may)) key dic
       )
       (coerceBor dic)
   Control.pure (mval, recoerceBor dic)
@@ -89,9 +89,9 @@ delete key dic = Control.do
   (mval, dic) <-
     updateRef
       ( \dic ->
-          Control.fmap swapTuple
-            $ flip runStateT Nothing
-            $ Raw.alterF (\may -> StateT \s -> Control.pure (Unsafe.toLinear Ur s, may)) key dic
+          Control.fmap swapTuple $
+            flip runStateT Nothing $
+              Raw.alterF (\may -> StateT \s -> Control.pure (Unsafe.toLinear Ur s, may)) key dic
       )
       (coerceBor dic)
   Control.pure (mval, recoerceBor dic)

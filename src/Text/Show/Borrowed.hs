@@ -91,8 +91,8 @@ instance {-# OVERLAPPABLE #-} (Display a) => Display [a] where
   displayPrec _ as = Control.do
     as <- Data.mapM (\a -> move a & \(Ur a) -> displayPrec 0 a) $ split as
     let %1 !(Ur showns) =
-          foldr (Ur.lift2 (P..)) (Ur P.id)
-            $ List.intersperse (Ur $ showString ", ") as
+          foldr (Ur.lift2 (P..)) (Ur P.id) $
+            List.intersperse (Ur $ showString ", ") as
     Control.pure $ Ur $ showString "[" P.. showns P.. showString "]"
 
 instance {-# OVERLAPPING #-} Display String where
@@ -104,31 +104,31 @@ instance (Display a, Display b) => Display (a, b) where
     let (borA, borB) = splitPair bor
     Ur shownA <- displayPrec 0 borA
     Ur shownB <- displayPrec 0 borB
-    Control.pure
-      $ Ur
-      $ showString "("
-      P.. shownA
-      P.. showString ", "
-      P.. shownB
-      P.. showString ")"
+    Control.pure $
+      Ur $
+        showString "("
+          P.. shownA
+          P.. showString ", "
+          P.. shownB
+          P.. showString ")"
 
 instance (Display a, Display b) => Display (Either a b) where
   displayPrec d bor = Control.do
     case splitEither bor of
       Left borA -> Control.do
         Ur shownA <- displayPrec 11 borA
-        Control.pure
-          $ Ur
-          $ showParen (d > 10)
-          $ showString "Left "
-          P.. shownA
+        Control.pure $
+          Ur $
+            showParen (d > 10) $
+              showString "Left "
+                P.. shownA
       Right borB -> Control.do
         Ur shownB <- displayPrec 11 borB
-        Control.pure
-          $ Ur
-          $ showParen (d > 10)
-          $ showString "Right "
-          P.. shownB
+        Control.pure $
+          Ur $
+            showParen (d > 10) $
+              showString "Right "
+                P.. shownB
 
 type GenericDisplay a = (GLC.Generic a, GDisplay (GLC.Rep a))
 
@@ -179,12 +179,12 @@ instance (GLC.Constructor c, GDisplay f) => GDisplay (GLC.C1 c f) where
     case ty of
       Named -> Control.pure $ Ur $ showString conName P.. showString " { " P.. shownF P.. showString " }"
       Unnamed ->
-        Control.pure
-          $ Ur
-          $ showParen (d > 10)
-          $ showString conName
-          P.. showString " "
-          P.. shownF
+        Control.pure $
+          Ur $
+            showParen (d > 10) $
+              showString conName
+                P.. showString " "
+                P.. shownF
 
 instance (GLC.Selector s, GDisplay f) => GDisplay (GLC.S1 s f) where
   gdisplayPrec ty d bor = Control.do

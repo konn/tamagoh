@@ -136,16 +136,16 @@ addTerm ::
   BO α (Ur (ENode l), Ur EClassId, Mut α (EGraph l))
 addTerm egraph term = Control.do
   (Ur node, egraph) <-
-    flip runStateT egraph
-      $ runUrT
-      $ foldFixM
-        ( \nodes ->
-            ENode
-              P.<$> P.traverse
-                (\node -> UrT $ StateT \egraph -> addCanonicalNode egraph node)
-                nodes
-        )
-        term
+    flip runStateT egraph $
+      runUrT $
+        foldFixM
+          ( \nodes ->
+              ENode
+                P.<$> P.traverse
+                  (\node -> UrT $ StateT \egraph -> addCanonicalNode egraph node)
+                  nodes
+          )
+          term
   (Ur eid, egraph) <- addCanonicalNode egraph node
   Control.pure (Ur node, Ur eid, egraph)
 
@@ -206,28 +206,30 @@ canonicalize :: (P.Traversable l) => Share α (EGraph l) %1 -> ENode l -> BO α 
 canonicalize egraph (ENode node) =
   move egraph & \(Ur egraph) -> Control.do
     let uf = egraph .# #unionFind
-    runUrT $ coerce P.. P.sequenceA
-      P.<$> P.mapM
-        ( \eid ->
-            UrT
-              $ Data.fmap (coerceLin @_ @(Maybe EClassId))
-              Control.<$> UFB.find (coerce eid) uf
-        )
-        node
+    runUrT $
+      coerce P.. P.sequenceA
+        P.<$> P.mapM
+          ( \eid ->
+              UrT $
+                Data.fmap (coerceLin @_ @(Maybe EClassId))
+                  Control.<$> UFB.find (coerce eid) uf
+          )
+          node
 
 -- | Canonicalize a node, without checking the existence of eclass ids.
 unsafeCanonicalize :: (P.Traversable l) => Share α (EGraph l) %1 -> ENode l -> BO α (Ur (ENode l))
 unsafeCanonicalize egraph (ENode node) =
   move egraph & \(Ur egraph) -> Control.do
     let uf = egraph .# #unionFind
-    runUrT $ coerce
-      P.<$> P.mapM
-        ( \eid ->
-            UrT
-              $ Data.fmap (coerceLin @_ @(EClassId))
-              Control.<$> UFB.unsafeFind (coerce eid) uf
-        )
-        node
+    runUrT $
+      coerce
+        P.<$> P.mapM
+          ( \eid ->
+              UrT $
+                Data.fmap (coerceLin @_ @(EClassId))
+                  Control.<$> UFB.unsafeFind (coerce eid) uf
+          )
+          node
 
 unsafeFind :: Borrow k α (EGraph f) %1 -> EClassId -> BO α (Ur EClassId)
 unsafeFind egraph (EClassId k) = Control.do
@@ -346,10 +348,10 @@ merges ::
   t EClassId ->
   Mut α (EGraph l) %1 ->
   BO α (Ur (Maybe MergeResult), Mut α (EGraph l))
-merges eids egraph = flip runStateT egraph
-  $ runUrT
-  $ runMaybeT do
-    foldlM1 (\id1 id2 -> P.fmap (id1 P.<>) $ MaybeT $ UrT $ StateT $ merge (getMergedId id1) (getMergedId id2)) $ P.fmap AlreadyMerged eids
+merges eids egraph = flip runStateT egraph $
+  runUrT $
+    runMaybeT do
+      foldlM1 (\id1 id2 -> P.fmap (id1 P.<>) $ MaybeT $ UrT $ StateT $ merge (getMergedId id1) (getMergedId id2)) $ P.fmap AlreadyMerged eids
 
 rebuild ::
   forall α l.
@@ -404,8 +406,8 @@ repair egraph eid parents = Control.do
     (newPs, newPsLend) <- withLinearlyBO \lin -> Control.do
       ps <- withLinearlyBO $ Control.pure . HMB.empty @(ENode _) @EClassId 16
       Control.pure $ borrow ps lin
-    (egraph, newPs) <- forRebor2_ egraph newPs parents
-      $ \egraph newPs (Ur (p_node, p_class)) ->
+    (egraph, newPs) <- forRebor2_ egraph newPs parents $
+      \egraph newPs (Ur (p_node, p_class)) ->
         Control.do
           (Ur p_node, egraph) <- sharing egraph $ \egraph ->
             canonicalize egraph p_node

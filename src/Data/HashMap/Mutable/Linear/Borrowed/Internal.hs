@@ -93,9 +93,9 @@ toBorrowList ref =
       ( \(Raw.HashMap _ _ !robinArr) ->
           Array.toList robinArr
             & \(Ur elems) ->
-              Control.pure
-                $! P.map (\(Raw.RobinVal _ !k !v) -> (Ur k, UnsafeAlias v))
-                $! P.catMaybes elems
+              Control.pure $!
+                P.map (\(Raw.RobinVal _ !k !v) -> (Ur k, UnsafeAlias v)) $!
+                  P.catMaybes elems
       )
       dic
 

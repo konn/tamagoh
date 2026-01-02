@@ -50,17 +50,17 @@ case1 dic = Control.do
   (residence, dic) <- HMB.insert 1 1 dic
   (finalAnswer, dic) <- sharing dic \dic -> Data.fmap copy Control.<$> HMB.lookup 1 dic
   Ur finalEnts <- HMB.toList dic
-  Control.pure
-    $ move (residence, finalAnswer)
-    & \(Ur (residence, finalAnswer)) ->
-      Ur HMCaseResult {..}
+  Control.pure $
+    move (residence, finalAnswer)
+      & \(Ur (residence, finalAnswer)) ->
+        Ur HMCaseResult {..}
 
 case2 :: Mut α (HashMap Int Int) %1 -> BO α (Ur HMCaseResult)
 case2 dic = Control.do
   (residence, dic) <- HMB.insert 2 2 dic
   (finalAnswer, dic) <- sharing dic \dic -> Data.fmap copy Control.<$> HMB.lookup 2 dic
   Ur finalEnts <- HMB.toList dic
-  Control.pure
-    $ move (residence, finalAnswer)
-    & \(Ur (residence, finalAnswer)) ->
-      Ur HMCaseResult {..}
+  Control.pure $
+    move (residence, finalAnswer)
+      & \(Ur (residence, finalAnswer)) ->
+        Ur HMCaseResult {..}

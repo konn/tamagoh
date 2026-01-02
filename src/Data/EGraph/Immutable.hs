@@ -106,8 +106,8 @@ empty = unur (linearly \l -> Unsafe.toLinear (Ur . EG) (Raw.new l))
 fromList :: (Hashable1 l, Traversable l, Movable1 l) => [Raw.Term l] -> EGraph l
 {-# INLINE fromList #-}
 fromList terms = unur PL.$ linearly \l ->
-  Unsafe.toLinear (Ur . EG)
-    PL.$ modifyLinearOnlyBO_ (Raw.new l) \egraph ->
+  Unsafe.toLinear (Ur . EG) PL.$
+    modifyLinearOnlyBO_ (Raw.new l) \egraph ->
       PL.flip evalStateT egraph PL.$ Control.fmap unur PL.$ runUrT do
         for_ terms \term ->
           UrT $ StateT \egraph -> Control.do

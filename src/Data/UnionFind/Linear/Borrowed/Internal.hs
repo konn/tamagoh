@@ -44,16 +44,16 @@ instance Display UnionFind where
     Ur (UnsafeAlias (Raw.UnionFind !n !parent !rank)) <- readSharedRef borRef
     let Ur ps = Vector.toList parent
         Ur rs = Vector.toList rank
-    Control.pure
-      $ Ur
-      $ showString "UnionFind "
-      P.. showString "{ size = "
-      P.. shows n
-      P.. showString ", parents = "
-      P.. shows ps
-      P.. showString ", ranks = "
-      P.. shows rs
-      P.. showString " }"
+    Control.pure $
+      Ur $
+        showString "UnionFind "
+          P.. showString "{ size = "
+          P.. shows n
+          P.. showString ", parents = "
+          P.. shows ps
+          P.. showString ", ranks = "
+          P.. shows rs
+          P.. showString " }"
 
 instance Consumable UnionFind where
   consume (UF ref) = consume $ freeRef ref
