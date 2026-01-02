@@ -33,7 +33,7 @@ jobs:
         plan: ${{fromJSON(needs.ci-enumerate.outputs.plan)}}
       fail-fast: false
     env:
-      cabal-version: 3.14.2.0
+      cabal-version: 3.16.1.0
       cabal: "cabal --project-file=${{matrix.plan.path}}"
       ghc: ${{matrix.plan.ghc}}
       project-file: ${{matrix.plan.path}}
@@ -130,7 +130,7 @@ jobs:
         plan: ${{fromJSON(needs.ci-enumerate.outputs.plan)}}
       fail-fast: false
     env:
-      cabal: 3.14.2.0
+      cabal: 3.16.1.0
       ghc: ${{matrix.plan.ghc}}
       project-file: ${{matrix.plan.path}}
       plan: ${{matrix.plan.name}}
