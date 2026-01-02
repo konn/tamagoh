@@ -97,8 +97,8 @@ copyCase dic = Control.do
     (finalDup, duped) <- sharing duped \duped -> Set.toList duped
 
     Control.pure $ \end ->
-      reclaim lentDuped (upcast end)
-        `lseq` duped
-        `lseq` dic
-        `lseq` SetDupResult {..}
+      reclaim lentDuped (upcast end) `lseq`
+        duped `lseq`
+          dic `lseq`
+            SetDupResult {..}
   Control.pure $ dic `lseq` move result
