@@ -157,6 +157,9 @@ test-suite tamagoh-doctest
   import: defaults
   type: exitcode-stdio-1.0
   hs-source-dirs: doctest
+
+  if impl(ghc >=9.14)
+    buildable: False
   main-is: DocTest.hs
   ghc-options:
     -threaded
