@@ -7,6 +7,19 @@
 -- remote-repo: stackage-nightly-2026-01-02:http://www.stackage.org/nightly-2026-01-02
 import: ../../cabal.project
 with-compiler: ghc-9.14.1
+allow-newer:
+  template-haskell,
+  base,
+  containers,
+  ghc-bignum,
+  ghc,
+  time,
+  ghc-exactprint,
+  ghc-boot,
+source-repository-package
+    type: git
+    location: https://github.com/sheaf/ghc-tcplugins-extra
+    tag: 6842eb467dde87cf6249828011f4c9d717f7f2b0
 constraints: abstract-deque ==0.3,
              abstract-deque-tests ==0.3,
              abstract-par ==0.3.3,
@@ -992,7 +1005,7 @@ constraints: abstract-deque ==0.3,
              ghc-compact ==0.1.0.0,
              ghc-core ==0.5.6,
              ghc-events ==0.21.0.0,
-             ghc-exactprint ==1.12.0.0,
+             ghc-exactprint ==1.14.0.0,
              ghc-experimental installed,
              ghc-heap installed,
              ghc-hs-meta ==0.1.5.0,
@@ -2833,7 +2846,7 @@ constraints: abstract-deque ==0.3,
              table-layout ==1.0.0.2,
              tabular ==0.2.2.8,
              tagchup ==0.4.1.2,
-             tagged ==0.8.9,
+             tagged ==0.8.10,
              tagged-binary ==0.2.0.1,
              tagged-identity ==0.1.5,
              tagged-transformer ==0.8.3,
