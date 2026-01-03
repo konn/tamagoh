@@ -12,7 +12,7 @@ Laws:
    * Commutativity: @a '/\' b = b '/\' a@
    * Idempotency: @a '/\' a = a@
 -}
-class Semilattice l where
+class (Eq l) => Semilattice l where
   (/\) :: l -> l -> l
   infixr 7 /\
 

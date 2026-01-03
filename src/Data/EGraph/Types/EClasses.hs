@@ -20,8 +20,9 @@
 module Data.EGraph.Types.EClasses (
   EClasses (),
   EClass (),
-  lookupAnalysis,
   new,
+  lookupAnalysis,
+  setAnalysis,
   nodes,
   delete,
   parents,
@@ -77,6 +78,22 @@ lookupAnalysis classes eid =
       Just eclass -> Control.do
         Ur a <- readSharedRef (eclass .# #analysis)
         Control.pure (Ur (Just $ copy a))
+
+setAnalysis ::
+  forall α d l.
+  (Consumable d) =>
+  EClassId ->
+  d ->
+  Mut α (EClasses d l) %1 ->
+  BO α (Ur Bool)
+setAnalysis eid d classes = Control.do
+  let %1 clss = coerceLin classes :: Mut α (Raw d l)
+  mclass <- HMB.lookup eid clss
+  case mclass of
+    Nothing -> Control.pure $ Ur False
+    Just eclass -> Control.do
+      ref <- modifyRef (`lseq` d) $ eclass .# #analysis
+      Control.pure $ ref `lseq` Ur True
 
 parents ::
   forall bk α d l m.

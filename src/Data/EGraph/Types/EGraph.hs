@@ -42,6 +42,7 @@ module Data.EGraph.Types.EGraph (
   Analysis (..),
 ) where
 
+import Algebra.Semilattice
 import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
@@ -387,7 +388,25 @@ repair egraph eid parents = Control.do
             Nothing -> Control.pure $ consume egraph
           Control.pure $ consume newPs
     egraph <- newPs `lseq` modifyAnalysis eid egraph
-    -- TODO
-    egraph `lseq` Control.pure (\end -> reclaim newPsLend (upcast end))
+    -- Rebuild analysis after modification
+    (Ur ps, egraph) <- sharing egraph \eg ->
+      EC.parents (eg .# #classes) eid
+    void $ forRebor_ egraph ps \egraph parent ->
+      move parent & \(Ur (pNode, pClass)) -> Control.do
+        (newAnal, egraph) <- sharing egraph \egraph -> Control.do
+          Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
+          Ur old <- EC.lookupAnalysis (egraph .# #classes) pClass
+          let d = P.maybe analysis (/\ analysis) old
+          if Just d P.== old
+            then Control.pure Nothing
+            else Control.pure $ Just $ Ur d
+        case newAnal of
+          Nothing -> Control.pure $ consume egraph
+          Just (Ur d) -> Control.do
+            egraph <- reborrowing_ egraph \egraph -> Control.do
+              void $ EC.setAnalysis pClass d (egraph .# #classes)
+            Control.pure $ consume egraph
+
+    Control.pure (\end -> reclaim newPsLend (upcast end))
 
   void $ setParents eid newParents (egraph .# #classes)
