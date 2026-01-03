@@ -308,7 +308,7 @@ unsafeMerge eid1 eid2 egraph = Control.do
         void $ HMB.insert node eid (egraph .# #hashcons)
 
       egraph <- reborrowing_ egraph \egraph -> Control.do
-        !set <- Set.inserts [eid] (egraph .# #worklist)
+        !set <- Set.insert eid (egraph .# #worklist)
         Control.pure $! consume set
 
       Control.pure (Ur (Merged eid), egraph)
@@ -405,7 +405,8 @@ repair egraph eid parents = Control.do
           Just (Ur d) -> Control.do
             egraph <- reborrowing_ egraph \egraph -> Control.do
               void $ EC.setAnalysis pClass d (egraph .# #classes)
-            Control.pure $ consume egraph
+            !set <- Set.insert pClass (egraph .# #worklist)
+            Control.pure $ consume set
 
     Control.pure (\end -> reclaim newPsLend (upcast end))
 
