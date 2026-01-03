@@ -223,8 +223,7 @@ addCanonicalNode ::
   ENode l ->
   BO α (Ur EClassId, Mut α (EGraph d l))
 addCanonicalNode egraph enode = Control.do
-  (Ur mid, egraph) <- sharing egraph \egraph ->
-    lookup enode egraph
+  (Ur mid, egraph) <- sharing egraph $ lookup enode
   case mid of
     Just eid -> Control.pure (Ur eid, egraph)
     Nothing -> Control.do

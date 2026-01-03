@@ -152,7 +152,7 @@ withRaw ::
 {-# INLINE withRaw #-}
 withRaw f (EG egraph) =
   let %1 !(Ur !a, eg) = modifyLinearOnlyBO egraph \egraph -> Control.do
-        (r, egraph) <- sharing egraph \egraph -> f egraph
+        (r, egraph) <- sharing egraph f
         Control.pure (egraph `lseq` r)
    in unsafeLeak eg `lseq` a
 

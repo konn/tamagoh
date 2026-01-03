@@ -146,7 +146,7 @@ deriving via GLC.Generically MiniCaseResult instance Movable MiniCaseResult
 
 caseABUnion :: Mut α (EGraph () Expr) %1 -> BO α (Ur MiniCaseResult)
 caseABUnion egraph = Control.do
-  (Ur (RawString -> initEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
+  (Ur (RawString -> initEGraph), egraph) <- sharing egraph display
   (Ur aNode, Ur initAId, egraph) <- addTerm egraph a
   (Ur bNode, Ur initBId, egraph) <- addTerm egraph b
   (Ur abEqAtFst, egraph) <- sharing egraph \egraph -> Control.do
@@ -157,12 +157,12 @@ caseABUnion egraph = Control.do
     equivalent egraph aNode bNode
   (Ur lastAId, egraph) <- addNode egraph aNode
   (Ur lastBId, egraph) <- addNode egraph bNode
-  (Ur (RawString -> finalEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
+  (Ur (RawString -> finalEGraph), egraph) <- sharing egraph display
   egraph `lseq` Control.pure (Ur MiniCaseResult {..})
 
 caseA5Union :: Mut α (EGraph () Expr) %1 -> BO α (Ur MiniCaseResult)
 caseA5Union egraph = Control.do
-  (Ur (RawString -> initEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
+  (Ur (RawString -> initEGraph), egraph) <- sharing egraph display
   (Ur aNode, Ur initAId, egraph) <- addTerm egraph a
   (Ur bNode, Ur initBId, egraph) <- addTerm egraph 5
   (Ur abEqAtFst, egraph) <- sharing egraph \egraph -> Control.do

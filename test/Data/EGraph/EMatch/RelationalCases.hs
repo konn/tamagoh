@@ -70,5 +70,5 @@ mkCase1 n egraph = Control.do
   Ur fs <- Control.pure $ move fs
   (Ur _, egraph) <- merges fs egraph
   egraph <- rebuild egraph
-  uncurry (flip lseq) Control.<$> sharing egraph \egraph ->
-    ematch (PNode $ F (Metavar "a") $ PNode $ G (Metavar "a")) egraph
+  uncurry (flip lseq) Control.<$> sharing egraph do
+    ematch (PNode $ F (Metavar "a") $ PNode $ G (Metavar "a"))
