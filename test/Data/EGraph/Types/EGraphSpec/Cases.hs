@@ -146,9 +146,9 @@ deriving via GLC.Generically MiniCaseResult instance Movable MiniCaseResult
 
 caseABUnion :: Mut α (EGraph () Expr) %1 -> BO α (Ur MiniCaseResult)
 caseABUnion egraph = Control.do
-  (Ur (RawString -> initEGraph), egraph) <- sharing egraph display
-  (Ur aNode, Ur initAId, egraph) <- addTerm egraph a
-  (Ur bNode, Ur initBId, egraph) <- addTerm egraph b
+  (Ur (RawString -> initEGraph), egraph) <- display <$~ egraph
+  (Ur aNode, Ur initAId, egraph) <- addTerm a egraph
+  (Ur bNode, Ur initBId, egraph) <- addTerm b egraph
   (Ur abEqAtFst, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph aNode bNode
   (Ur (P.fmap getMergedId -> unionedAorBId), egraph) <- merge initAId initBId egraph
@@ -157,14 +157,14 @@ caseABUnion egraph = Control.do
     equivalent egraph aNode bNode
   (Ur lastAId, egraph) <- addNode egraph aNode
   (Ur lastBId, egraph) <- addNode egraph bNode
-  (Ur (RawString -> finalEGraph), egraph) <- sharing egraph display
+  (Ur (RawString -> finalEGraph), egraph) <- display <$~ egraph
   egraph `lseq` Control.pure (Ur MiniCaseResult {..})
 
 caseA5Union :: Mut α (EGraph () Expr) %1 -> BO α (Ur MiniCaseResult)
 caseA5Union egraph = Control.do
-  (Ur (RawString -> initEGraph), egraph) <- sharing egraph display
-  (Ur aNode, Ur initAId, egraph) <- addTerm egraph a
-  (Ur bNode, Ur initBId, egraph) <- addTerm egraph 5
+  (Ur (RawString -> initEGraph), egraph) <- display <$~ egraph
+  (Ur aNode, Ur initAId, egraph) <- addTerm a egraph
+  (Ur bNode, Ur initBId, egraph) <- addTerm 5 egraph
   (Ur abEqAtFst, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph aNode bNode
   (Ur (P.fmap getMergedId -> unionedAorBId), egraph) <- merge initAId initBId egraph
@@ -179,8 +179,8 @@ caseA5Union egraph = Control.do
 caseABvsAC :: Mut α (EGraph () Expr) %1 -> BO α (Ur Case1Result)
 caseABvsAC egraph = Control.do
   (Ur (RawString -> initEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
-  (Ur abNode, Ur initABId, egraph) <- addTerm egraph $ a + b
-  (Ur acNode, Ur initACId, egraph) <- addTerm egraph $ a + c
+  (Ur abNode, Ur initABId, egraph) <- addTerm (a + b) egraph
+  (Ur acNode, Ur initACId, egraph) <- addTerm (a + c) egraph
   (Ur abacEqAtFirst, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph abNode acNode
   (Ur initAId, egraph) <- addNode egraph (ENode (Var "a"))
@@ -196,8 +196,8 @@ caseABvsAC egraph = Control.do
 caseABvsA5 :: Mut α (EGraph () Expr) %1 -> BO α (Ur Case1Result)
 caseABvsA5 egraph = Control.do
   (Ur (RawString -> initEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
-  (Ur abNode, Ur initABId, egraph) <- addTerm egraph $ a + b
-  (Ur acNode, Ur initACId, egraph) <- addTerm egraph $ a + 5
+  (Ur abNode, Ur initABId, egraph) <- addTerm (a + b) egraph
+  (Ur acNode, Ur initACId, egraph) <- addTerm (a + 5) egraph
   (Ur abacEqAtFirst, egraph) <- sharing egraph \egraph -> Control.do
     equivalent egraph abNode acNode
   (Ur initAId, egraph) <- addNode egraph (ENode (Var "a"))

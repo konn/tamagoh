@@ -24,7 +24,9 @@ module Data.EGraph.Types.EGraph (
   new,
   find,
   addTerm,
+  getAnalysis,
   lookup,
+  lookupTerm,
   lookupEClass,
   unsafeFind,
   canonicalize,
@@ -86,10 +88,10 @@ getOriginalNode egraph eid =
 
 addTerm ::
   (Analysis l d, Hashable1 l, Movable1 l) =>
-  Mut α (EGraph d l) %1 ->
   Term l ->
+  Mut α (EGraph d l) %1 ->
   BO α (Ur (ENode l), Ur EClassId, Mut α (EGraph d l))
-addTerm egraph term = Control.do
+addTerm term egraph = Control.do
   (Ur node, egraph) <-
     flip runStateT egraph $
       runUrT $
@@ -97,11 +99,11 @@ addTerm egraph term = Control.do
           ( \nodes ->
               ENode
                 P.<$> P.traverse
-                  (\node -> UrT $ StateT \egraph -> addCanonicalNode egraph node)
+                  (\node -> UrT $ StateT $ addCanonicalNode node)
                   nodes
           )
           term
-  (Ur eid, egraph) <- addCanonicalNode egraph node
+  (Ur eid, egraph) <- addCanonicalNode node egraph
   Control.pure (Ur node, Ur eid, egraph)
 
 new :: forall d l. (Hashable1 l) => Linearly %1 -> EGraph d l
@@ -123,6 +125,29 @@ lookup enode egraph =
   share egraph & \(Ur egraph) -> runUrT $ runMaybeT do
     !enode <- MaybeT $ UrT (canonicalize enode egraph)
     MaybeT $ UrT $ move . Data.fmap copy Control.<$> HMB.lookup enode (egraph .# #hashcons)
+
+lookupTerm ::
+  (P.Traversable l, Hashable1 l) =>
+  Term l ->
+  Borrow bk α (EGraph d l) %m ->
+  BO α (Ur (Maybe EClassId))
+lookupTerm term egraph =
+  share egraph & \(Ur egraph) -> Control.do
+    let go term =
+          foldFixM
+            (\t -> MaybeT $ UrT (lookup (ENode t) egraph))
+            term
+    runUrT $ runMaybeT (go term)
+
+getAnalysis ::
+  (Copyable d) =>
+  EClassId ->
+  Borrow k α (EGraph d l) %m ->
+  BO α (Ur (Maybe d))
+getAnalysis eid egraph =
+  share egraph & \(Ur egraph) -> Control.do
+    let %1 clss = egraph .# #classes
+    EC.lookupAnalysis clss eid
 
 lookupEClass ::
   (Movable1 l) =>
@@ -151,6 +176,12 @@ instance (P.Traversable l, Hashable1 l) => Equatable l (ENode l) where
   equivalent egraph enode1 enode2 = Control.do
     Ur meid1 <- lookup enode1 egraph
     Ur meid2 <- lookup enode2 egraph
+    Control.pure $ Ur $ (P.==) P.<$> meid1 P.<*> meid2
+
+instance (P.Traversable l, Hashable1 l) => Equatable l (Term l) where
+  equivalent egraph term1 term2 = Control.do
+    Ur meid1 <- lookupTerm term1 egraph
+    Ur meid2 <- lookupTerm term2 egraph
     Control.pure $ Ur $ (P.==) P.<$> meid1 P.<*> meid2
 
 canonicalize ::
@@ -212,21 +243,22 @@ addNode ::
   ENode l ->
   BO α (Ur (Maybe EClassId), Mut α (EGraph d l))
 addNode egraph node = Control.do
-  (node, egraph) <- sharing egraph $ canonicalize node
+  (node, egraph) <- canonicalize node <$~ egraph
   case node of
     Ur Nothing -> Control.pure (Ur Nothing, egraph)
     Ur (Just enode) ->
-      Bi.first (Ur.lift Just) Control.<$> addCanonicalNode egraph enode
+      Bi.first (Ur.lift Just) Control.<$> addCanonicalNode enode egraph
 
 addCanonicalNode ::
   (Hashable1 l, Movable1 l, Analysis l d) =>
-  Mut α (EGraph d l) %1 ->
   ENode l ->
+  Mut α (EGraph d l) %1 ->
   BO α (Ur EClassId, Mut α (EGraph d l))
-addCanonicalNode egraph enode = Control.do
-  (Ur mid, egraph) <- sharing egraph $ lookup enode
+addCanonicalNode enode egraph = Control.do
+  (Ur mid, egraph) <- lookup enode <$~ egraph
   case mid of
-    Just eid -> Control.pure (Ur eid, egraph)
+    Just eid -> Contro.do
+      Control.pure (Ur eid, egraph)
     Nothing -> Control.do
       (Ur eid, egraph) <- reborrowing egraph \egraph -> Control.do
         (eid, uf) <- UFB.fresh (egraph .# #unionFind)
@@ -235,12 +267,12 @@ addCanonicalNode egraph enode = Control.do
         (Ur !d, egraph) <- sharing egraph $ unsafeMakeAnalyzeNode enode
         (Ur _, classes) <- EC.insertIfNew eid enode d $ egraph .# #classes
         Control.pure $ consume classes
-      egraph <- modifyAnalysis eid egraph
       egraph <- reborrowing_ egraph \egraph -> Control.do
         Control.void $ HMB.insert enode eid (egraph .# #hashcons)
       egraph <- reborrowing_ egraph \egraph -> Control.do
         !dic <- HMB.insert eid enode (egraph .# #nodes)
         Control.pure $! consume dic
+      egraph <- modifyAnalysis eid <%= egraph
 
       Control.pure (Ur eid, egraph)
 
@@ -367,7 +399,7 @@ repair egraph eid parents = Control.do
   egraph <- forRebor_ egraph parents $ \egraph (Ur (p_node, p_class)) -> Control.do
     egraph <- reborrowing_ egraph \egraph ->
       void $ HMB.delete p_node (egraph .# #hashcons)
-    (Ur (fromJust -> p_node), egraph) <- sharing egraph $ canonicalize p_node
+    (Ur (fromJust -> p_node), egraph) <- canonicalize p_node <$~ egraph
     (Ur p_class, egraph) <- sharing egraph \egraph ->
       Data.fmap (fromMaybe (error "EGraph.repair: find failed")) Control.<$> find egraph p_class
     void $ HMB.insert p_node p_class (egraph .# #hashcons)
@@ -378,7 +410,7 @@ repair egraph eid parents = Control.do
     (egraph, newPs) <- forRebor2_ egraph newPs parents $
       \egraph newPs (Ur (p_node, p_class)) ->
         Control.do
-          (Ur p_node, egraph) <- sharing egraph $ canonicalize p_node
+          (Ur p_node, egraph) <- canonicalize p_node <$~ egraph
           (mem, newPs) <- sharing newPs \newPs ->
             Data.fmap copy Control.<$> HMB.lookup (fromJust p_node) newPs
           case mem of
@@ -387,7 +419,7 @@ repair egraph eid parents = Control.do
                 void $ merge p_class class' egraph
             Nothing -> Control.pure $ consume egraph
           Control.pure $ consume newPs
-    egraph <- newPs `lseq` modifyAnalysis eid egraph
+    egraph <- newPs `lseq` reborrowing_ egraph (modifyAnalysis eid)
     -- Rebuild analysis after modification
     (Ur ps, egraph) <- sharing egraph \eg ->
       EC.parents (eg .# #classes) eid

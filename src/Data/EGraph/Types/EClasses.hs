@@ -182,7 +182,7 @@ insertIfNew ::
   Mut α (EClasses d l) %1 ->
   BO α (Ur Bool, Mut α (EClasses d l))
 insertIfNew eid enode analysis clss = Control.do
-  (Ur mem, clss) <- sharing clss $ member eid
+  (Ur mem, clss) <- member eid <$~ clss
   if mem
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
@@ -206,8 +206,8 @@ merge ::
   Mut α (EClasses d l) %1 ->
   BO α (Ur Bool, Mut α (EClasses d l))
 merge eid1 eid2 uf clss = Control.do
-  (Ur mem1, clss) <- sharing clss $ member eid1
-  (Ur mem2, clss) <- sharing clss $ member eid2
+  (Ur mem1, clss) <- member eid1 <$~ clss
+  (Ur mem2, clss) <- member eid2 <$~ clss
   if not mem1 || not mem2
     then Control.pure (Ur False, clss)
     else (Ur True,) Control.<$> unsafeMerge eid1 eid2 uf clss

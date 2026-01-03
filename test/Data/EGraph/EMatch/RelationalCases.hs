@@ -54,7 +54,7 @@ mkCase1 :: Int -> Mut α (EGraph () Lang1) %1 -> BO α (Ur [(EClassId, Substitut
 mkCase1 n egraph = Control.do
   (ns, egraph) <- forRebor egraph (NE.fromList [1 .. n]) \egraph i ->
     move i & \(Ur i) -> Control.do
-      (Ur _, eid, egraph) <- addTerm egraph $ intT i
+      (Ur _, eid, egraph) <- addTerm (intT i) egraph
       Control.pure $ egraph `lseq` eid
   Ur ns <- Control.pure $ move ns
   (gs, egraph) <- forRebor egraph ns \egraph (Ur eid) -> Control.do

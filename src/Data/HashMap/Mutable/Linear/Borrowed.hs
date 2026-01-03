@@ -91,7 +91,7 @@ delete key dic = Control.do
       ( \dic ->
           Control.fmap swapTuple $
             flip runStateT Nothing $
-              Raw.alterF (\may -> StateT \s -> Control.pure (Unsafe.toLinear Ur s, may)) key dic
+              Raw.alterF (\may -> StateT \ !s -> Control.pure (Unsafe.toLinear Ur s, may)) key dic
       )
       (coerceBor dic)
   Control.pure (mval, recoerceBor dic)

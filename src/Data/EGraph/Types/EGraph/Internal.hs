@@ -93,11 +93,11 @@ In addition to 'Semilattice' laws, it must satisfy the following laws:
 -}
 class (P.Traversable l, Semilattice d, Copyable d, Movable d) => Analysis l d where
   makeAnalysis :: l d -> d
-  modifyAnalysis :: EClassId -> Mut α (EGraph d l) %1 -> BO α (Mut α (EGraph d l))
+  modifyAnalysis :: EClassId -> Mut α (EGraph d l) %1 -> BO α ()
+  modifyAnalysis = const $ Control.pure . consume
 
 instance (P.Traversable l) => Analysis l () where
   makeAnalysis _ = ()
-  modifyAnalysis _ egraph = Control.pure egraph
 
 instance LinearOnly (EGraph d l) where
   linearOnly = UnsafeLinearOnly

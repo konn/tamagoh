@@ -52,7 +52,6 @@ import Control.Functor.Linear (StateT (..), evalStateT)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure (BO, Linearly, Mut, Share, linearly, modifyLinearOnlyBO, modifyLinearOnlyBO_, sharing)
 import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
-import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.EGraph.EMatch.Relational.Database (HasDatabase)
 import Data.EGraph.Saturation hiding (saturate)
 import Data.EGraph.Saturation qualified as Raw
@@ -61,7 +60,6 @@ import Data.EGraph.Types.EGraph (Analysis, Term)
 import Data.EGraph.Types.EGraph qualified as Raw
 import Data.EGraph.Types.Language (Language)
 import Data.EGraph.Types.Pattern (Pattern (..))
-import Data.Fix (foldFixM)
 import Data.Foldable (for_)
 import Data.Functor.Classes (Show1)
 import Data.Functor.Linear qualified as PL
@@ -104,7 +102,10 @@ empty :: (Hashable1 l) => EGraph d l
 {-# INLINE empty #-}
 empty = unur (linearly \l -> Unsafe.toLinear (Ur . EG) (Raw.new l))
 
-fromList :: (Analysis l d, Hashable1 l, Movable1 l) => [Raw.Term l] -> EGraph d l
+fromList ::
+  forall d l.
+  (Analysis l d, Hashable1 l, Movable1 l) =>
+  [Raw.Term l] -> EGraph d l
 {-# INLINE fromList #-}
 fromList terms = unur PL.$ linearly \l ->
   Unsafe.toLinear (Ur . EG) PL.$
@@ -112,7 +113,7 @@ fromList terms = unur PL.$ linearly \l ->
       PL.flip evalStateT egraph PL.$ Control.fmap unur PL.$ runUrT do
         for_ terms \term ->
           UrT $ StateT \egraph -> Control.do
-            (Ur _, Ur _, egraph) <- Raw.addTerm egraph term
+            (Ur _, Ur _, egraph) <- Raw.addTerm term egraph
             Control.pure (Ur (), egraph)
 
 -- | _O(1)_. Freezes a mutable EGraph into an immutable one.
@@ -187,15 +188,7 @@ lookupTerm ::
   EGraph d l ->
   Maybe EClassId
 {-# INLINE lookupTerm #-}
-lookupTerm t =
-  withRaw
-    ( \egraph -> Control.do
-        let go term =
-              foldFixM
-                (\t -> MaybeT $ UrT (Raw.lookup (ENode t) egraph))
-                term
-        runUrT PL.$ runMaybeT P.$ go t
-    )
+lookupTerm t = withRaw (Raw.lookupTerm t)
 
 saturate ::
   (Language l, Show1 l, Hashable v, Show v, Analysis l d) =>

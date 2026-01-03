@@ -14,15 +14,21 @@
 
 module Data.EGraph.ImmutableSpec (module Data.EGraph.ImmutableSpec) where
 
+import Algebra.Semilattice
+import Control.Exception (throwIO)
 import Control.Functor.Linear qualified as Control
+import Control.Monad.Borrow.Pure (Copyable, (<$~))
 import Data.EGraph.Immutable
 import Data.EGraph.Types.EGraph qualified as MEG
+import Data.EGraph.Types.EGraph qualified as Raw
 import Data.EGraph.Types.Language (deriveLanguage)
 import Data.Hashable (Hashable)
 import GHC.Generics hiding ((:*:))
-import Prelude.Linear (Consumable (..), Ur (..))
+import Generics.Linear.TH qualified as LG
+import Prelude.Linear (Consumable (..), Dupable, Movable, Ur (..))
 import Test.Tasty
 import Test.Tasty.HUnit
+import Text.Show.Borrowed (AsCopyableShow (..), Display)
 import Prelude hiding (lookup)
 
 data Expr a = a :+ a | a :* a | Lit Int | Var String
@@ -88,8 +94,8 @@ test_saturate =
         let Ur graph =
               modify
                 ( \eg -> Control.do
-                    (Ur _, Ur _, eg) <- MEG.addTerm eg lhs
-                    (Ur _, Ur _, eg) <- MEG.addTerm eg rhs
+                    (Ur _, Ur _, eg) <- MEG.addTerm lhs eg
+                    (Ur _, Ur _, eg) <- MEG.addTerm rhs eg
                     Control.pure (consume eg)
                 )
                 graph1
@@ -120,7 +126,7 @@ test_saturate =
         let Ur graph =
               modify
                 ( \eg -> Control.do
-                    (Ur _, Ur _, eg) <- MEG.addTerm eg lhs
+                    (Ur _, Ur _, eg) <- MEG.addTerm lhs eg
                     Control.pure (consume eg)
                 )
                 graph1
@@ -145,3 +151,78 @@ test_saturate =
     a = var "a"
     b = var "b"
     c = var "c"
+
+newtype ConstantFolding = ConstantFolding {constant :: Maybe Int}
+  deriving (Eq, Show, Generic)
+
+LG.deriveGeneric ''ConstantFolding
+
+deriving via Generically ConstantFolding instance Copyable ConstantFolding
+
+deriving via Generically ConstantFolding instance Consumable ConstantFolding
+
+deriving via Generically ConstantFolding instance Dupable ConstantFolding
+
+deriving via Generically ConstantFolding instance Movable ConstantFolding
+
+deriving via
+  AsCopyableShow ConstantFolding
+  instance
+    Display ConstantFolding
+
+instance Semilattice ConstantFolding where
+  ConstantFolding Nothing /\ ConstantFolding c = ConstantFolding c
+  ConstantFolding c /\ ConstantFolding Nothing = ConstantFolding c
+  ConstantFolding (Just x) /\ ConstantFolding (Just y)
+    | x == y = ConstantFolding (Just x)
+    | otherwise = ConstantFolding Nothing
+
+instance Analysis Expr ConstantFolding where
+  makeAnalysis :: Expr ConstantFolding -> ConstantFolding
+  makeAnalysis (Lit n) = ConstantFolding (Just n)
+  makeAnalysis Var {} = ConstantFolding Nothing
+  makeAnalysis (ConstantFolding l :+ ConstantFolding r) =
+    ConstantFolding $ (+) <$> l <*> r
+  makeAnalysis (ConstantFolding l :* ConstantFolding r) =
+    ConstantFolding $ (*) <$> l <*> r
+
+  modifyAnalysis eid egraph = Control.do
+    (Ur anal, egraph) <- Raw.getAnalysis eid <$~ egraph
+    case constant =<< anal of
+      Nothing -> Control.pure (consume egraph)
+      Just v -> Control.do
+        (Ur _, Ur eid', egraph) <- Raw.addTerm (wrapTerm $ Lit v) egraph
+        if eid == eid'
+          then Control.pure (consume egraph)
+          else Control.void (Raw.unsafeMerge eid eid' egraph)
+
+graphConstFold :: EGraph ConstantFolding Expr
+graphConstFold = empty
+
+test_constantFolding :: TestTree
+test_constantFolding =
+  testGroup
+    "saturation with constant folding"
+    [ testCase "1 + 1 == 2" do
+        let lhs = 1 + 1 :: Term Expr
+            rhs = 2 :: Term Expr
+            graph = fromList @ConstantFolding [lhs]
+        graph' <- either throwIO pure $ saturate SaturationConfig {maxIterations = Nothing} ringRules graph
+        let lid = lookupTerm lhs graph'
+        let rid = lookupTerm rhs graph'
+        putStrLn $ "LHS EClassId: " <> show lid
+        putStrLn $ "RHS EClassId: " <> show rid
+        let eqv = equivalent graph' lhs rhs
+        assertBool ("Expected to be equal, but got: " <> show eqv) (eqv == Just True)
+    , testCase "(a + 2) * 5 == 10 + 5 * a" do
+        let lhs = (var "a" + 2) * 5
+            rhs = 10 + 5 * var "a"
+            graph = fromList @ConstantFolding [lhs]
+        graph' <- either throwIO pure $ saturate SaturationConfig {maxIterations = Nothing} ringRules graph
+        let lid = lookupTerm lhs graph'
+        let rid = lookupTerm rhs graph'
+        putStrLn $ "LHS EClassId: " <> show lid
+        putStrLn $ "RHS EClassId: " <> show rid
+        let eqv = equivalent graph' lhs rhs
+        assertBool ("Expected to be equal, but got: " <> show eqv) (eqv == Just True)
+    ]
