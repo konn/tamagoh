@@ -84,7 +84,7 @@ instance (Dupable v) => Dupable (HashMap k v) where
     (HM ref, HM $ Ref.new hm' lin)
 
 toBorrowList ::
-  Borrow bk α (HashMap k v) %1 ->
+  Borrow bk α (HashMap k v) %m ->
   BO α [(Ur k, (Borrow bk α v))]
 toBorrowList ref =
   share ref & \(Ur dic) -> Control.do

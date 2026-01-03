@@ -20,6 +20,7 @@
 module Data.EGraph.Types.EClasses (
   EClasses (),
   EClass (),
+  lookupAnalysis,
   new,
   nodes,
   delete,
@@ -33,15 +34,17 @@ module Data.EGraph.Types.EClasses (
   unsafeMerge,
 ) where
 
+import Algebra.Semilattice
 import Control.Functor.Linear (void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
+import Data.EGraph.Types.EClasses.Internal
+import Data.EGraph.Types.EGraph.Internal (Analysis (..))
 import Data.EGraph.Types.ENode
 import Data.Foldable (Foldable)
-import Data.Functor.Classes (Show1)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
@@ -50,75 +53,60 @@ import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe.Linear
-import Data.Set.Mutable.Linear.Borrowed (Set)
+import Data.Ref.Linear (freeRef)
+import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
 import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.UnionFind.Linear.Borrowed qualified as UF
-import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
-import GHC.Generics qualified as GHC
-import Generics.Linear.TH (deriveGeneric)
+import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear
-import Prelude.Linear.Internal.Generically
-import Text.Show.Borrowed (Display)
 import Unsafe.Linear qualified as Unsafe
 
-newtype EClasses l = EClasses (Raw l)
-  deriving newtype (Consumable)
-
-type Raw l = HashMap EClassId (EClass l)
-
-new :: Linearly %1 -> EClasses l
-new = EClasses . HMB.empty 16
-
--- TODO: use (unsafe) indirection around Sets to reduce copying cost
-data EClass l
-  = EClass
-  { nodes :: !(Set (ENode l))
-  , parents :: !(HashMap (ENode l) EClassId)
-  }
-  deriving (GHC.Generic)
-
-deriveGeneric ''EClass
-
-deriving via Generically (EClass l) instance Consumable (EClass l)
-
-deriving via Generically (EClass l) instance Dupable (EClass l)
-
-deriving via Generically (EClass l) instance (Copyable1 l, Show1 l) => Display (EClass l)
-
-deriving newtype instance Dupable (EClasses l)
-
-deriving via Raw l instance (Copyable1 l, Show1 l) => Display (EClasses l)
+lookupAnalysis ::
+  forall bk α d l m.
+  (Copyable d) =>
+  Borrow bk α (EClasses d l) %m ->
+  EClassId ->
+  BO α (Ur (Maybe d))
+lookupAnalysis classes eid =
+  share classes & \(Ur classes) -> Control.do
+    let %1 clss = coerceLin classes :: Share α (Raw d l)
+    mclass <- HMB.lookup eid clss
+    case mclass of
+      Nothing -> Control.pure (Ur Nothing)
+      Just eclass -> Control.do
+        Ur a <- readSharedRef (eclass .# #analysis)
+        Control.pure (Ur (Just $ copy a))
 
 parents ::
-  forall bk α l.
-  Borrow bk α (EClasses l) %1 ->
+  forall bk α d l m.
+  Borrow bk α (EClasses d l) %m ->
   EClassId ->
   BO α (Ur [(ENode l, EClassId)])
 parents clss0 eid = Control.do
-  let %1 clss = coerceLin clss0 :: Borrow bk α (Raw l)
+  let %1 clss = coerceLin clss0 :: Borrow bk α (Raw d l)
   mclass <- HMB.lookup eid clss
   case mclass of
     Nothing -> Control.pure (Ur [])
     Just eclass -> HMB.toList (eclass .# #parents)
 
 delete ::
-  forall α l.
-  Mut α (EClasses l) %1 ->
+  forall α d l.
+  Mut α (EClasses d l) %1 ->
   EClassId ->
-  BO α (Maybe (EClass l), Mut α (EClasses l))
+  BO α (Maybe (EClass d l), Mut α (EClasses d l))
 delete clss eid = Control.do
-  let %1 !clss' = coerceLin clss :: Mut _ (Raw l)
+  let %1 !clss' = coerceLin clss :: Mut _ (Raw d l)
   Bi.second coerceLin Control.<$> HMB.delete eid clss'
 
 nodes ::
-  forall bk α l.
+  forall bk α d l m.
   (Movable1 l) =>
-  Borrow bk α (EClasses l) %1 ->
+  Borrow bk α (EClasses d l) %m ->
   EClassId ->
   BO α (Ur (Maybe (NonEmpty (ENode l))))
 nodes clss0 eid = Control.do
-  let %1 clss = coerceLin clss0 :: Borrow bk α (Raw l)
+  let %1 clss = coerceLin clss0 :: Borrow bk α (Raw d l)
   mclass <- HMB.lookup eid clss
   case mclass of
     Nothing -> Control.pure (Ur Nothing)
@@ -127,15 +115,15 @@ nodes clss0 eid = Control.do
       Control.pure $ Ur (NonEmpty.nonEmpty ns)
 
 setParents ::
-  forall l α.
+  forall d l α.
   (Hashable1 l) =>
   EClassId ->
   HashMap (ENode l) EClassId %1 ->
-  Mut α (EClasses l) %1 ->
-  BO α (Mut α (EClasses l))
+  Mut α (EClasses d l) %1 ->
+  BO α (Mut α (EClasses d l))
 setParents eid ps clss = Control.do
   reborrowing_ clss \clss0 -> Control.do
-    let %1 !clss = coerceLin clss0 :: Mut _ (Raw l)
+    let %1 !clss = coerceLin clss0 :: Mut _ (Raw d l)
     mclass <- HMB.lookup eid clss
     case mclass of
       Nothing -> Control.pure $ consume ps
@@ -146,8 +134,8 @@ addParent ::
   (Hashable1 l) =>
   EClassId ->
   ENode l ->
-  Mut α (EClass l) %1 ->
-  BO α (Mut α (EClass l))
+  Mut α (EClass d l) %1 ->
+  BO α (Mut α (EClass d l))
 addParent pid enode eclass = Control.do
   eclass <- reborrowing_ eclass \eclass -> Control.do
     let %1 !parentsSet = eclass .# #parents
@@ -155,33 +143,36 @@ addParent pid enode eclass = Control.do
   Control.pure eclass
 
 member ::
-  forall l α.
+  forall d l bk α m.
   EClassId ->
-  Share α (EClasses l) %1 ->
+  Borrow bk α (EClasses d l) %m ->
   BO α (Ur Bool)
-member eid clss0 = Control.do
-  let clss = coerceLin clss0 :: Share _ (Raw l)
-  HMB.member eid clss
+member eid clss0 =
+  share clss0 & \(Ur clss0) -> Control.do
+    let clss = coerceLin clss0 :: Share _ (Raw d l)
+    HMB.member eid clss
 
 {- |
 Returns 'True' if the node was newly inserted;
 otherwise no change will be made and returns 'False'.
 -}
 insertIfNew ::
-  forall l α.
-  (Hashable1 l, Foldable l) =>
+  forall d l α.
+  (Hashable1 l, Foldable l, Consumable d) =>
   EClassId ->
   ENode l ->
-  Mut α (EClasses l) %1 ->
-  BO α (Ur Bool, Mut α (EClasses l))
-insertIfNew eid enode clss = Control.do
-  (Ur mem, clss) <- sharing clss \clss -> member eid clss
+  d ->
+  Mut α (EClasses d l) %1 ->
+  BO α (Ur Bool, Mut α (EClasses d l))
+insertIfNew eid enode analysis clss = Control.do
+  (Ur mem, clss) <- sharing clss $ member eid
   if mem
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
-      nodes <- withLinearlyBO $ Control.pure . Set.singleton enode
-      parents <- withLinearlyBO $ Control.pure . HMB.empty 16
-      (mop, clss) <- HMB.insert eid EClass {parents, nodes} $ coerceLin clss
+      nodes <- asksLinearly $ Set.singleton enode
+      parents <- asksLinearly $ HMB.empty 16
+      analysis <- asksLinearly $ Ref.new analysis
+      (mop, clss) <- HMB.insert eid EClass {parents, nodes, analysis} $ coerceLin clss
       clss <- reborrowing_ clss \clss -> Control.do
         chss <-
           mapMaybe (\(Ur _, e) -> e)
@@ -191,27 +182,32 @@ insertIfNew eid enode clss = Control.do
 
 -- | Returns 'False' if the classes were already merged and no change will be made.
 merge ::
-  (Hashable1 l, Data.Functor l, Movable1 l, DistributesAlias l) =>
+  (Hashable1 l, Data.Functor l, Movable1 l, DistributesAlias l, Analysis l d) =>
   EClassId ->
   EClassId ->
   Share α UnionFind ->
-  Mut α (EClasses l) %1 ->
-  BO α (Ur Bool, Mut α (EClasses l))
+  Mut α (EClasses d l) %1 ->
+  BO α (Ur Bool, Mut α (EClasses d l))
 merge eid1 eid2 uf clss = Control.do
-  (Ur mem1, clss) <- sharing clss $ \clss -> member eid1 clss
-  (Ur mem2, clss) <- sharing clss $ \clss -> member eid2 clss
+  (Ur mem1, clss) <- sharing clss $ member eid1
+  (Ur mem2, clss) <- sharing clss $ member eid2
   if not mem1 || not mem2
     then Control.pure (Ur False, clss)
     else (Ur True,) Control.<$> unsafeMerge eid1 eid2 uf clss
 
 unsafeMerge ::
-  forall α l.
-  (Hashable1 l, Movable1 l, Data.Functor l, DistributesAlias l) =>
+  forall α d l.
+  ( Hashable1 l
+  , Movable1 l
+  , Data.Functor l
+  , DistributesAlias l
+  , Analysis l d
+  ) =>
   EClassId ->
   EClassId ->
   Share α UnionFind ->
-  Mut α (EClasses l) %1 ->
-  BO α (Mut α (EClasses l))
+  Mut α (EClasses d l) %1 ->
+  BO α (Mut α (EClasses d l))
 unsafeMerge eid1 eid2 uf clss
   | eid1 == eid2 = Control.pure clss
   | otherwise = Control.do
@@ -221,11 +217,12 @@ unsafeMerge eid1 eid2 uf clss
           then Control.pure (Ur eid1, Ur eid2)
           else Control.pure (Ur eid2, Ur eid1)
       (mr, clss) <- delete clss eid2
-      let %1 !EClass {nodes = !rnodes, parents = !rparents} = case mr of
+      let %1 !EClass {nodes = !rnodes, parents = !rparents, analysis = !ra} = case mr of
             Nothing -> error "EGraph.Types.EClasses.unsafeMerge: eid2 not found"
             Just eclass -> eclass
+      let %1 !(Ur ranalysis) = move $ freeRef ra
       clss <- reborrowing_ clss \clss0 -> Control.do
-        let clss = coerceLin clss0 :: Mut _ (Raw l)
+        let clss = coerceLin clss0 :: Mut _ (Raw d l)
         l <- HMB.lookup eid1 clss
         case l of
           Nothing -> Control.pure $ rnodes `lseq` rparents `lseq` ()
@@ -235,6 +232,8 @@ unsafeMerge eid1 eid2 uf clss
 
             (lparents, l) <- reborrowing l \l -> HMB.take_ (l .# #parents)
             let %1 !parents = HMB.union lparents rparents
+            l <- reborrowing_ l \l -> Control.do
+              void $ modifyRef (\la -> move la & \(Ur la) -> la /\ ranalysis) (l .# #analysis)
 
             l <- reborrowing_ l \l -> Control.do
               void $ Set.swap nodes (l .# #nodes)

@@ -144,7 +144,7 @@ deriving via AsMovable MiniCaseResult instance Dupable MiniCaseResult
 
 deriving via GLC.Generically MiniCaseResult instance Movable MiniCaseResult
 
-caseABUnion :: Mut α (EGraph Expr) %1 -> BO α (Ur MiniCaseResult)
+caseABUnion :: Mut α (EGraph () Expr) %1 -> BO α (Ur MiniCaseResult)
 caseABUnion egraph = Control.do
   (Ur (RawString -> initEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
   (Ur aNode, Ur initAId, egraph) <- addTerm egraph a
@@ -160,7 +160,7 @@ caseABUnion egraph = Control.do
   (Ur (RawString -> finalEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
   egraph `lseq` Control.pure (Ur MiniCaseResult {..})
 
-caseA5Union :: Mut α (EGraph Expr) %1 -> BO α (Ur MiniCaseResult)
+caseA5Union :: Mut α (EGraph () Expr) %1 -> BO α (Ur MiniCaseResult)
 caseA5Union egraph = Control.do
   (Ur (RawString -> initEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
   (Ur aNode, Ur initAId, egraph) <- addTerm egraph a
@@ -176,7 +176,7 @@ caseA5Union egraph = Control.do
   (Ur (RawString -> finalEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
   egraph `lseq` Control.pure (Ur MiniCaseResult {..})
 
-caseABvsAC :: Mut α (EGraph Expr) %1 -> BO α (Ur Case1Result)
+caseABvsAC :: Mut α (EGraph () Expr) %1 -> BO α (Ur Case1Result)
 caseABvsAC egraph = Control.do
   (Ur (RawString -> initEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
   (Ur abNode, Ur initABId, egraph) <- addTerm egraph $ a + b
@@ -193,7 +193,7 @@ caseABvsAC egraph = Control.do
   (Ur (RawString -> finalEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
   egraph `lseq` Control.pure (Ur Case1Result {..})
 
-caseABvsA5 :: Mut α (EGraph Expr) %1 -> BO α (Ur Case1Result)
+caseABvsA5 :: Mut α (EGraph () Expr) %1 -> BO α (Ur Case1Result)
 caseABvsA5 egraph = Control.do
   (Ur (RawString -> initEGraph), egraph) <- sharing egraph $ \egraph -> display egraph
   (Ur abNode, Ur initABId, egraph) <- addTerm egraph $ a + b

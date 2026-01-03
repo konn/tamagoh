@@ -8,6 +8,7 @@
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -38,91 +39,44 @@ module Data.EGraph.Types.EGraph (
   Term,
   Equatable (..),
   hashconsL,
+  Analysis (..),
 ) where
 
 import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Control.Monad.Borrow.Pure.Utils
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (coerce)
 import Data.Coerce.Directed (upcast)
 import Data.EGraph.Types.EClassId
-import Data.EGraph.Types.EClasses (EClasses, parents, setParents)
+import Data.EGraph.Types.EClasses (parents, setParents)
 import Data.EGraph.Types.EClasses qualified as EC
+import Data.EGraph.Types.EGraph.Internal
 import Data.EGraph.Types.ENode
 import Data.EGraph.Types.Term
 import Data.Fix (foldFixM)
 import Data.Foldable1 (Foldable1, foldlM1)
-import Data.Functor.Classes (Show1)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
-import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe (fromJust)
-import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
-import Data.UnionFind.Linear.Borrowed (UnionFind)
+import Data.Traversable qualified as P
 import Data.UnionFind.Linear.Borrowed qualified as UFB
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
-import GHC.Generics (Generic, Generically (..))
-import Generics.Linear.TH (deriveGeneric)
+import GHC.Generics (Generic)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
-import Text.Show.Borrowed (Display)
 import Prelude qualified as P
-
-{- | Invariant: all the 'EClassId's appearing somewhere in this structure
-  must be valid keys in the 'unionFind' field.
--}
-data EGraph l = EGraph
-  { unionFind :: !UnionFind
-  -- ^ A union-find structure on e-class ids.
-  , classes :: !(EClasses l)
-  {- ^ A mapping from EClassId to EClass.
-
-  Invariant: only the canonical EClassIds resides in the e-class.
-  -}
-  , nodes :: !(HashMap EClassId (ENode l))
-  {- ^ A map from eclass-id to the _original_ enode.
-  Associated e-node MUST BE canonical AFTER rebuilding.
-
-  NOTE: this field is not mentioned in the original egg paper,
-  but it is needed to recover the hashcons invariant on the nodes
-  that are being unioned.
-  -}
-  , hashcons :: !(HashMap (ENode l) EClassId)
-  {- ^
-  A map from _canonical_ enodes to eclass-ids.
-  Keys MUST BE canonical AFTER rebuilding.
-  -}
-  , worklist :: !(Set EClassId)
-  -- ^ A set of eclass-ids that need to be repaired.
-  }
-  deriving (Generic)
-
-deriveGeneric ''EGraph
-
-deriving via
-  Generically (EGraph l)
-  instance
-    (Copyable1 l, Show1 l) => Display (EGraph l)
-
-deriving via Generically (EGraph l) instance Consumable (EGraph l)
-
-deriving via Generically (EGraph l) instance (Movable1 l) => Dupable (EGraph l)
-
-hashconsL :: RecordLabel (EGraph l) "hashcons" (HashMap (ENode l) EClassId)
-hashconsL = #hashcons
 
 getOriginalNode ::
   (Copyable1 l, Movable1 l) =>
-  Borrow k α (EGraph l) %1 ->
+  Borrow k α (EGraph d l) %m ->
   EClassId ->
   BO α (Ur (Maybe (ENode l)))
 getOriginalNode egraph eid =
@@ -130,10 +84,10 @@ getOriginalNode egraph eid =
     maybe (Ur Nothing) (move . Just . copy) Control.<$> HMB.lookup eid (egraph .# #nodes)
 
 addTerm ::
-  (P.Traversable l, Hashable1 l, Movable1 l) =>
-  Mut α (EGraph l) %1 ->
+  (Analysis l d, Hashable1 l, Movable1 l) =>
+  Mut α (EGraph d l) %1 ->
   Term l ->
-  BO α (Ur (ENode l), Ur EClassId, Mut α (EGraph l))
+  BO α (Ur (ENode l), Ur EClassId, Mut α (EGraph d l))
 addTerm egraph term = Control.do
   (Ur node, egraph) <-
     flip runStateT egraph $
@@ -149,11 +103,7 @@ addTerm egraph term = Control.do
   (Ur eid, egraph) <- addCanonicalNode egraph node
   Control.pure (Ur node, Ur eid, egraph)
 
-instance LinearOnly (EGraph l) where
-  linearOnly :: LinearOnlyWitness (EGraph l)
-  linearOnly = UnsafeLinearOnly
-
-new :: (Hashable1 l) => Linearly %1 -> EGraph l
+new :: forall d l. (Hashable1 l) => Linearly %1 -> EGraph d l
 new = runReader Control.do
   unionFind <- asks UFB.empty
   classes <- asks $ EC.new
@@ -162,21 +112,21 @@ new = runReader Control.do
   worklist <- asks $ Set.empty 16
   Control.pure EGraph {..}
 
-find :: Borrow k α (EGraph l) %1 -> EClassId -> BO α (Ur (Maybe EClassId))
+find :: Borrow k α (EGraph d l) %m -> EClassId -> BO α (Ur (Maybe EClassId))
 find egraph (EClassId k) = Control.do
   let uf = egraph .# #unionFind
   coerceLin Data.<$> UFB.find k uf
 
-lookup :: (P.Traversable l, Hashable1 l) => ENode l -> Share α (EGraph l) %1 -> BO α (Ur (Maybe EClassId))
+lookup :: (P.Traversable l, Hashable1 l) => ENode l -> Borrow bk α (EGraph d l) %m -> BO α (Ur (Maybe EClassId))
 lookup enode egraph =
-  move egraph & \(Ur egraph) -> runUrT $ runMaybeT do
-    !enode <- MaybeT $ UrT (canonicalize egraph enode)
+  share egraph & \(Ur egraph) -> runUrT $ runMaybeT do
+    !enode <- MaybeT $ UrT (canonicalize enode egraph)
     MaybeT $ UrT $ move . Data.fmap copy Control.<$> HMB.lookup enode (egraph .# #hashcons)
 
 lookupEClass ::
   (Movable1 l) =>
   EClassId ->
-  Borrow k α (EGraph l) %1 ->
+  Borrow k α (EGraph d l) %m ->
   BO α (Ur (Maybe (NonEmpty (ENode l))))
 lookupEClass eid egraph =
   share egraph & \(Ur egraph) -> Control.do
@@ -188,7 +138,7 @@ lookupEClass eid egraph =
         EC.nodes clss eid
 
 class Equatable l a where
-  equivalent :: Share α (EGraph l) -> a -> a -> BO α (Ur (Maybe Bool))
+  equivalent :: Share α (EGraph d l) -> a -> a -> BO α (Ur (Maybe Bool))
 
 instance Equatable l EClassId where
   equivalent egraph eid1 eid2 = Control.do
@@ -202,9 +152,13 @@ instance (P.Traversable l, Hashable1 l) => Equatable l (ENode l) where
     Ur meid2 <- lookup enode2 egraph
     Control.pure $ Ur $ (P.==) P.<$> meid1 P.<*> meid2
 
-canonicalize :: (P.Traversable l) => Share α (EGraph l) %1 -> ENode l -> BO α (Ur (Maybe (ENode l)))
-canonicalize egraph (ENode node) =
-  move egraph & \(Ur egraph) -> Control.do
+canonicalize ::
+  (P.Traversable l) =>
+  ENode l ->
+  Borrow k α (EGraph d l) %m ->
+  BO α (Ur (Maybe (ENode l)))
+canonicalize (ENode node) egraph =
+  share egraph & \(Ur egraph) -> Control.do
     let uf = egraph .# #unionFind
     runUrT $
       coerce P.. P.sequenceA
@@ -217,9 +171,13 @@ canonicalize egraph (ENode node) =
           node
 
 -- | Canonicalize a node, without checking the existence of eclass ids.
-unsafeCanonicalize :: (P.Traversable l) => Share α (EGraph l) %1 -> ENode l -> BO α (Ur (ENode l))
-unsafeCanonicalize egraph (ENode node) =
-  move egraph & \(Ur egraph) -> Control.do
+unsafeCanonicalize ::
+  (P.Traversable l) =>
+  ENode l ->
+  Borrow bk α (EGraph d l) %m ->
+  BO α (Ur (ENode l))
+unsafeCanonicalize (ENode node) egraph =
+  share egraph & \(Ur egraph) -> Control.do
     let uf = egraph .# #unionFind
     runUrT $
       coerce
@@ -231,28 +189,39 @@ unsafeCanonicalize egraph (ENode node) =
           )
           node
 
-unsafeFind :: Borrow k α (EGraph f) %1 -> EClassId -> BO α (Ur EClassId)
+unsafeFind :: Borrow k α (EGraph d l) %m -> EClassId -> BO α (Ur EClassId)
 unsafeFind egraph (EClassId k) = Control.do
   let uf = egraph .# #unionFind
   coerceLin Data.<$> UFB.unsafeFind k uf
 
-addNode ::
-  (P.Traversable l, Hashable1 l, Movable1 l) =>
-  Mut α (EGraph l) %1 ->
+unsafeMakeAnalyzeNode ::
+  (Analysis l d) =>
   ENode l ->
-  BO α (Ur (Maybe EClassId), Mut α (EGraph l))
+  Borrow k α (EGraph d l) %m ->
+  BO α (Ur d)
+unsafeMakeAnalyzeNode enode egraph =
+  share egraph & \(Ur egraph) -> runUrT do
+    let ecs = egraph .# #classes
+    makeAnalysis P.<$> P.forM enode.unwrap \eid ->
+      fromJust P.<$> UrT (EC.lookupAnalysis ecs eid)
+
+addNode ::
+  (Analysis l d, Hashable1 l, Movable1 l) =>
+  Mut α (EGraph d l) %1 ->
+  ENode l ->
+  BO α (Ur (Maybe EClassId), Mut α (EGraph d l))
 addNode egraph node = Control.do
-  (node, egraph) <- sharing egraph \egraph -> canonicalize egraph node
+  (node, egraph) <- sharing egraph $ canonicalize node
   case node of
     Ur Nothing -> Control.pure (Ur Nothing, egraph)
     Ur (Just enode) ->
       Bi.first (Ur.lift Just) Control.<$> addCanonicalNode egraph enode
 
 addCanonicalNode ::
-  (P.Traversable l, Hashable1 l, Movable1 l) =>
-  Mut α (EGraph l) %1 ->
+  (Hashable1 l, Movable1 l, Analysis l d) =>
+  Mut α (EGraph d l) %1 ->
   ENode l ->
-  BO α (Ur EClassId, Mut α (EGraph l))
+  BO α (Ur EClassId, Mut α (EGraph d l))
 addCanonicalNode egraph enode = Control.do
   (Ur mid, egraph) <- sharing egraph \egraph ->
     lookup enode egraph
@@ -263,9 +232,10 @@ addCanonicalNode egraph enode = Control.do
         (eid, uf) <- UFB.fresh (egraph .# #unionFind)
         Control.pure $ uf `lseq` Ur.lift EClassId eid
       egraph <- reborrowing_ egraph \egraph -> Control.do
-        let %1 !classes = egraph .# #classes
-        (Ur _, classes) <- EC.insertIfNew eid enode classes
+        (Ur !d, egraph) <- sharing egraph $ unsafeMakeAnalyzeNode enode
+        (Ur _, classes) <- EC.insertIfNew eid enode d $ egraph .# #classes
         Control.pure $ consume classes
+      egraph <- modifyAnalysis eid egraph
       egraph <- reborrowing_ egraph \egraph -> Control.do
         Control.void $ HMB.insert enode eid (egraph .# #hashcons)
       egraph <- reborrowing_ egraph \egraph -> Control.do
@@ -291,8 +261,8 @@ merge ::
   (Copyable1 l, Movable1 l, Hashable1 l, P.Traversable l) =>
   EClassId ->
   EClassId ->
-  Mut α (EGraph l) %1 ->
-  BO α (Ur (Maybe MergeResult), Mut α (EGraph l))
+  Mut α (EGraph d l) %1 ->
+  BO α (Ur (Maybe MergeResult), Mut α (EGraph d l))
 merge eid1 eid2 egraph = Control.do
   (eidsThere, egraph) <- sharing egraph \egraph -> Control.do
     let uf = egraph .# #unionFind
@@ -309,8 +279,8 @@ unsafeMerge ::
   (Copyable1 l, Movable1 l, Hashable1 l, P.Traversable l) =>
   EClassId ->
   EClassId ->
-  Mut α (EGraph l) %1 ->
-  BO α (Ur MergeResult, Mut α (EGraph l))
+  Mut α (EGraph d l) %1 ->
+  BO α (Ur MergeResult, Mut α (EGraph d l))
 unsafeMerge eid1 eid2 egraph = Control.do
   (Ur (eid1, eid2), egraph) <- sharing egraph \egraph -> Control.do
     Ur eid1 <- unsafeFind egraph eid1
@@ -334,7 +304,7 @@ unsafeMerge eid1 eid2 egraph = Control.do
       egraph <- reborrowing_ egraph \egraph -> Control.do
         (Ur node, egraph) <- sharing egraph \egraph -> Control.do
           Ur node <- getOriginalNode egraph outdatedId
-          unsafeCanonicalize egraph $ fromJust node
+          unsafeCanonicalize (fromJust node) egraph
         void $ HMB.insert node eid (egraph .# #hashcons)
 
       egraph <- reborrowing_ egraph \egraph -> Control.do
@@ -346,21 +316,21 @@ unsafeMerge eid1 eid2 egraph = Control.do
 merges ::
   (Foldable1 t, P.Functor t, Copyable1 l, Movable1 l, Hashable1 l, P.Traversable l) =>
   t EClassId ->
-  Mut α (EGraph l) %1 ->
-  BO α (Ur (Maybe MergeResult), Mut α (EGraph l))
+  Mut α (EGraph d l) %1 ->
+  BO α (Ur (Maybe MergeResult), Mut α (EGraph d l))
 merges eids egraph = flip runStateT egraph $
   runUrT $
     runMaybeT do
       foldlM1 (\id1 id2 -> P.fmap (id1 P.<>) $ MaybeT $ UrT $ StateT $ merge (getMergedId id1) (getMergedId id2)) $ P.fmap AlreadyMerged eids
 
 rebuild ::
-  forall α l.
-  (Hashable1 l, Movable1 l, P.Traversable l, Copyable1 l) =>
-  Mut α (EGraph l) %1 ->
-  BO α (Mut α (EGraph l))
+  forall α d l.
+  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d) =>
+  Mut α (EGraph d l) %1 ->
+  BO α (Mut α (EGraph d l))
 rebuild = loop
   where
-    loop :: Mut α (EGraph l) %1 -> BO α (Mut α (EGraph l))
+    loop :: Mut α (EGraph d l) %1 -> BO α (Mut α (EGraph d l))
     loop egraph = Control.do
       (Ur isNull, egraph) <- sharing egraph \e -> Set.null $ e .# #worklist
       if isNull
@@ -387,8 +357,8 @@ rebuild = loop
           loop egraph
 
 repair ::
-  (Hashable1 l, Movable1 l, P.Traversable l, Copyable1 l) =>
-  Mut α (EGraph l) %1 ->
+  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d) =>
+  Mut α (EGraph d l) %1 ->
   EClassId ->
   [(ENode l, EClassId)] ->
   BO α ()
@@ -397,20 +367,18 @@ repair egraph eid parents = Control.do
   egraph <- forRebor_ egraph parents $ \egraph (Ur (p_node, p_class)) -> Control.do
     egraph <- reborrowing_ egraph \egraph ->
       void $ HMB.delete p_node (egraph .# #hashcons)
-    (Ur (fromJust -> p_node), egraph) <- sharing egraph \egraph ->
-      canonicalize egraph p_node
+    (Ur (fromJust -> p_node), egraph) <- sharing egraph $ canonicalize p_node
     (Ur p_class, egraph) <- sharing egraph \egraph ->
       Data.fmap (fromMaybe (error "EGraph.repair: find failed")) Control.<$> find egraph p_class
     void $ HMB.insert p_node p_class (egraph .# #hashcons)
   (newParents, egraph) <- reborrowing' egraph \egraph -> Control.do
-    (newPs, newPsLend) <- withLinearlyBO \lin -> Control.do
-      ps <- withLinearlyBO $ Control.pure . HMB.empty @(ENode _) @EClassId 16
+    (newPs, newPsLend) <- asksLinearlyM \lin -> Control.do
+      ps <- asksLinearly $ HMB.empty @(ENode _) @EClassId 16
       Control.pure $ borrow ps lin
     (egraph, newPs) <- forRebor2_ egraph newPs parents $
       \egraph newPs (Ur (p_node, p_class)) ->
         Control.do
-          (Ur p_node, egraph) <- sharing egraph $ \egraph ->
-            canonicalize egraph p_node
+          (Ur p_node, egraph) <- sharing egraph $ canonicalize p_node
           (mem, newPs) <- sharing newPs \newPs ->
             Data.fmap copy Control.<$> HMB.lookup (fromJust p_node) newPs
           case mem of
@@ -419,7 +387,8 @@ repair egraph eid parents = Control.do
                 void $ merge p_class class' egraph
             Nothing -> Control.pure $ consume egraph
           Control.pure $ consume newPs
-
-    egraph `lseq` newPs `lseq` Control.pure (\end -> reclaim newPsLend (upcast end))
+    egraph <- newPs `lseq` modifyAnalysis eid egraph
+    -- TODO
+    egraph `lseq` Control.pure (\end -> reclaim newPsLend (upcast end))
 
   void $ setParents eid newParents (egraph .# #classes)

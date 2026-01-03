@@ -6,6 +6,7 @@
 module Data.EGraph.Immutable (
   -- * Immutable EGraph
   EGraph (),
+  Analysis (..),
 
   -- * Construction
   empty,
@@ -56,7 +57,7 @@ import Data.EGraph.EMatch.Relational.Database (HasDatabase)
 import Data.EGraph.Saturation hiding (saturate)
 import Data.EGraph.Saturation qualified as Raw
 import Data.EGraph.Types (EClassId (..), ENode (..), unwrapTerm, wrapTerm)
-import Data.EGraph.Types.EGraph (Term)
+import Data.EGraph.Types.EGraph (Analysis, Term)
 import Data.EGraph.Types.EGraph qualified as Raw
 import Data.EGraph.Types.Language (Language)
 import Data.EGraph.Types.Pattern (Pattern (..))
@@ -71,18 +72,18 @@ import Data.Unrestricted.Linear (Ur (..), dup, lseq, move, unur)
 import Data.Unrestricted.Linear.Internal.UrT (UrT (..), runUrT)
 import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
 import GHC.Exts (Multiplicity (..))
-import Prelude.Linear (Movable)
+import Prelude.Linear (Dupable, Movable)
 import Prelude.Linear qualified as PL
 import Unsafe.Linear qualified as Unsafe
 import Prelude as P hiding (lookup)
 
-data EGraph l where
-  EG :: !(Raw.EGraph l) %'Many -> EGraph l
+data EGraph d l where
+  EG :: !(Raw.EGraph d l) %'Many -> EGraph d l
 
 new ::
-  (Hashable1 l, Movable1 l, Copyable1 l, Traversable l, Movable a) =>
-  (forall α. Mut α (Raw.EGraph l) %1 -> BO α a) %1 ->
-  Ur (EGraph l, a)
+  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Movable a) =>
+  (forall α. Mut α (Raw.EGraph d l) %1 -> BO α a) %1 ->
+  Ur (EGraph d l, a)
 {-# INLINE new #-}
 new f = linearly \lin ->
   let %1 !(Ur a, eg) = modifyLinearOnlyBO (Raw.new lin) (Control.fmap move PL.. f)
@@ -90,20 +91,20 @@ new f = linearly \lin ->
    in Ur (frozen, a)
 
 modify ::
-  (Hashable1 l, Movable1 l, Copyable1 l, Traversable l) =>
-  (forall α. Mut α (Raw.EGraph l) %1 -> BO α ()) %1 ->
-  EGraph l ->
-  Ur (EGraph l)
+  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d) =>
+  (forall α. Mut α (Raw.EGraph d l) %1 -> BO α ()) %1 ->
+  EGraph d l ->
+  Ur (EGraph d l)
 {-# INLINE modify #-}
 modify f egraph = linearly \lin ->
   let %1 !eg = modifyLinearOnlyBO_ (thaw egraph lin) f
    in freeze eg
 
-empty :: (Hashable1 l) => EGraph l
+empty :: (Hashable1 l) => EGraph d l
 {-# INLINE empty #-}
 empty = unur (linearly \l -> Unsafe.toLinear (Ur . EG) (Raw.new l))
 
-fromList :: (Hashable1 l, Traversable l, Movable1 l) => [Raw.Term l] -> EGraph l
+fromList :: (Analysis l d, Hashable1 l, Movable1 l) => [Raw.Term l] -> EGraph d l
 {-# INLINE fromList #-}
 fromList terms = unur PL.$ linearly \l ->
   Unsafe.toLinear (Ur . EG) PL.$
@@ -116,15 +117,15 @@ fromList terms = unur PL.$ linearly \l ->
 
 -- | _O(1)_. Freezes a mutable EGraph into an immutable one.
 freeze ::
-  (Hashable1 l, Movable1 l, Copyable1 l, Traversable l) =>
-  Raw.EGraph l %1 -> Ur (EGraph l)
+  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d) =>
+  Raw.EGraph d l %1 -> Ur (EGraph d l)
 {-# INLINE freeze #-}
 freeze egraph =
   let %1 !eg = modifyLinearOnlyBO_ egraph (PL.void PL.. Raw.rebuild)
    in Unsafe.toLinear (Ur . EG) eg
 
 -- | _O(n)_. Clones the immutable EGraph into a mutable one.
-thaw :: (Movable1 l) => EGraph l -> Linearly %1 -> Raw.EGraph l
+thaw :: (Movable1 l, Dupable d) => EGraph d l -> Linearly %1 -> Raw.EGraph d l
 {-# INLINE thaw #-}
 thaw egraph lin =
   let %1 !(!old, !new) = dup (unsafeThaw egraph lin)
@@ -136,17 +137,17 @@ NOTE: it is the caller's responsibility to ensure that the immutable EGraph
 is not used after the 'unsafeThaw' is called.
 -}
 unsafeThaw ::
-  EGraph l ->
+  EGraph d l ->
   Linearly %1 ->
-  Raw.EGraph l
+  Raw.EGraph d l
 {-# INLINE unsafeThaw #-}
 unsafeThaw (EG !egraph) lin = lin `lseq` egraph
 
 withRaw ::
   ( forall α.
-    Share α (Raw.EGraph l) -> BO α (Ur a)
+    Share α (Raw.EGraph d l) -> BO α (Ur a)
   ) %1 ->
-  EGraph l ->
+  EGraph d l ->
   a
 {-# INLINE withRaw #-}
 withRaw f (EG egraph) =
@@ -155,35 +156,35 @@ withRaw f (EG egraph) =
         Control.pure (egraph `lseq` r)
    in unsafeLeak eg `lseq` a
 
-find :: EClassId -> EGraph l -> Maybe EClassId
+find :: EClassId -> EGraph d l -> Maybe EClassId
 {-# INLINE find #-}
 find eid = withRaw (\egraph -> Raw.find egraph eid)
 
-lookupEClass :: (Movable1 l) => EClassId -> EGraph l -> Maybe (NonEmpty (ENode l))
+lookupEClass :: (Movable1 l) => EClassId -> EGraph d l -> Maybe (NonEmpty (ENode l))
 {-# INLINE lookupEClass #-}
 lookupEClass eid = withRaw (\egraph -> Raw.lookupEClass eid egraph)
 
 canonicalize ::
   (Traversable l) =>
-  ENode l -> EGraph l -> Maybe (ENode l)
+  ENode l -> EGraph d l -> Maybe (ENode l)
 {-# INLINE canonicalize #-}
-canonicalize node = withRaw (\egraph -> Raw.canonicalize egraph node)
+canonicalize node = withRaw (Raw.canonicalize node)
 
-equivalent :: (Raw.Equatable l a) => EGraph l -> a -> a -> Maybe Bool
+equivalent :: (Raw.Equatable l a) => EGraph d l -> a -> a -> Maybe Bool
 {-# INLINE equivalent #-}
 equivalent egraph a b = withRaw (\egraph -> Raw.equivalent egraph a b) egraph
 
 lookup ::
   (Hashable1 l, Traversable l) =>
-  ENode l -> EGraph l -> Maybe EClassId
+  ENode l -> EGraph d l -> Maybe EClassId
 {-# INLINE lookup #-}
 lookup node = withRaw (\egraph -> Raw.lookup node egraph)
 
 lookupTerm ::
-  forall l.
+  forall d l.
   (Hashable1 l, Traversable l) =>
   Term l ->
-  EGraph l ->
+  EGraph d l ->
   Maybe EClassId
 {-# INLINE lookupTerm #-}
 lookupTerm t =
@@ -197,11 +198,11 @@ lookupTerm t =
     )
 
 saturate ::
-  (Language l, Show1 l, Hashable v, Show v) =>
+  (Language l, Show1 l, Hashable v, Show v, Analysis l d) =>
   SaturationConfig ->
   [Rule l v] ->
-  EGraph l ->
-  Either (SaturationError l v) (EGraph l)
+  EGraph d l ->
+  Either (SaturationError l v) (EGraph d l)
 saturate cfg rules = do
   case traverse compileRule rules of
     Left err -> const $ Left err

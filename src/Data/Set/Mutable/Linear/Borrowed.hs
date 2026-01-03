@@ -83,7 +83,7 @@ inserts (k : ks) old = Control.do
 
 askRaw ::
   (Raw.Set k %1 -> (a, Raw.Set k)) %1 ->
-  Borrow bk α (Set k) %1 ->
+  Borrow bk α (Set k) %m ->
   BO α a
 askRaw f dic = case share dic of
   Ur dic -> Control.do
@@ -102,7 +102,7 @@ member ::
   BO α (Ur Bool)
 member key = askRaw (Raw.member key)
 
-toList :: Borrow bk α (Set k) %1 -> BO α [k]
+toList :: Borrow bk α (Set k) %m -> BO α [k]
 toList =
   askRaw_
     ( \(Raw.Set (RawHM.HashMap _ _ robinArr)) ->
@@ -117,11 +117,11 @@ toList =
 toListUnborrowed :: (Keyed k) => Set k %1 -> [k]
 toListUnborrowed (Set ref) = unur $ Raw.toList (freeRef ref)
 
-null :: (Keyed k) => Borrow bk α (Set k) %1 -> BO α (Ur Bool)
+null :: (Keyed k) => Borrow bk α (Set k) %m -> BO α (Ur Bool)
 {-# INLINE null #-}
 null set = askRaw (Bi.first (Data.fmap (== 0)) . Raw.size) set
 
-size :: (Keyed k) => Borrow bk α (Set k) %1 -> BO α (Ur Int)
+size :: (Keyed k) => Borrow bk α (Set k) %m -> BO α (Ur Int)
 {-# INLINE size #-}
 size = askRaw Raw.size
 
@@ -131,7 +131,7 @@ take set = Control.do
   Bi.second recoerceBor Control.<$> updateRef go (coerceBor set)
   where
     go :: Raw.Set k %1 -> BO α (Set k, Raw.Set k)
-    go s = withLinearlyBO \lin ->
+    go s = asksLinearlyM \lin ->
       dup lin & \(lin, lin') -> Control.do
         Control.pure (Set $ Ref.new s lin, Raw.emptyL 16 $ fromPB lin')
 
@@ -144,7 +144,7 @@ swap ::
   Set k %1 ->
   Mut α (Set k) %1 ->
   BO α (Set k, Mut α (Set k))
-swap keys dic = withLinearlyBO \lin -> Control.do
+swap keys dic = asksLinearlyM \lin -> Control.do
   Bi.second recoerceBor
     Control.<$> updateRef (\old -> Control.pure (Set $! Ref.new old lin, freeRef $ inner keys)) (coerceBor dic)
 

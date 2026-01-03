@@ -26,7 +26,7 @@ import Prelude.Linear
 
 withNewEGraph ::
   (Hashable1 l) =>
-  (forall α. Mut α (EGraph l) %1 -> BO α (Ur a)) %1 ->
+  (forall α. Mut α (EGraph () l) %1 -> BO α (Ur a)) %1 ->
   Ur a
 withNewEGraph f =
   linearly \lin -> DataFlow.do

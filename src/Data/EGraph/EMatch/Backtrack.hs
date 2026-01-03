@@ -32,23 +32,25 @@ import Data.Maybe (catMaybes, maybeToList)
 import Data.Unrestricted.Linear (Ur (..), UrT (..), runUrT)
 import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear ()
+import Prelude.Linear qualified as PL
 import Prelude as P
 
 ematchBacktrack ::
-  forall l v α.
+  forall d l bk v α m.
   (Movable1 l, Matchable l, Hashable v) =>
-  Share α (EGraph l) ->
+  Borrow bk α (EGraph d l) %m ->
   Pattern l v ->
   EClassId ->
   BO α (Ur [Substitution v])
-ematchBacktrack egraph = go [mempty]
+ematchBacktrack eg = share eg PL.& \(Ur eg) -> go eg [mempty]
   where
     go ::
+      Share α (EGraph d l) ->
       [Substitution v] ->
       Pattern l v ->
       EClassId ->
       BO α (Ur [Substitution v])
-    go subss pat eid =
+    go egraph subss pat eid =
       find egraph eid Control.>>= \case
         Ur Nothing -> Control.pure (Ur [])
         Ur (Just eid) -> runUrT do
@@ -79,7 +81,7 @@ ematchBacktrack egraph = go [mempty]
                   concat
                     <$> mapM
                       ( foldlM
-                          (\subss -> UrT . uncurry (go subss))
+                          (\subss -> UrT . uncurry (go egraph subss))
                           subss
                       )
                       matches

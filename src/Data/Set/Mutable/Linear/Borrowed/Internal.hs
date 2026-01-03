@@ -73,7 +73,7 @@ instance (Display k) => Display (Set k) where
         Control.<$> Data.mapM (\x -> move x & \(Ur x) -> displayPrec 0 x) lst
     Control.pure $ Ur $ showString "{" P.. lst P.. showString "}"
 
-toBorrowList :: Borrow bk α (Set k) %1 -> BO α [Borrow bk α k]
+toBorrowList :: Borrow bk α (Set k) %m -> BO α [Borrow bk α k]
 toBorrowList =
   askRaw_
     ( \(Raw.Set (RawHM.HashMap _ _ robinArr)) ->
@@ -86,7 +86,7 @@ toBorrowList =
 
 askRaw_ ::
   (Raw.Set k %1 -> a) %1 ->
-  Borrow bk α (Set k) %1 ->
+  Borrow bk α (Set k) %m ->
   BO α a
 askRaw_ f dic = case share dic of
   Ur dic -> Control.do

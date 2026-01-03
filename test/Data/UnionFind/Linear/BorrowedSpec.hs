@@ -24,7 +24,7 @@ test_union =
     "union"
     [ testCase "disjoint" do
         let Ur (bothJust, noneq) = linearly \l -> runBO l Control.do
-              uf0 <- withLinearlyBO (Control.pure PL.. empty)
+              uf0 <- asksLinearly empty
               let %1 !(uf, lend) = borrowLinearOnly uf0
               (Ur key1, uf) <- fresh uf
               (Ur key2, uf) <- fresh uf
@@ -39,7 +39,7 @@ test_union =
     , testCase "two unioned" do
         let (key1, key2, newKey, k1, k2) = linearly \l ->
               runBO l Control.do
-                uf0 <- withLinearlyBO (Control.pure PL.. empty)
+                uf0 <- asksLinearly empty
                 let %1 !(uf, lend) = borrowLinearOnly uf0
                 (Ur key1, uf) <- fresh uf
                 (Ur key2, uf) <- fresh uf
@@ -59,7 +59,7 @@ test_union =
     , testCase "two equal, one indep" do
         let ((key1, key2, key3), newKey, k1, k2, k3) = linearly \l ->
               runBO l Control.do
-                uf0 <- withLinearlyBO (Control.pure PL.. empty)
+                uf0 <- asksLinearly empty
                 let %1 !(uf, lend) = borrowLinearOnly uf0
                 (Ur key1, uf) <- fresh uf
                 (Ur key2, uf) <- fresh uf

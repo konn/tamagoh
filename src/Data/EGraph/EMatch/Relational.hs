@@ -41,7 +41,9 @@ import Prelude.Linear qualified as PL
 
 ematch ::
   (Hashable v, Show v, Show1 l, Traversable l, HasDatabase l, Movable1 l) =>
-  Pattern l v -> Borrow k α (EGraph l) %1 -> BO α (Ur [(EClassId, Substitution v)])
+  Pattern l v ->
+  Borrow k α (EGraph d l) %m ->
+  BO α (Ur [(EClassId, Substitution v)])
 ematch pat egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
     Ur db <- buildDatabase egraph

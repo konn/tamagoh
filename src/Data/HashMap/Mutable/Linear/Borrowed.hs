@@ -129,7 +129,7 @@ alterF f key dic = Control.do
 
 askRaw ::
   (Raw.HashMap k v %1 -> (a, Raw.HashMap k v)) %1 ->
-  Borrow bk α (HashMap k v) %1 ->
+  Borrow bk α (HashMap k v) %m ->
   BO α a
 askRaw f dic = case share dic of
   Ur !dic -> Control.do
@@ -140,13 +140,13 @@ askRaw f dic = case share dic of
       -- This leakage won't cause memory leak, because Lender will eventually free the whole block.
       (!res, !dic) -> unsafeLeak dic `lseq` Control.pure res
 
-size :: Borrow bk α (HashMap k v) %1 -> BO α (Ur Int)
+size :: Borrow bk α (HashMap k v) %m -> BO α (Ur Int)
 size = askRaw Raw.size
 
 lookup ::
   (Keyed k) =>
   k ->
-  Borrow bk α (HashMap k v) %1 ->
+  Borrow bk α (HashMap k v) %m ->
   BO α (Maybe (Borrow bk α v))
 lookup !key !dic =
   Data.fmap UnsafeAlias . unur Control.<$> askRaw (Raw.lookup key) dic
@@ -154,19 +154,19 @@ lookup !key !dic =
 lookups ::
   (Keyed k) =>
   [k] ->
-  Borrow bk α (HashMap k v) %1 ->
+  Borrow bk α (HashMap k v) %m ->
   BO α [(Ur k, (Maybe (Borrow bk α v)))]
 lookups keys0 = Unsafe.toLinear \ !dic -> Control.do
   let keys = P.map Ur $ IHS.toList $ IHS.fromList keys0
   Data.forM keys (\(Ur !key) -> lookup key dic Control.<&> \ !v -> (Ur key, v))
 
-member :: (Keyed k) => k -> Borrow bk α (HashMap k v) %1 -> BO α (Ur Bool)
+member :: (Keyed k) => k -> Borrow bk α (HashMap k v) %m -> BO α (Ur Bool)
 member key = askRaw (Raw.member key)
 
 askRaw_ ::
   (Movable a) =>
   (Raw.HashMap k v %1 -> a) %1 ->
-  Borrow bk α (HashMap k v) %1 ->
+  Borrow bk α (HashMap k v) %m ->
   BO α a
 {-# INLINE askRaw_ #-}
 askRaw_ f dic = case share dic of
@@ -177,7 +177,7 @@ askRaw_ f dic = case share dic of
 
 toList ::
   (Movable v) =>
-  Borrow bk α (HashMap k v) %1 -> BO α (Ur [(k, v)])
+  Borrow bk α (HashMap k v) %m -> BO α (Ur [(k, v)])
 toList =
   askRaw_ \(Raw.HashMap _ _ !robinArr) ->
     deepCloneArray' dupRobinVal robinArr & Unsafe.toLinear \(_, !robinArr) ->
@@ -193,7 +193,7 @@ swap ::
   HashMap k v %1 ->
   Mut α (HashMap k v) %1 ->
   BO α (HashMap k v, Mut α (HashMap k v))
-swap keys dic = withLinearlyBO \lin -> Control.do
+swap keys dic = asksLinearlyM \lin -> Control.do
   Bi.second recoerceBor
     Control.<$> updateRef (\ !old -> Control.pure (HM $ Ref.new old lin, freeRef $ inner keys)) (coerceBor dic)
 
@@ -203,7 +203,7 @@ take dic = Control.do
   Bi.second recoerceBor Control.<$> updateRef go (coerceBor dic)
   where
     go :: Raw.HashMap k v %1 -> BO α (HashMap k v, Raw.HashMap k v)
-    go s = withLinearlyBO \lin ->
+    go s = asksLinearlyM \lin ->
       dup lin & \(lin, lin') -> Control.do
         Control.pure (HM $! Ref.new s lin, Raw.emptyL 16 $! fromPB lin')
 

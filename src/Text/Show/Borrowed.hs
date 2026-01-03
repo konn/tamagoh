@@ -42,6 +42,18 @@ import Prelude qualified as P
 class Display a where
   displayPrec :: Int -> Share α a -> BO α (Ur ShowS)
 
+instance (Display a) => Display (Ref a) where
+  displayPrec d bor = Control.do
+    Ur bor <- readSharedRef bor
+    displayPrec d bor
+
+instance (Copyable a, Show a) => Display (Ur a) where
+  displayPrec d x =
+    Control.pure $
+      Ur $
+        showParen (d > 10) $
+          showString "Ur " P.. showsPrec 0 (unur $ copy x)
+
 display :: (Display a) => Share α a -> BO α (Ur String)
 display bor = Control.do
   Ur shown <- displayPrec 0 bor
@@ -199,3 +211,5 @@ instance (Display c) => GDisplay (GLC.K1 i c) where
   gdisplayPrec _ d bor = Control.do
     let UnsafeAlias (GLC.K1 c) = bor
     displayPrec d (UnsafeAlias c)
+
+deriving via AsCopyableShow () instance Display ()

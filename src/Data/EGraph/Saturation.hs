@@ -107,15 +107,15 @@ data SaturationConfig = SaturationConfig
   deriving (Show, Eq, Ord, Generic)
 
 saturate ::
-  forall l v α.
-  (Language l, Show1 l, Hashable v, Show v) =>
+  forall d l v α.
+  (Analysis l d, Language l, Show1 l, Hashable v, Show v) =>
   SaturationConfig ->
   [CompiledRule l v] ->
-  Mut α (EGraph l) %1 ->
-  BO α (Mut α (EGraph l))
+  Mut α (EGraph d l) %1 ->
+  BO α (Mut α (EGraph d l))
 saturate config rules = go (St.toStrict config.maxIterations)
   where
-    go :: St.Maybe Word -> Mut α (EGraph l) %1 -> BO α (Mut α (EGraph l))
+    go :: St.Maybe Word -> Mut α (EGraph d l) %1 -> BO α (Mut α (EGraph d l))
     go (St.Just 0) !egraph = Control.pure egraph
     go remaining !egraph = Control.do
       (Ur results, egraph) <- sharing egraph \egraph -> Control.do
@@ -138,13 +138,13 @@ saturate config rules = go (St.toStrict config.maxIterations)
         tell $! FML.fromList $ map (\(eid, subs) -> Ur (eid, subs, rule)) matches
 
     substitute ::
-      Mut α (EGraph l) %1 ->
+      Mut α (EGraph d l) %1 ->
       [Ur (EClassId, Substitution v, CompiledRule l v)] %1 ->
-      BO α (Bool, Mut α (EGraph l))
+      BO α (Bool, Mut α (EGraph d l))
     substitute egraph results = Control.do
       reborrowing' egraph \egraph -> Control.do
-        !(var, lend) <- withLinearlyBO \lin ->
-          Control.pure (borrowLinearOnly (Ref.new False lin))
+        !(var, lend) <- asksLinearly \lin ->
+          borrowLinearOnly (Ref.new False lin)
         (var, egraph) <- forRebor2_ var egraph results \var egraph (Ur (eid, subs, CompiledRule {..})) ->
           case substPattern subs rhs of
             Failure _ -> Control.pure (var `lseq` consume egraph)

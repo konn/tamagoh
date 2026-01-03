@@ -71,6 +71,7 @@ library
   hs-source-dirs: src
   -- cabal-gild: discover src --exclude=src/**/Internal.hs
   exposed-modules:
+    Algebra.Semilattice
     Control.Monad.Borrow.Pure.Freeze
     Control.Monad.Borrow.Pure.Orphans
     Control.Monad.Borrow.Pure.Utils
@@ -103,6 +104,8 @@ library
 
   -- cabal-gild: discover src --include=src/**/Internal.hs
   other-modules:
+    Data.EGraph.Types.EClasses.Internal
+    Data.EGraph.Types.EGraph.Internal
     Data.HashMap.Mutable.Linear.Borrowed.Internal
     Data.Set.Mutable.Linear.Borrowed.Internal
     Data.UnionFind.Linear.Borrowed.Internal

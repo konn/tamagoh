@@ -50,7 +50,7 @@ instance Num (Pattern Expr v) where
   abs _ = error "abs is not supported"
   signum _ = error "signum is not supported"
 
-graph1 :: EGraph Expr
+graph1 :: EGraph () Expr
 graph1 = empty
 
 ringRules :: [Rule Expr String]

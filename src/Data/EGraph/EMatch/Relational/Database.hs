@@ -48,7 +48,7 @@ import Prelude.Linear qualified as PL
 
 buildDatabase ::
   (HasDatabase l, Movable1 l, Traversable l) =>
-  Borrow k α (EGraph l) %1 ->
+  Borrow k α (EGraph d l) %m ->
   BO α (Ur (Database l))
 buildDatabase egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
@@ -57,7 +57,7 @@ buildDatabase egraph =
       Data.forM nodes \(enode, id) ->
         move (enode, id) PL.& \(Ur (enode, id)) ->
           (,)
-            Control.<$> (unur PL.. Ur.lift fromJust Control.<$> canonicalize egraph enode)
+            Control.<$> (unur PL.. Ur.lift fromJust Control.<$> canonicalize enode egraph)
             Control.<*> (unur Control.<$> unsafeFind egraph id)
     Control.pure PL.$
       Ur $

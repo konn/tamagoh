@@ -50,7 +50,7 @@ deriveLanguage ''Lang1
 intT :: Int -> Term Lang1
 intT i = wrapTerm $ I i
 
-mkCase1 :: Int -> Mut α (EGraph Lang1) %1 -> BO α (Ur [(EClassId, Substitution String)])
+mkCase1 :: Int -> Mut α (EGraph () Lang1) %1 -> BO α (Ur [(EClassId, Substitution String)])
 mkCase1 n egraph = Control.do
   (ns, egraph) <- forRebor egraph (NE.fromList [1 .. n]) \egraph i ->
     move i & \(Ur i) -> Control.do
