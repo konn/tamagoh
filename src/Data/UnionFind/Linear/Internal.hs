@@ -31,7 +31,10 @@ import Control.Monad.Borrow.Pure (Copyable)
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Data.Hashable (Hashable)
 import Data.Ord.Linear qualified as Linear
+import Data.Vector.Generic qualified as VG
+import Data.Vector.Generic.Mutable qualified as VGM
 import Data.Vector.Mutable.Linear.Unboxed (Vector)
+import Data.Vector.Unboxed qualified as U
 import Prelude.Linear hiding (Eq (..), Num (..), Ord (..), find, (+), (-))
 import Unsafe.Linear qualified as Unsafe
 import Prelude (Eq (..), Num (..), Ord (..))
@@ -52,7 +55,16 @@ newtype Key = Key {getKey :: Word}
     , Dupable
     , Movable
     , Copyable
+    , U.Unbox
     )
+
+newtype instance U.MVector s Key = MV_Key (U.MVector s Word)
+
+deriving newtype instance VGM.MVector U.MVector Key
+
+deriving newtype instance VG.Vector U.Vector Key
+
+newtype instance U.Vector Key = V_Key (U.Vector Word)
 
 instance Linear.Eq Key where
   (==) = Unsafe.coerce $ (Prelude.==) @Word
@@ -80,7 +92,7 @@ The structure maintains two unboxed vectors:
 All fields are strict to prevent space leaks.
 -}
 data UnionFind where
-  UnionFind :: !Word -> !(Vector Word) %1 -> !(Vector Word) %1 -> UnionFind
+  UnionFind :: !Word -> !(Vector Key) %1 -> !(Vector Word) %1 -> UnionFind
 
 instance Consumable UnionFind where
   -- TODO: stop leaking

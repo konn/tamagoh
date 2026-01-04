@@ -54,6 +54,7 @@ module Data.UnionFind.Linear (
 import Control.Functor.Linear (asks, runReader)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
+import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Coerce qualified
 import Data.Functor.Linear qualified as Data
 import Data.Linear.Witness.Compat (fromPB)
@@ -88,17 +89,16 @@ unsafeFindMut :: Key -> UnionFind %1 -> (Ur Key, UnionFind)
 unsafeFindMut x (UnionFind n parent rank) =
   findRoot x parent rank
   where
-    findRoot :: Key -> Vector Word %1 -> Vector Word %1 -> (Ur Key, UnionFind)
-    findRoot i p r =
-      Vector.get (keyToInt i) p & \(Ur parentI, p) ->
-        let parentKey = Key parentI
-         in if i == parentKey
-              then (Ur i, UnionFind n p r)
-              else
-                findRoot parentKey p r & \(Ur root, UnionFind _ p'' r') ->
-                  -- Path compression: make i point directly to root
-                  Vector.set (keyToInt i) (getKey root) p'' & \p''' ->
-                    (Ur root, UnionFind n p''' r')
+    findRoot :: Key -> Vector Key %1 -> Vector Word %1 -> (Ur Key, UnionFind)
+    findRoot i p r = DataFlow.do
+      (Ur parentKey, p) <- Vector.get (keyToInt i) p
+      if i == parentKey
+        then (Ur i, UnionFind n p r)
+        else DataFlow.do
+          (Ur root, UnionFind _ p r) <- findRoot parentKey p r
+          -- Path compression: make i point directly to root
+          p <- Vector.set (keyToInt i) root p
+          (Ur root, UnionFind n p r)
 
 {- | Find the representative (root) of the set containing the given element,
 with path compression for efficiency.
@@ -120,13 +120,12 @@ unsafeFind :: Key -> UnionFind %1 -> (Ur Key, UnionFind)
 unsafeFind x (UnionFind n parent rank) =
   findRoot x parent rank
   where
-    findRoot :: Key -> Vector Word %1 -> Vector Word %1 -> (Ur Key, UnionFind)
+    findRoot :: Key -> Vector Key %1 -> Vector Word %1 -> (Ur Key, UnionFind)
     findRoot i p r =
-      Vector.get (keyToInt i) p & \(Ur parentI, p) ->
-        let parentKey = Key parentI
-         in if i == parentKey
-              then (Ur i, UnionFind n p r)
-              else findRoot parentKey p r
+      Vector.get (keyToInt i) p & \(Ur parentKey, p) ->
+        if i == parentKey
+          then (Ur i, UnionFind n p r)
+          else findRoot parentKey p r
 
 {- | Find the representative (root) of the set containing the given element.
 Returns Nothing if the key is out of bounds.
@@ -153,25 +152,18 @@ unsafeUnion x y uf =
         else unionRoots rootX rootY uf
   where
     unionRoots :: Key -> Key -> UnionFind %1 -> (Ur Key, UnionFind)
-    unionRoots rx ry (UnionFind n parent rank) =
-      Vector.get (keyToInt rx) rank & \(Ur rankX, rank') ->
-        Vector.get (keyToInt ry) rank' & \(Ur rankY, rank) ->
-          if rankX < rankY
-            then
-              -- Make ry the parent of rx, ry becomes the root
-              Vector.set (keyToInt rx) (getKey ry) parent & \parent' ->
-                (Ur ry, UnionFind n parent' rank)
-            else
-              if rankX > rankY
-                then
-                  -- Make rx the parent of ry, rx becomes the root
-                  Vector.set (keyToInt ry) (getKey rx) parent & \parent' ->
-                    (Ur rx, UnionFind n parent' rank)
-                else
-                  -- Equal ranks: make ry parent of rx and increment ry's rank, ry becomes the root
-                  Vector.set (keyToInt rx) (getKey ry) parent & \parent ->
-                    Vector.set (keyToInt ry) (rankY + 1) rank & \rank ->
-                      (Ur ry, UnionFind n parent rank)
+    unionRoots rx ry (UnionFind n parent rank) = DataFlow.do
+      (Ur rankX, rank) <- Vector.get (keyToInt rx) rank
+      (Ur rankY, rank) <- Vector.get (keyToInt ry) rank
+      let (pid, cid)
+            | rankX < rankY = (ry, rx)
+            | otherwise = (rx, ry)
+      parent <- Vector.set (keyToInt cid) pid parent
+      rank <-
+        if rankX == rankY
+          then Vector.modify_ (+ 1) (keyToInt pid) rank
+          else rank
+      (Ur pid, UnionFind n parent rank)
 
 {- | Unite the sets containing the two given elements using union-by-rank.
 Returns Nothing if either key is out of bounds, otherwise returns Just the representative key of the unified set.
@@ -186,10 +178,10 @@ union (Key x) (Key y) (UnionFind n parent rank)
 __Unsafe__: Does not check bounds. Will crash if keys >= size.
 -}
 unsafeEquivalent :: Key -> Key -> UnionFind %1 -> (Ur Bool, UnionFind)
-unsafeEquivalent x y uf =
-  unsafeFind x uf & \(Ur rootX, uf') ->
-    unsafeFind y uf' & \(Ur rootY, uf'') ->
-      (Ur (rootX == rootY), uf'')
+unsafeEquivalent x y uf = DataFlow.do
+  (Ur rootX, uf) <- unsafeFind x uf
+  (Ur rootY, uf) <- unsafeFind y uf
+  (Ur (rootX == rootY), uf)
 
 {- | Check if two elements are in the same set.
 Returns Nothing if either key is out of bounds.
@@ -204,11 +196,10 @@ The new element starts in its own singleton set.
 -}
 fresh :: UnionFind %1 -> (Ur Key, UnionFind)
 fresh (UnionFind n parent rank) =
-  let newIdx = n
-      newKey' = Key n
-   in Vector.push newIdx parent & \parent' ->
-        Vector.push 0 rank & \rank' ->
-          (Ur newKey', UnionFind (n + 1) parent' rank')
+  let newIdx = Key n
+   in Vector.push newIdx parent & \parent ->
+        Vector.push 0 rank & \rank ->
+          (Ur newIdx, UnionFind (n + 1) parent rank)
 
 -- | Get the number of elements in the union-find structure.
 size :: UnionFind %1 -> (Ur Word, UnionFind)
