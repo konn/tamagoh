@@ -178,8 +178,7 @@ instance Semilattice ConstantFolding where
   ConstantFolding c /\ ConstantFolding Nothing = ConstantFolding c
   ConstantFolding (Just x) /\ ConstantFolding (Just y)
     | x == y = ConstantFolding (Just x)
-    | otherwise =
-        error $ "ConstantFolding: conflicting constants: " <> show (x, y)
+    | otherwise = ConstantFolding Nothing
 
 instance Analysis Expr ConstantFolding where
   makeAnalysis (Lit n) = ConstantFolding (Just n)
