@@ -52,6 +52,7 @@ import GHC.Generics (Generic)
 import GHC.Generics qualified as GHC
 import Prelude.Linear (Consumable (consume), Ur (..), consume, lseq)
 import Prelude.Linear qualified as PL
+import Text.Show.Borrowed (Display)
 import Validation (Validation (..))
 
 data Rule l v = Rule
@@ -108,7 +109,7 @@ data SaturationConfig = SaturationConfig
 
 saturate ::
   forall d l v α.
-  (Analysis l d, Language l, Show1 l, Hashable v, Show v) =>
+  (Analysis l d, Language l, Show1 l, Hashable v, Show v, Display d) =>
   SaturationConfig ->
   [CompiledRule l v] ->
   Mut α (EGraph d l) %1 ->

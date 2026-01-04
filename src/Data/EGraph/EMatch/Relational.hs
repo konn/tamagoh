@@ -50,7 +50,7 @@ ematch pat egraph =
     Control.pure PL.$ Ur $ ematchDb (compile pat) db
 
 ematchDb ::
-  (Hashable v, Show v, Show1 l, Traversable l, HasDatabase l) =>
+  (Hashable v, Show v, Show1 l, HasDatabase l) =>
   PatternQuery l v -> Database l -> [(EClassId, Substitution v)]
 ematchDb PatternQuery {..} db =
   map
@@ -63,7 +63,7 @@ ematchDb PatternQuery {..} db =
 
 query ::
   forall l v.
-  (Hashable v, Foldable l, HasDatabase l) =>
+  (Hashable v, HasDatabase l) =>
   Query l v ->
   Database l ->
   [Substitution v]
@@ -72,7 +72,7 @@ query (SelectAll v) = map (singletonVar v) . HS.toList . universe
 
 genericJoin ::
   forall l v.
-  (Hashable v, Foldable l, HasDatabase l) =>
+  (Hashable v, HasDatabase l) =>
   ConjunctiveQuery l v ->
   Database l ->
   [Substitution v]

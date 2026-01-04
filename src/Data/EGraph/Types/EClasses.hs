@@ -16,6 +16,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 module Data.EGraph.Types.EClasses (
   EClasses (),
@@ -46,6 +47,7 @@ import Data.EGraph.Types.EClasses.Internal
 import Data.EGraph.Types.EGraph.Internal (Analysis (..))
 import Data.EGraph.Types.ENode
 import Data.Foldable (Foldable)
+import Data.Functor.Classes (Show1)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
@@ -57,15 +59,14 @@ import Data.Maybe.Linear
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
-import Data.UnionFind.Linear.Borrowed (UnionFind)
-import Data.UnionFind.Linear.Borrowed qualified as UF
-import Data.Unrestricted.Linear.Lifted (Movable1)
+import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
 import Prelude.Linear
+import Text.Show.Borrowed (Display)
 import Unsafe.Linear qualified as Unsafe
 
 lookupAnalysis ::
   forall bk α d l m.
-  (Copyable d) =>
+  (Copyable d, Copyable1 l, Show1 l, Display d) =>
   Borrow bk α (EClasses d l) %m ->
   EClassId ->
   BO α (Ur (Maybe d))
@@ -197,42 +198,38 @@ insertIfNew eid enode analysis clss = Control.do
         void $ Data.forM chss \ch -> addParent eid enode ch
       mop `lseq` Control.pure (Ur True, coerceLin clss)
 
--- | Returns 'False' if the classes were already merged and no change will be made.
+{- | @'unsafeMerge' eid1 eid2 class@ merges the e-classes identified by @eid1@ and @eid2@, returning 'False' if the classes were already merged and no change will be made..
+  Your must pass the canonical id as @eid1@, and the non-canonical id as @eid2@.
+-}
 merge ::
-  (Hashable1 l, Data.Functor l, Movable1 l, DistributesAlias l, Analysis l d) =>
+  (Hashable1 l, Movable1 l, Analysis l d) =>
   EClassId ->
   EClassId ->
-  Share α UnionFind ->
   Mut α (EClasses d l) %1 ->
   BO α (Ur Bool, Mut α (EClasses d l))
-merge eid1 eid2 uf clss = Control.do
+merge eid1 eid2 clss = Control.do
   (Ur mem1, clss) <- member eid1 <$~ clss
   (Ur mem2, clss) <- member eid2 <$~ clss
   if not mem1 || not mem2
     then Control.pure (Ur False, clss)
-    else (Ur True,) Control.<$> unsafeMerge eid1 eid2 uf clss
+    else (Ur True,) Control.<$> unsafeMerge eid1 eid2 clss
 
+{- | @'unsafeMerge' eid1 eid2 class@ merges the e-classes identified by @eid1@ and @eid2@, without cheking the exitence of the eids.
+  Your must pass the canonical id as @eid1@, and the non-canonical id as @eid2@.
+-}
 unsafeMerge ::
   forall α d l.
   ( Hashable1 l
   , Movable1 l
-  , Data.Functor l
-  , DistributesAlias l
   , Analysis l d
   ) =>
   EClassId ->
   EClassId ->
-  Share α UnionFind ->
   Mut α (EClasses d l) %1 ->
   BO α (Mut α (EClasses d l))
-unsafeMerge eid1 eid2 uf clss
+unsafeMerge eid1 eid2 clss
   | eid1 == eid2 = Control.pure clss
   | otherwise = Control.do
-      Ur (EClassId -> canonId) <- UF.unsafeFind (coerce eid1) uf
-      (Ur eid1, Ur eid2) <-
-        if canonId == eid1
-          then Control.pure (Ur eid1, Ur eid2)
-          else Control.pure (Ur eid2, Ur eid1)
       (mr, clss) <- delete clss eid2
       let %1 !EClass {nodes = !rnodes, parents = !rparents, analysis = !ra} = case mr of
             Nothing -> error "EGraph.Types.EClasses.unsafeMerge: eid2 not found"
