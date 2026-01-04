@@ -49,6 +49,7 @@ library
     bifunctors,
     containers,
     data-fix,
+    deepseq,
     deriving-compat,
     dlist,
     fmlist,
@@ -135,6 +136,7 @@ test-suite tamagoh-test
   other-modules:
     Data.EGraph.EMatch.RelationalCases
     Data.EGraph.EMatch.RelationalSpec
+    Data.EGraph.Egg.MathSpec
     Data.EGraph.ImmutableSpec
     Data.EGraph.TestUtils
     Data.EGraph.Types.EGraphSpec
@@ -153,10 +155,50 @@ test-suite tamagoh-test
     lens,
     linear-generics,
     tamagoh,
+    tamagoh:benchmark-utils,
     tasty,
     tasty-hunit,
 
   build-tool-depends: tasty-discover:tasty-discover
+  ghc-options:
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+
+library benchmark-utils
+  import: defaults
+  hs-source-dirs: internal/bench-utils
+  -- cabal-gild: discover internal/bench-utils
+  exposed-modules:
+    Tamagoh.Bench.Math
+    Tamagoh.Bench.Orphans
+
+  build-depends:
+    data-fix,
+    deepseq,
+    hashable,
+    hegg,
+    lens,
+    linear-base,
+    pure-borrow,
+    recursion-schemes,
+    tamagoh,
+    unordered-containers,
+
+benchmark tamagoh-bench-math
+  import: defaults
+  type: exitcode-stdio-1.0
+  hs-source-dirs: bench
+  main-is: math.hs
+  -- cabal-gild: discover bench --exclude=bench/Main.hs
+  other-modules:
+  build-depends:
+    hegg,
+    tamagoh,
+    tamagoh:benchmark-utils,
+    tasty,
+    tasty-bench,
+
   ghc-options:
     -threaded
     -rtsopts

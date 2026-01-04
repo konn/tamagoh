@@ -5,6 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Data.EGraph.Types.Pattern (
@@ -15,6 +16,7 @@ module Data.EGraph.Types.Pattern (
   addPattern,
 ) where
 
+import Control.DeepSeq (NFData, NFData1)
 import Control.Functor.Linear (StateT (..))
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
@@ -27,6 +29,7 @@ import Data.FMList qualified as FML
 import Data.Fix (Fix (unFix))
 import Data.Foldable qualified as F
 import Data.Functor.Classes (Eq1, Ord1, Show1)
+import Data.Functor.Foldable (Base, Corecursive (..))
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.Unrestricted.Linear (UrT (..), runUrT)
@@ -40,8 +43,10 @@ import Prelude as P
 
 data Pattern l v = Metavar v | PNode (l (Pattern l v))
   deriving (GHC.Generic, GHC.Generic1, Functor, Foldable, Traversable)
-  deriving anyclass (Hashable1)
+  deriving anyclass (Hashable1, NFData1)
   deriving (Eq1, Ord1) via Generically1 (Pattern l)
+
+deriving anyclass instance (NFData1 l, NFData v) => NFData (Pattern l v)
 
 deriving anyclass instance (Hashable1 l, Hashable v) => Hashable (Pattern l v)
 
@@ -52,6 +57,11 @@ deriving stock instance (Eq1 l, Eq v) => Eq (Pattern l v)
 deriving stock instance (Ord1 l, Ord v) => Ord (Pattern l v)
 
 deriveShow1 ''Pattern
+
+type instance Base (Pattern l v) = l
+
+instance (Functor l) => Corecursive (Pattern l v) where
+  embed = PNode
 
 embedTerm :: (Functor l) => Term l -> Pattern l v
 embedTerm = PNode . fmap embedTerm . unwrapTerm

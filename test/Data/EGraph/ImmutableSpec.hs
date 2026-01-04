@@ -62,7 +62,7 @@ instance Num (Pattern Expr v) where
 graph1 :: EGraph () Expr
 graph1 = empty
 
-ringRules :: [Rule Expr String]
+ringRules :: [Rule Expr d String]
 ringRules =
   [ named "add-zero" $ a + 0 ==> a
   , named "+-comm" $ a + b ==> b + a

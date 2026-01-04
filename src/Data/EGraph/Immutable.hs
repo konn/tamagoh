@@ -42,6 +42,7 @@ module Data.EGraph.Immutable (
   Rule (..),
   (==>),
   named,
+  (@?),
 
   -- * Extraction
   CostModel (..),
@@ -57,6 +58,7 @@ module Data.EGraph.Immutable (
   Term,
   wrapTerm,
   unwrapTerm,
+  numEClasses,
 ) where
 
 import Control.Functor.Linear (StateT (..), evalStateT)
@@ -234,7 +236,7 @@ extractBestOf lens eid = withRaw (Raw.extractBestOf lens eid)
 saturate ::
   (Language l, Show1 l, Hashable v, Show v, Analysis l d) =>
   SaturationConfig ->
-  [Rule l v] ->
+  [Rule l d v] ->
   EGraph d l ->
   Either (SaturationError l v) (EGraph d l)
 saturate cfg rules = do
@@ -256,3 +258,7 @@ buildDatabase ::
   EGraph d l ->
   Database l
 buildDatabase = withRaw RawDb.buildDatabase
+
+numEClasses :: EGraph d l -> Int
+{-# INLINE numEClasses #-}
+numEClasses = withRaw Raw.numEClasses

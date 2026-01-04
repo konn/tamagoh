@@ -22,6 +22,7 @@
 module Data.EGraph.Types.EGraph (
   EGraph (..),
   new,
+  numEClasses,
   find,
   addTerm,
   getAnalysis,
@@ -450,3 +451,8 @@ repair egraph eid parents = Control.do
     Control.pure (\end -> reclaim newPsLend (upcast end))
 
   void $ setParents eid newParents (egraph .# #classes)
+
+numEClasses :: Borrow k α (EGraph d l) %m -> BO α (Ur Int)
+numEClasses egraph = Control.do
+  let clss = egraph .# #classes
+  EC.size clss

@@ -5,6 +5,7 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE OverloadedLabels #-}
@@ -25,17 +26,21 @@ module Data.EGraph.Saturation (
   SaturationError (..),
   Rule (..),
   (==>),
+  (@?),
   named,
   CompiledRule,
   compileRule,
   ExtractBest (..),
   CostModel (..),
+  SideCondition (..),
+  MatchInfo (..),
 ) where
 
 import Algebra.Semilattice
+import Control.DeepSeq
 import Control.Exception (Exception)
 import Control.Functor.Linear qualified as Control
-import Control.Lens (Lens', (^.), _1)
+import Control.Lens (Lens', (?~), (^.), _1)
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Borrow.Pure.Utils (forRebor2_)
@@ -46,19 +51,21 @@ import Data.Deriving (deriveShow1)
 import Data.EGraph.EMatch.Relational (ematchDb)
 import Data.EGraph.EMatch.Relational.Database (Database, buildDatabase)
 import Data.EGraph.EMatch.Relational.Query
-import Data.EGraph.EMatch.Types (Substitution, substPattern)
+import Data.EGraph.EMatch.Types (Substitution (..), substPattern)
 import Data.EGraph.Types
 import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.Language
 import Data.FMList qualified as FML
 import Data.Foldable qualified as F
 import Data.Foldable qualified as P
+import Data.Function ((&))
 import Data.Functor.Classes
 import Data.Generics.Labels ()
 import Data.HasField.Linear
+import Data.HashMap.Strict qualified as PHM
 import Data.HashSet qualified as HashSet
 import Data.Hashable
-import Data.Hashable.Lifted (Hashable1)
+import Data.Maybe (mapMaybe)
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Semigroup (Arg (..), ArgMin, Min (..))
@@ -66,43 +73,69 @@ import Data.Strict qualified as St
 import Data.Traversable qualified as Traverse
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
-import GHC.Generics (Generic)
+import GHC.Generics (Generic, Generic1)
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear (Consumable (consume), Dupable, Movable, Ur (..), consume, lseq)
 import Prelude.Linear qualified as PL
 import Text.Show.Borrowed (AsCopyableShow (..), Display)
 import Validation (Validation (..))
+import Prelude as P
 
-data Rule l v = Rule
+newtype SideCondition l d v = SideCondition (PHM.HashMap v (MatchInfo l d) -> Bool)
+  deriving (Generic)
+  deriving anyclass (NFData)
+
+data MatchInfo l d = MatchInfo
+  { eclassId :: EClassId
+  , nodes :: ![ENode l]
+  , analysis :: !d
+  }
+  deriving (Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+
+instance Show (SideCondition l d v) where
+  showsPrec _ _ = showString "<side condition>"
+
+instance Show1 (SideCondition l d) where
+  liftShowsPrec _ _ _ _ = showString "<side condition>"
+
+data Rule l d v = Rule
   { lhs :: !(Pattern l v)
   , rhs :: !(Pattern l v)
+  , condition :: Maybe (SideCondition l d v)
   , name :: !String
   }
-  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, GHC.Generic, GHC.Generic1)
-  deriving (Eq1, Ord1) via GHC.Generically1 (Rule l)
-  deriving anyclass (Hashable, Hashable1)
+  deriving (Show, GHC.Generic, GHC.Generic1)
+  deriving anyclass (NFData)
 
 deriveShow1 ''Rule
 
-named :: String -> Rule l v -> Rule l v
-named name Rule {lhs, rhs} = Rule {..}
+named :: String -> Rule l d v -> Rule l d v
+named name Rule {lhs, rhs, condition} = Rule {..}
 
 infix 5 ==>
 
-(==>) :: (Show1 l, Show v) => Pattern l v -> Pattern l v -> Rule l v
+(==>) :: (Show1 l, Show v) => Pattern l v -> Pattern l v -> Rule l d v
 lhs ==> rhs =
   let !name = showsPrec 11 lhs . showString " ==> " . showsPrec 11 rhs $ ""
+      !condition = Nothing
    in Rule {name, ..}
 
-data CompiledRule l v = CompiledRule
+infix 1 @?
+
+(@?) ::
+  Rule l d0 v ->
+  (PHM.HashMap v (MatchInfo l d) -> Bool) ->
+  Rule l d v
+r @? cond = r & #condition ?~ SideCondition cond
+
+data CompiledRule l d v = CompiledRule
   { name :: !String
   , lhs :: !(PatternQuery l v)
   , rhs :: !(Pattern l v)
+  , condition :: !(Maybe (SideCondition l d v))
   }
-  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, GHC.Generic, GHC.Generic1)
-  deriving (Eq1, Ord1) via GHC.Generically1 (CompiledRule l)
-  deriving anyclass (Hashable, Hashable1)
+  deriving (Show, GHC.Generic, GHC.Generic1)
 
 data SaturationError l v = DanglingVariables (HashSet.HashSet v)
   deriving (Show, Eq, Ord)
@@ -110,8 +143,8 @@ data SaturationError l v = DanglingVariables (HashSet.HashSet v)
 
 compileRule ::
   (Traversable l, Hashable v) =>
-  Rule l v ->
-  Either (SaturationError l v) (CompiledRule l v)
+  Rule l d v ->
+  Either (SaturationError l v) (CompiledRule l d v)
 compileRule Rule {..} = do
   let danglings =
         HashSet.fromList (F.toList rhs)
@@ -130,7 +163,7 @@ saturate ::
   forall d l v α.
   (Analysis l d, Language l, Show1 l, Hashable v, Show v) =>
   SaturationConfig ->
-  [CompiledRule l v] ->
+  [CompiledRule l d v] ->
   Mut α (EGraph d l) %1 ->
   BO α (Mut α (EGraph d l))
 saturate config rules = go (St.toStrict config.maxIterations)
@@ -140,7 +173,8 @@ saturate config rules = go (St.toStrict config.maxIterations)
     go remaining !egraph = Control.do
       (Ur results, egraph) <- sharing egraph \egraph -> Control.do
         Ur db <- buildDatabase egraph
-        Control.pure (Ur $ collect db)
+        Ur anals <- EC.analyses (egraph .# #classes)
+        Control.pure (Ur $ collect anals db)
       if null results
         then Control.pure egraph
         else Control.do
@@ -151,15 +185,33 @@ saturate config rules = go (St.toStrict config.maxIterations)
               go (subtract 1 <$> remaining) egraph
             else Control.pure egraph
 
-    collect :: Database l -> [Ur (EClassId, Substitution v, CompiledRule l v)]
-    collect db = FML.toList $ execWriter do
-      P.forM_ rules \rule@CompiledRule {..} -> Control.do
-        let matches = ematchDb lhs db
-        tell $! FML.fromList $ map (\(eid, subs) -> Ur (eid, subs, rule)) matches
+    collect ::
+      PHM.HashMap EClassId ([ENode l], d) ->
+      Database l ->
+      [Ur (EClassId, Substitution v, CompiledRule l d v)]
+    collect analyses db =
+      FML.toList $! execWriter do
+        P.forM_ rules \rule@CompiledRule {..} -> do
+          let matches = ematchDb lhs db
+          tell . FML.fromList $ mapMaybe (check analyses rule) matches
 
+    check analyses rule (eid, subs) =
+      case rule.condition of
+        Just (SideCondition cond)
+          | not $
+              cond
+                ( PHM.mapMaybe
+                    ( \eclassId -> do
+                        (nodes, analysis) <- PHM.lookup eclassId analyses
+                        Just MatchInfo {..}
+                    )
+                    subs.substitution
+                ) ->
+              Nothing
+        _ -> Just $ Ur (eid, subs, rule)
     substitute ::
       Mut α (EGraph d l) %1 ->
-      [Ur (EClassId, Substitution v, CompiledRule l v)] %1 ->
+      [Ur (EClassId, Substitution v, CompiledRule l d v)] %1 ->
       BO α (Bool, Mut α (EGraph d l))
     substitute egraph results = Control.do
       reborrowing' egraph \egraph -> Control.do

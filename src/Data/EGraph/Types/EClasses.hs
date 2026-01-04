@@ -20,6 +20,7 @@
 module Data.EGraph.Types.EClasses (
   EClasses (),
   EClass (),
+  analyses,
   new,
   lookupAnalysis,
   setAnalysis,
@@ -33,14 +34,13 @@ module Data.EGraph.Types.EClasses (
   insertIfNew,
   merge,
   unsafeMerge,
+  size,
 ) where
 
 import Algebra.Semilattice
 import Control.Functor.Linear (void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
@@ -52,6 +52,7 @@ import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
+import Data.HashMap.Strict qualified as PHM
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
@@ -59,11 +60,28 @@ import Data.Maybe.Linear
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
-import Data.Unrestricted.Linear (UrT (..), runUrT)
+import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear
 import Unsafe.Linear qualified as Unsafe
-import Prelude qualified as P
+
+analyses ::
+  (Movable d, Copyable d, Movable1 l, Hashable1 l) =>
+  Borrow bk α (EClasses d l) %m ->
+  BO α (Ur (PHM.HashMap EClassId ([ENode l], d)))
+analyses clss =
+  share clss & \(Ur clss) -> Control.do
+    dic <- HMB.toBorrowList (coerceLin clss :: Share _ (Raw _ _))
+    Ur.lift PHM.fromList
+      . move
+      Control.<$> Data.mapM
+        ( \(Ur k, bor) ->
+            move bor & \(Ur bor) -> Control.do
+              nodes <- Set.toList (bor .# #nodes)
+              Ur anal <- Data.fmap copy Control.<$> readSharedRef (bor .# #analysis)
+              Control.pure (k, (nodes, anal))
+        )
+        dic
 
 lookupAnalysis ::
   forall bk α d l m.
@@ -259,3 +277,6 @@ unsafeMerge eid1 eid2 clss
 
 coerceLin :: (Coercible a b) => a %1 -> b
 coerceLin = Unsafe.toLinear \ !a -> coerce a
+
+size :: Borrow k α (EClasses d l) %m -> BO α (Ur Int)
+size = HMB.size . coerceLin
