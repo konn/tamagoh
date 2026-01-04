@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
@@ -6,6 +7,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -16,6 +18,9 @@
 
 module Data.EGraph.Saturation (
   saturate,
+  extractBest,
+  extractBest_,
+  extractBestOf,
   SaturationConfig (..),
   SaturationError (..),
   Rule (..),
@@ -23,12 +28,18 @@ module Data.EGraph.Saturation (
   named,
   CompiledRule,
   compileRule,
+  ExtractBest (..),
+  CostModel (..),
 ) where
 
+import Algebra.Semilattice
 import Control.Exception (Exception)
 import Control.Functor.Linear qualified as Control
+import Control.Lens (Lens', (^.), _1)
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Borrow.Pure.Utils (forRebor2_)
+import Control.Monad.Trans.Maybe (MaybeT (..))
 import Control.Monad.Trans.Writer.CPS (execWriter, tell)
 import Data.Coerce.Directed (upcast)
 import Data.Deriving (deriveShow1)
@@ -37,22 +48,29 @@ import Data.EGraph.EMatch.Relational.Database (Database, buildDatabase)
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types (Substitution, substPattern)
 import Data.EGraph.Types
+import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.Language
 import Data.FMList qualified as FML
 import Data.Foldable qualified as F
 import Data.Foldable qualified as P
 import Data.Functor.Classes
+import Data.Generics.Labels ()
+import Data.HasField.Linear
 import Data.HashSet qualified as HashSet
 import Data.Hashable
 import Data.Hashable.Lifted (Hashable1)
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import Data.Semigroup (Arg (..), ArgMin, Min (..))
 import Data.Strict qualified as St
+import Data.Traversable qualified as Traverse
+import Data.Unrestricted.Linear (UrT (..), runUrT)
+import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
 import GHC.Generics (Generic)
 import GHC.Generics qualified as GHC
-import Prelude.Linear (Consumable (consume), Ur (..), consume, lseq)
+import Generics.Linear.TH (deriveGeneric)
+import Prelude.Linear (Consumable (consume), Dupable, Movable, Ur (..), consume, lseq)
 import Prelude.Linear qualified as PL
-import Text.Show.Borrowed (Display)
 import Validation (Validation (..))
 
 data Rule l v = Rule
@@ -109,7 +127,7 @@ data SaturationConfig = SaturationConfig
 
 saturate ::
   forall d l v α.
-  (Analysis l d, Language l, Show1 l, Hashable v, Show v, Display d) =>
+  (Analysis l d, Language l, Show1 l, Hashable v, Show v) =>
   SaturationConfig ->
   [CompiledRule l v] ->
   Mut α (EGraph d l) %1 ->
@@ -160,3 +178,103 @@ saturate config rules = go (St.toStrict config.maxIterations)
                     AlreadyMerged {} -> Control.pure PL.$ consume var
                   Control.pure (consume egraph)
         Control.pure \end -> var `lseq` egraph `lseq` freeRef (reclaim lend (upcast end))
+
+newtype ExtractBest l cost = ExtractBest
+  { optimal :: ArgMin cost (ENode l)
+  }
+  deriving (Eq, Ord, Show, Generic)
+  deriving newtype (Semilattice)
+
+deriveGeneric ''ExtractBest
+
+deriving via
+  GHC.Generically (ExtractBest l cost)
+  instance
+    ( Copyable1 l
+    , Copyable cost
+    ) =>
+    Copyable (ExtractBest l cost)
+
+deriving via
+  GHC.Generically (ExtractBest l cost)
+  instance
+    ( Movable1 l
+    , Consumable cost
+    ) =>
+    Consumable (ExtractBest l cost)
+
+deriving via
+  GHC.Generically (ExtractBest l cost)
+  instance
+    ( Movable1 l
+    , Dupable cost
+    ) =>
+    Dupable (ExtractBest l cost)
+
+deriving via
+  GHC.Generically (ExtractBest l cost)
+  instance
+    ( Movable1 l
+    , Movable cost
+    ) =>
+    Movable (ExtractBest l cost)
+
+class
+  ( Ord cost
+  , Copyable cost
+  , Movable cost
+  ) =>
+  CostModel cost l
+  where
+  costFunction :: l (Min cost) -> cost
+
+instance
+  ( CostModel cost l
+  , Copyable1 l
+  , Movable1 l
+  , Traversable l
+  ) =>
+  Analysis l (ExtractBest l cost)
+  where
+  makeAnalysis node =
+    let enode = ENode $ fst <$> node
+        !cost = costFunction (fmap (\(Arg w _) -> w) . (.optimal) . snd <$> node)
+     in ExtractBest $ Min (Arg cost enode)
+
+{- | Extract the best term from the given e-class minimizing the given cost model, using given lens.
+To get the maximal term, use 'Data.Ord.Down' as the cost type.
+-}
+extractBest_ ::
+  (Language l, CostModel cost l) =>
+  EClassId ->
+  Borrow k α (EGraph (ExtractBest l cost) l) %m ->
+  BO α (Ur (Maybe (Term l, cost)))
+extractBest_ = extractBestOf id
+
+{- | Extract the best term from the given e-class minimizing the given cost model, using given lens.
+To get the maximal term, use 'Data.Ord.Down' as the cost type.
+-}
+extractBest ::
+  (Analysis l d, Language l, CostModel cost l) =>
+  EClassId ->
+  Borrow k α (EGraph (ExtractBest l cost, d) l) %m ->
+  BO α (Ur (Maybe (Term l, cost)))
+extractBest = extractBestOf _1
+
+{- | Extract the best term from the given e-class minimizing the given cost model, using given lens.
+To get the maximal term, use 'Data.Ord.Down' as the cost type.
+-}
+extractBestOf ::
+  (Analysis l d, Language l) =>
+  Lens' d (ExtractBest l cost) ->
+  EClassId ->
+  Borrow k α (EGraph d l) %m ->
+  BO α (Ur (Maybe (Term l, cost)))
+extractBestOf costL eid egraph =
+  share egraph PL.& \(Ur egraph) ->
+    let go eid = do
+          anal <- MaybeT $ UrT PL.$ EC.lookupAnalysis (egraph .# #classes) eid
+          let Min (Arg cost (ENode node)) = anal ^. costL . #optimal
+          term <- Traverse.mapM (fmap fst . go) node
+          pure (wrapTerm term, cost)
+     in runUrT PL.$ runMaybeT $ go eid

@@ -9,6 +9,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
 
@@ -17,6 +18,7 @@ module Data.EGraph.ImmutableSpec (module Data.EGraph.ImmutableSpec) where
 import Algebra.Semilattice
 import Control.Exception (throwIO)
 import Control.Functor.Linear qualified as Control
+import Control.Lens (view)
 import Control.Monad.Borrow.Pure (Copyable, (<$~))
 import Data.EGraph.Immutable
 import Data.EGraph.Types.EGraph qualified as MEG
@@ -178,17 +180,16 @@ instance Semilattice ConstantFolding where
     | otherwise = ConstantFolding Nothing
 
 instance Analysis Expr ConstantFolding where
-  makeAnalysis :: Expr ConstantFolding -> ConstantFolding
   makeAnalysis (Lit n) = ConstantFolding (Just n)
   makeAnalysis Var {} = ConstantFolding Nothing
-  makeAnalysis (ConstantFolding l :+ ConstantFolding r) =
+  makeAnalysis ((_, ConstantFolding l) :+ (_, ConstantFolding r)) =
     ConstantFolding $ (+) <$> l <*> r
-  makeAnalysis (ConstantFolding l :* ConstantFolding r) =
+  makeAnalysis ((_, ConstantFolding l) :* (_, ConstantFolding r)) =
     ConstantFolding $ (*) <$> l <*> r
 
-  modifyAnalysis eid egraph = Control.do
+  modifyAnalysis constFoldL eid egraph = Control.do
     (Ur anal, egraph) <- Raw.getAnalysis eid <$~ egraph
-    case constant =<< anal of
+    case constant . view constFoldL =<< anal of
       Nothing -> Control.pure (consume egraph)
       Just v -> Control.do
         (Ur _, Ur eid', egraph) <- Raw.addTerm (wrapTerm $ Lit v) egraph

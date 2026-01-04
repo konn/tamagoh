@@ -78,7 +78,6 @@ import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
 import Data.Vector.Internal.Check (HasCallStack)
 import GHC.Generics (Generic)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
-import Text.Show.Borrowed (Display)
 import Prelude qualified as P
 
 getOriginalNode ::
@@ -91,7 +90,7 @@ getOriginalNode egraph eid =
     maybe (Ur Nothing) (move . Just . copy) Control.<$> HMB.lookup eid (egraph .# #nodes)
 
 addTerm ::
-  (Analysis l d, Hashable1 l, Movable1 l, Show1 l, Display d, Copyable1 l) =>
+  (Analysis l d, Hashable1 l, Movable1 l, Show1 l) =>
   Term l ->
   Mut α (EGraph d l) %1 ->
   BO α (Ur (ENode l), Ur EClassId, Mut α (EGraph d l))
@@ -144,7 +143,7 @@ lookupTerm term egraph =
     runUrT $ runMaybeT (go term)
 
 getAnalysis ::
-  (Copyable d, Copyable1 l, Show1 l, Display d) =>
+  (Copyable d) =>
   EClassId ->
   Borrow k α (EGraph d l) %m ->
   BO α (Ur (Maybe d))
@@ -231,7 +230,7 @@ unsafeFind egraph (EClassId k) = Control.do
   coerceLin Data.<$> UFB.unsafeFind k uf
 
 unsafeMakeAnalyzeNode ::
-  (Analysis l d, Show1 l, HasCallStack, Display d, Copyable1 l) =>
+  (Analysis l d, Show1 l, HasCallStack) =>
   ENode l ->
   Borrow k α (EGraph d l) %m ->
   BO α (Ur d)
@@ -239,10 +238,10 @@ unsafeMakeAnalyzeNode enode egraph =
   share egraph & \(Ur egraph) -> runUrT do
     let ecs = egraph .# #classes
     makeAnalysis P.<$> P.forM enode.unwrap \eid ->
-      P.fromMaybe (error $ "unsafeMakeAnalyzeNode: lookupAnalysis failed: " <> show (enode, eid)) P.<$> UrT (EC.lookupAnalysis ecs eid)
+      P.maybe (error $ "unsafeMakeAnalyzeNode: lookupAnalysis failed: " <> show (enode, eid)) (eid,) P.<$> UrT (EC.lookupAnalysis ecs eid)
 
 addNode ::
-  (Analysis l d, Hashable1 l, Movable1 l, Show1 l, Display d, Copyable1 l) =>
+  (Analysis l d, Hashable1 l, Movable1 l, Show1 l) =>
   Mut α (EGraph d l) %1 ->
   ENode l ->
   BO α (Ur (Maybe EClassId), Mut α (EGraph d l))
@@ -254,7 +253,7 @@ addNode egraph node = Control.do
       Bi.first (Ur.lift Just) Control.<$> addCanonicalNode enode egraph
 
 addCanonicalNode ::
-  (Hashable1 l, Movable1 l, Analysis l d, Show1 l, HasCallStack, Display d, Copyable1 l) =>
+  (Hashable1 l, Movable1 l, Analysis l d, Show1 l, HasCallStack) =>
   ENode l ->
   Mut α (EGraph d l) %1 ->
   BO α (Ur EClassId, Mut α (EGraph d l))
@@ -275,7 +274,7 @@ addCanonicalNode enode egraph = Control.do
       egraph <- reborrowing_ egraph \egraph -> Control.do
         !dic <- HMB.insert eid enode (egraph .# #nodes)
         Control.pure $! consume dic
-      egraph <- modifyAnalysis eid <%= egraph
+      egraph <- modifyAnalysis id eid <%= egraph
 
       Control.pure (Ur eid, egraph)
 
@@ -363,7 +362,7 @@ merges eids egraph = flip runStateT egraph $
 
 rebuild ::
   forall α d l.
-  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Show1 l, Display d) =>
+  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Show1 l) =>
   Mut α (EGraph d l) %1 ->
   BO α (Mut α (EGraph d l))
 rebuild = loop
@@ -395,7 +394,7 @@ rebuild = loop
           loop egraph
 
 repair ::
-  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Show1 l, Display d) =>
+  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Show1 l) =>
   Mut α (EGraph d l) %1 ->
   EClassId ->
   [(ENode l, EClassId)] ->
@@ -426,7 +425,7 @@ repair egraph eid parents = Control.do
           Nothing -> unsafeFind egraph p_class
         Control.void $ HMB.insert p_node newId newPs
 
-    egraph <- newPs `lseq` reborrowing_ egraph (modifyAnalysis eid)
+    egraph <- newPs `lseq` reborrowing_ egraph (modifyAnalysis id eid)
     -- Rebuild analysis after modification
     (Ur ps, egraph) <- sharing egraph \eg ->
       EC.parents (eg .# #classes) eid

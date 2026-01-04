@@ -150,6 +150,7 @@ test-suite tamagoh-test
     deriving-compat,
     falsify,
     hashable,
+    lens,
     linear-generics,
     tamagoh,
     tasty,

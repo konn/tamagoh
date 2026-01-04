@@ -16,7 +16,6 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
-{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 module Data.EGraph.Types.EClasses (
   EClasses (),
@@ -47,7 +46,6 @@ import Data.EGraph.Types.EClasses.Internal
 import Data.EGraph.Types.EGraph.Internal (Analysis (..))
 import Data.EGraph.Types.ENode
 import Data.Foldable (Foldable)
-import Data.Functor.Classes (Show1)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
@@ -59,14 +57,13 @@ import Data.Maybe.Linear
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
-import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
+import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear
-import Text.Show.Borrowed (Display)
 import Unsafe.Linear qualified as Unsafe
 
 lookupAnalysis ::
   forall bk α d l m.
-  (Copyable d, Copyable1 l, Show1 l, Display d) =>
+  (Copyable d) =>
   Borrow bk α (EClasses d l) %m ->
   EClassId ->
   BO α (Ur (Maybe d))

@@ -30,12 +30,11 @@ import Data.Functor.Classes (Eq1, Ord1, Show1)
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.Unrestricted.Linear (UrT (..), runUrT)
-import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
+import Data.Unrestricted.Linear.Lifted (Movable1)
 import GHC.Generics (Generically1)
 import GHC.Generics qualified as GHC
 import Prelude.Linear (Ur)
 import Prelude.Linear qualified as PL
-import Text.Show.Borrowed (Display)
 import Text.Show.Deriving (deriveShow1)
 import Prelude as P
 
@@ -69,7 +68,7 @@ matchNode (PNode p) (ENode node) = Right . FML.toList <$> tryMatch p node
 
 addPattern ::
   forall d l α.
-  (Analysis l d, Hashable1 l, Movable1 l, Show1 l, Display d, Copyable1 l) =>
+  (Analysis l d, Hashable1 l, Movable1 l, Show1 l) =>
   Pattern l EClassId ->
   Mut α (EGraph d l) %1 ->
   BO α (Ur (Maybe EClassId), Mut α (EGraph d l))

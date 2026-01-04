@@ -24,8 +24,10 @@ module Data.EGraph.Types.EGraph.Internal (
 
 import Algebra.Semilattice (Semilattice)
 import Control.Functor.Linear qualified as Control
+import Control.Lens (Lens', view, _1, _2, _3, _4)
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
+import Data.Bifunctor qualified as Bi
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.EClasses.Internal (EClasses)
 import Data.EGraph.Types.ENode
@@ -92,12 +94,44 @@ In addition to 'Semilattice' laws, it must satisfy the following laws:
   1. Idempotency of modify: @'modify' eid =<< 'modify' eid egraph == modify eid egraph@.
 -}
 class (P.Traversable l, Semilattice d, Copyable d, Movable d) => Analysis l d where
-  makeAnalysis :: l d -> d
-  modifyAnalysis :: EClassId -> Mut α (EGraph d l) %1 -> BO α ()
-  modifyAnalysis = const $ Control.pure . consume
+  makeAnalysis :: l (EClassId, d) -> d
+  modifyAnalysis ::
+    (Analysis l d') =>
+    Lens' d' d -> EClassId -> Mut α (EGraph d' l) %1 -> BO α ()
+  modifyAnalysis = const $ const $ Control.pure . consume
 
 instance (P.Traversable l) => Analysis l () where
   makeAnalysis _ = ()
 
 instance LinearOnly (EGraph d l) where
   linearOnly = UnsafeLinearOnly
+
+instance (Analysis l a, Analysis l b) => Analysis l (a, b) where
+  makeAnalysis xs = (makeAnalysis (Bi.second fst P.<$> xs), makeAnalysis (Bi.second snd P.<$> xs))
+  modifyAnalysis l eid egraph = Control.do
+    egraph <- reborrowing_ egraph $ modifyAnalysis (l P.. _1) eid
+    modifyAnalysis (l P.. _2) eid egraph
+
+instance (Analysis l a, Analysis l b, Analysis l c) => Analysis l (a, b, c) where
+  makeAnalysis xs =
+    ( makeAnalysis (Bi.second (view _1) P.<$> xs)
+    , makeAnalysis (Bi.second (view _2) P.<$> xs)
+    , makeAnalysis (Bi.second (view _3) P.<$> xs)
+    )
+  modifyAnalysis l eid egraph = Control.do
+    egraph <- reborrowing_ egraph $ modifyAnalysis (l P.. _1) eid
+    egraph <- reborrowing_ egraph $ modifyAnalysis (l P.. _2) eid
+    modifyAnalysis (l P.. _3) eid egraph
+
+instance (Analysis l a, Analysis l b, Analysis l c, Analysis l d) => Analysis l (a, b, c, d) where
+  makeAnalysis xs =
+    ( makeAnalysis (Bi.second (view _1) P.<$> xs)
+    , makeAnalysis (Bi.second (view _2) P.<$> xs)
+    , makeAnalysis (Bi.second (view _3) P.<$> xs)
+    , makeAnalysis (Bi.second (view _4) P.<$> xs)
+    )
+  modifyAnalysis l eid egraph = Control.do
+    egraph <- reborrowing_ egraph $ modifyAnalysis (l P.. _1) eid
+    egraph <- reborrowing_ egraph $ modifyAnalysis (l P.. _2) eid
+    egraph <- reborrowing_ egraph $ modifyAnalysis (l P.. _3) eid
+    modifyAnalysis (l P.. _4) eid egraph

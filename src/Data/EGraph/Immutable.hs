@@ -43,6 +43,11 @@ module Data.EGraph.Immutable (
   (==>),
   named,
 
+  -- * Extraction
+  extractBest,
+  extractBest_,
+  extractBestOf,
+
   -- * Re-exports
   ENode (..),
   EClassId (..),
@@ -54,13 +59,14 @@ module Data.EGraph.Immutable (
 
 import Control.Functor.Linear (StateT (..), evalStateT)
 import Control.Functor.Linear qualified as Control
+import Control.Lens (Lens')
 import Control.Monad.Borrow.Pure (BO, Linearly, Mut, Share, linearly, modifyLinearOnlyBO, modifyLinearOnlyBO_, sharing)
 import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Data.EGraph.EMatch.Relational qualified as Rel
 import Data.EGraph.EMatch.Relational.Database (Database, HasDatabase)
 import Data.EGraph.EMatch.Relational.Database qualified as RawDb
 import Data.EGraph.EMatch.Types (Substitution)
-import Data.EGraph.Saturation hiding (saturate)
+import Data.EGraph.Saturation hiding (extractBest, extractBestOf, extractBest_, saturate)
 import Data.EGraph.Saturation qualified as Raw
 import Data.EGraph.Types (EClassId (..), ENode (..), unwrapTerm, wrapTerm)
 import Data.EGraph.Types.EGraph (Analysis, Term)
@@ -90,7 +96,7 @@ instance (Display d, Copyable1 l, Show1 l) => Show (EGraph d l) where
   showsPrec d = withRaw PL.$ displayPrec d
 
 new ::
-  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Movable a, Show1 l, Display d) =>
+  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Movable a, Show1 l) =>
   (forall α. Mut α (Raw.EGraph d l) %1 -> BO α a) %1 ->
   Ur (EGraph d l, a)
 {-# INLINE new #-}
@@ -100,7 +106,7 @@ new f = linearly \lin ->
    in Ur (frozen, a)
 
 modify ::
-  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Show1 l, Display d) =>
+  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Show1 l) =>
   (forall α. Mut α (Raw.EGraph d l) %1 -> BO α ()) %1 ->
   EGraph d l ->
   Ur (EGraph d l)
@@ -115,7 +121,7 @@ empty = unur (linearly \l -> Unsafe.toLinear (Ur . EG) (Raw.new l))
 
 fromList ::
   forall d l.
-  (Analysis l d, Hashable1 l, Movable1 l, Show1 l, Display d, Copyable1 l) =>
+  (Analysis l d, Hashable1 l, Movable1 l, Show1 l) =>
   [Raw.Term l] -> EGraph d l
 {-# INLINE fromList #-}
 fromList terms = unur PL.$ linearly \l ->
@@ -129,7 +135,7 @@ fromList terms = unur PL.$ linearly \l ->
 
 -- | _O(1)_. Freezes a mutable EGraph into an immutable one.
 freeze ::
-  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Show1 l, Display d) =>
+  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Show1 l) =>
   Raw.EGraph d l %1 -> Ur (EGraph d l)
 {-# INLINE freeze #-}
 freeze egraph =
@@ -201,8 +207,30 @@ lookupTerm ::
 {-# INLINE lookupTerm #-}
 lookupTerm t = withRaw (Raw.lookupTerm t)
 
+extractBest_ ::
+  (Language l, CostModel cost l) =>
+  EClassId ->
+  EGraph (ExtractBest l cost) l ->
+  Maybe (Term l, cost)
+extractBest_ eid = withRaw (Raw.extractBest_ eid)
+
+extractBest ::
+  (Analysis l d, Language l, CostModel cost l) =>
+  EClassId ->
+  EGraph (ExtractBest l cost, d) l ->
+  Maybe (Term l, cost)
+extractBest eid = withRaw (Raw.extractBest eid)
+
+extractBestOf ::
+  (Analysis l d, Language l) =>
+  Lens' d (ExtractBest l cost) ->
+  EClassId ->
+  EGraph d l ->
+  Maybe (Term l, cost)
+extractBestOf lens eid = withRaw (Raw.extractBestOf lens eid)
+
 saturate ::
-  (Language l, Show1 l, Hashable v, Show v, Analysis l d, Display d) =>
+  (Language l, Show1 l, Hashable v, Show v, Analysis l d) =>
   SaturationConfig ->
   [Rule l v] ->
   EGraph d l ->
