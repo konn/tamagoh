@@ -12,7 +12,7 @@ module Data.Trie (
   project,
 ) where
 
-import Control.Arrow ((&&&))
+import Data.Bifunctor qualified as Bi
 import Data.EGraph.Types.EClassId (EClassId)
 import Data.FMList (FMList)
 import Data.FMList qualified as FML
@@ -28,10 +28,7 @@ import Data.Strict.Maybe qualified as Strict
 import GHC.Generics
 
 -- Invariant: keys are subset of branches's keys
-data Trie = Trie
-  { keys :: {-# UNPACK #-} !(HashSet EClassId)
-  , branches :: {-# UNPACK #-} !(HashMap EClassId Trie)
-  }
+newtype Trie = Trie {branches :: HashMap EClassId Trie}
   deriving (Eq, Ord, Generic)
 
 instance Show Trie where
@@ -44,7 +41,7 @@ type Row = [EClassId]
 toRows :: Trie -> [Row]
 toRows = FML.toList . go
   where
-    go (Trie _ hm)
+    go (Trie hm)
       | HM.null hm = FML.singleton []
       | otherwise =
           foldMap'
@@ -55,34 +52,34 @@ toRows = FML.toList . go
 {-# INLINE toRows #-}
 
 empty :: Trie
-empty = Trie mempty HM.empty
+empty = Trie HM.empty
 {-# INLINE empty #-}
 
 member :: [EClassId] -> Trie -> Bool
 member [] _ = True
-member (i : is) (Trie keys vec) =
-  if HashSet.member i keys
+member (i : is) (Trie vec) =
+  if HM.member i vec
     then member is $ vec HM.! i
     else False
 {-# INLINE member #-}
 
 singleton :: [EClassId] -> Trie
-singleton [] = Trie mempty HM.empty
-singleton (i : is) = Trie (HashSet.singleton i) $ HM.singleton i (singleton is)
+singleton [] = Trie HM.empty
+singleton (i : is) = Trie $ HM.singleton i (singleton is)
 {-# INLINE singleton #-}
 
 insert :: [EClassId] -> Trie -> Trie
 insert [] trie = trie
-insert (i : is) (Trie keys vec) =
-  Trie (HashSet.insert i keys) $ HM.alter (Just . maybe (singleton is) (insert is)) i vec
+insert (i : is) (Trie vec) =
+  Trie $ HM.alter (Just . maybe (singleton is) (insert is)) i vec
 {-# INLINE insert #-}
 
 focus :: [Maybe EClassId] -> Trie -> Trie
 focus [] trie = trie
-focus (Nothing : xs) (Trie keys trie) = Trie keys $ focus xs <$> trie
-focus (Just i : xs) (Trie keys trie) =
-  if HashSet.member i keys
-    then Trie (HashSet.singleton i) $ HM.singleton i $ focus xs $ trie HM.! i
+focus (Nothing : xs) (Trie vec) = Trie $ focus xs <$> vec
+focus (Just i : xs) (Trie vec) =
+  if HM.member i vec
+    then Trie (HM.singleton i $ focus xs $ vec HM.! i)
     else empty
 {-# INLINE focus #-}
 
@@ -90,13 +87,16 @@ project :: NonEmpty Int -> Trie -> HashSet EClassId
 project indices =
   Strict.fromJust
     . go 0 (IntSet.toAscList $ IntSet.fromList $ F.toList indices) Strict.Nothing
-    . pure
+    . FML.singleton
   where
     go :: Int -> [Int] -> Strict.Maybe (HashSet EClassId) -> FMList Trie -> Strict.Maybe (HashSet EClassId)
     go !_ [] !acc _ = acc
     go !n (i : is) !acc tries
       | n == i =
-          let (keys, chs) = foldMap' ((.keys) &&& (FML.fromList . F.toList . (.branches))) tries
+          let (keys, chs) =
+                foldMap'
+                  (Bi.bimap HashSet.fromList FML.fromList . unzip . HM.toList . (.branches))
+                  tries
               !acc' =
                 Strict.Just $
                   Strict.maybe keys (HashSet.intersection keys) acc
@@ -107,4 +107,4 @@ project indices =
 
 cons :: EClassId -> Trie -> Trie
 {-# INLINE cons #-}
-cons i = Trie (HashSet.singleton i) . HM.singleton i
+cons i = Trie . HM.singleton i
