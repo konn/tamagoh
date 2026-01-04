@@ -39,6 +39,8 @@ import Algebra.Semilattice
 import Control.Functor.Linear (void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
@@ -57,9 +59,11 @@ import Data.Maybe.Linear
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
+import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear
 import Unsafe.Linear qualified as Unsafe
+import Prelude qualified as P
 
 lookupAnalysis ::
   forall bk α d l m.

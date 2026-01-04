@@ -28,6 +28,7 @@ import Data.Hashable (Hashable)
 import GHC.Generics hiding ((:*:))
 import Generics.Linear.TH qualified as LG
 import Prelude.Linear (Consumable (..), Dupable, Movable, Ur (..))
+import Prelude.Linear qualified as PL
 import Test.Tasty
 import Test.Tasty.HUnit
 import Text.Show.Borrowed (AsCopyableShow (..), Display)
@@ -177,7 +178,8 @@ instance Semilattice ConstantFolding where
   ConstantFolding c /\ ConstantFolding Nothing = ConstantFolding c
   ConstantFolding (Just x) /\ ConstantFolding (Just y)
     | x == y = ConstantFolding (Just x)
-    | otherwise = ConstantFolding Nothing
+    | otherwise =
+        error $ "ConstantFolding: conflicting constants: " <> show (x, y)
 
 instance Analysis Expr ConstantFolding where
   makeAnalysis (Lit n) = ConstantFolding (Just n)
@@ -216,3 +218,49 @@ checkFolding name lhs rhs = testCase name do
   graph' <- either throwIO pure $ saturate SaturationConfig {maxIterations = Nothing} ringRules graph
   let eqv = equivalent graph' lhs rhs
   assertBool ("Expected to be equal, but got: " <> show eqv) (eqv == Just True)
+
+newtype NodeCount = NodeCount Word
+  deriving (Eq, Ord, Generic)
+  deriving newtype (Show, Num, Copyable, Movable, Consumable, Dupable)
+
+instance (Foldable f) => CostModel NodeCount f where
+  costFunction = (+ 1) . sum
+
+newtype Depth = Depth Word
+  deriving (Eq, Ord, Generic)
+  deriving newtype (Show, Num, Copyable, Movable, Consumable, Dupable)
+
+instance (Foldable f) => CostModel Depth f where
+  costFunction f = if null f then 0 else 1 + maximum f
+
+test_extractBest :: TestTree
+test_extractBest =
+  testGroup
+    "extractBest"
+    [ testCase "a + 2 with a = 5 gives best term 7" do
+        let term = var "a" + 2 :: Term Expr
+            five = 5 :: Term Expr
+            graph = fromList @(ExtractBest Expr NodeCount, ConstantFolding) [term, five]
+
+        eid <- maybe (assertFailure "term not found in initial graph") pure $ lookupTerm term graph
+        aId <- maybe (assertFailure "term not found in initial graph") pure $ lookupTerm (var "a") graph
+        fiveId <- maybe (assertFailure "term not found in initial graph") pure $ lookupTerm five graph
+        (bestTerm, count) <-
+          maybe (assertFailure "term not found in initial graph") pure $
+            extractBest eid graph
+        count @?= 3
+        bestTerm @?= term
+        graph' <-
+          either throwIO pure $
+            saturate SaturationConfig {maxIterations = Nothing} ringRules $
+              PL.unur PL.$
+                modify
+                  (Control.void PL.. Raw.merge aId fiveId)
+                  graph
+
+        (bestTerm, count) <-
+          maybe (assertFailure "term not found in merged graph") pure $
+            extractBest eid graph'
+        count @?= 1
+        bestTerm @?= 7
+    ]

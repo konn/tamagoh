@@ -68,7 +68,7 @@ matchNode (PNode p) (ENode node) = Right . FML.toList <$> tryMatch p node
 
 addPattern ::
   forall d l α.
-  (Analysis l d, Hashable1 l, Movable1 l, Show1 l) =>
+  (Analysis l d, Hashable1 l, Movable1 l) =>
   Pattern l EClassId ->
   Mut α (EGraph d l) %1 ->
   BO α (Ur (Maybe EClassId), Mut α (EGraph d l))

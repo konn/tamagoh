@@ -71,6 +71,7 @@ import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear (Consumable (consume), Dupable, Movable, Ur (..), consume, lseq)
 import Prelude.Linear qualified as PL
+import Text.Show.Borrowed (AsCopyableShow (..), Display)
 import Validation (Validation (..))
 
 data Rule l v = Rule
@@ -219,6 +220,11 @@ deriving via
     ) =>
     Movable (ExtractBest l cost)
 
+deriving via
+  AsCopyableShow (ExtractBest l cost)
+  instance
+    (Show cost, Copyable cost, Show1 l, Copyable1 l) => Display (ExtractBest l cost)
+
 class
   ( Ord cost
   , Copyable cost
@@ -226,7 +232,7 @@ class
   ) =>
   CostModel cost l
   where
-  costFunction :: l (Min cost) -> cost
+  costFunction :: l (Min cost) -> Min cost
 
 instance
   ( CostModel cost l
@@ -238,7 +244,7 @@ instance
   where
   makeAnalysis node =
     let enode = ENode $ fst <$> node
-        !cost = costFunction (fmap (\(Arg w _) -> w) . (.optimal) . snd <$> node)
+        Min !cost = costFunction (fmap (\(Arg w _) -> w) . (.optimal) . snd <$> node)
      in ExtractBest $ Min (Arg cost enode)
 
 {- | Extract the best term from the given e-class minimizing the given cost model, using given lens.
@@ -273,6 +279,7 @@ extractBestOf ::
 extractBestOf costL eid egraph =
   share egraph PL.& \(Ur egraph) ->
     let go eid = do
+          eid <- MaybeT $ UrT $ find egraph eid
           anal <- MaybeT $ UrT PL.$ EC.lookupAnalysis (egraph .# #classes) eid
           let Min (Arg cost (ENode node)) = anal ^. costL . #optimal
           term <- Traverse.mapM (fmap fst . go) node
