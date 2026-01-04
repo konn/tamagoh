@@ -1,6 +1,16 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
-module Data.Trie (Trie (), empty, cons, member, singleton, insert, focus, project) where
+module Data.Trie (
+  Trie (),
+  empty,
+  toRows,
+  cons,
+  member,
+  singleton,
+  insert,
+  focus,
+  project,
+) where
 
 import Control.Arrow ((&&&))
 import Data.EGraph.Types.EClassId (EClassId)
@@ -22,7 +32,27 @@ data Trie = Trie
   { keys :: {-# UNPACK #-} !(HashSet EClassId)
   , branches :: {-# UNPACK #-} !(HashMap EClassId Trie)
   }
-  deriving (Show, Eq, Ord, Generic)
+  deriving (Eq, Ord, Generic)
+
+instance Show Trie where
+  showsPrec d trie =
+    showParen (d > 10) $
+      showString "fromRows " . shows (toRows trie)
+
+type Row = [EClassId]
+
+toRows :: Trie -> [Row]
+toRows = FML.toList . go
+  where
+    go (Trie _ hm)
+      | HM.null hm = FML.singleton []
+      | otherwise =
+          foldMap'
+            ( \(i, t) ->
+                fmap (i :) (go t)
+            )
+            (HM.toList hm)
+{-# INLINE toRows #-}
 
 empty :: Trie
 empty = Trie mempty HM.empty

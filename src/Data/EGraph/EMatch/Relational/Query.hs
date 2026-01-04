@@ -64,7 +64,7 @@ data EClassIdOrVar v
 
 deriveShow1 ''EClassIdOrVar
 
-newtype Atom l v = Atom (Relation l (EClassIdOrVar v))
+data Atom l v = Atom (Relation l (EClassIdOrVar v))
   deriving (Generic, Generic1, Functor, Foldable, Traversable)
   deriving (Eq1, Ord1) via Generically1 (Atom l)
 

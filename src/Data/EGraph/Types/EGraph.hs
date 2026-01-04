@@ -428,7 +428,7 @@ repair egraph eid parents = Control.do
         (newAnal, egraph) <- sharing egraph \egraph -> Control.do
           Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
           Ur old <- EC.lookupAnalysis (egraph .# #classes) pClass
-          let d = P.maybe analysis (/\ analysis) old
+          let !d = P.maybe analysis (/\ analysis) old
           if Just d P.== old
             then Control.pure Nothing
             else Control.pure $ Just $ Ur d

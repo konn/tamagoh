@@ -88,6 +88,6 @@ genericJoin (hd :- qs) db = go (nubHash $ F.toList $ Pair hd (Compose qs)) mempt
             Just xs' ->
               foldl1' HS.intersection $
                 NE.map
-                  (\(Atom (MkRel _ node), poss) -> project poss (getTrie node db))
+                  (\(Atom (MkRel _ node), poss) -> project poss (getTrie (toOperator node) db))
                   xs'
        in concatMap (\eid -> go vs $ insertVar v eid sub) domain

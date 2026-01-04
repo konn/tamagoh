@@ -18,10 +18,12 @@ import Algebra.Semilattice
 import Control.Exception (throwIO)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure (Copyable, (<$~))
+import Data.EGraph.EMatch.Relational.Query (compile)
 import Data.EGraph.Immutable
 import Data.EGraph.Types.EGraph qualified as MEG
 import Data.EGraph.Types.EGraph qualified as Raw
 import Data.EGraph.Types.Language (deriveLanguage)
+import Data.Functor ((<&>))
 import Data.Hashable (Hashable)
 import GHC.Generics hiding ((:*:))
 import Generics.Linear.TH qualified as LG
@@ -61,14 +63,14 @@ graph1 = empty
 
 ringRules :: [Rule Expr String]
 ringRules =
-  [ named "+-comm" $ a + b ==> b + a
+  [ named "add-zero" $ a + 0 ==> a
+  , named "+-comm" $ a + b ==> b + a
   , named "*-comm" $ a * b ==> b * a
   , named "+-assoc-r" $ (a + b) + c ==> a + (b + c)
   , named "+-assoc-l" $ a + (b + c) ==> (a + b) + c
   , named "*-assoc-r" $ (a * b) * c ==> a * (b * c)
   , named "*-assoc-l" $ a * (b * c) ==> (a * b) * c
   , named "distrib" $ a * (b + c) ==> a * b + a * c
-  , named "add-zero" $ a + 0 ==> a
   , named "mul-one" $ a * 1 ==> a
   , named "mul-zero" $ 0 * a ==> 0
   ]
@@ -193,8 +195,10 @@ instance Analysis Expr ConstantFolding where
       Just v -> Control.do
         (Ur _, Ur eid', egraph) <- Raw.addTerm (wrapTerm $ Lit v) egraph
         if eid == eid'
-          then Control.pure (consume egraph)
-          else Control.void (Raw.unsafeMerge eid eid' egraph)
+          then Control.do
+            Control.pure (consume egraph)
+          else Control.do
+            Control.void (Raw.unsafeMerge eid eid' egraph)
 
 graphConstFold :: EGraph ConstantFolding Expr
 graphConstFold = empty
@@ -203,15 +207,27 @@ test_constantFolding :: TestTree
 test_constantFolding =
   testGroup
     "saturation with constant folding"
-    [ testCase "1 + 1 == 2" do
+    [ testCaseSteps "1 + 1 == 2" \step -> do
         let lhs = 1 + 1 :: Term Expr
             rhs = 2 :: Term Expr
             graph = fromList @ConstantFolding [lhs]
+        let initLhs = lookupTerm lhs graph
+        let initLhsClass = initLhs <&> \lid -> lookupEClass lid graph
+        let plusZeros = ematch (Metavar "a" + 0) graph
+        step $ "Initial EGraph: " <> show graph
+        step $ "Initial EGraph DB: " <> show (buildDatabase graph)
+        step $ "Compiled pattern: a + 0 ===" <> show (compile @Expr (Metavar "a" + 0))
+        step $ "Initial LHS EClassId: " <> show initLhs
+        step $ "Initial LHS EClass: " <> show initLhsClass
+        step $ "Matching (a + 0) patterns: " <> show plusZeros
         graph' <- either throwIO pure $ saturate SaturationConfig {maxIterations = Nothing} ringRules graph
         let lid = lookupTerm lhs graph'
         let rid = lookupTerm rhs graph'
-        putStrLn $ "LHS EClassId: " <> show lid
-        putStrLn $ "RHS EClassId: " <> show rid
+        step $ "Saturated EGraph: " <> show graph'
+        step $ "Saturated LHS EClassId: " <> show lid
+        step $ "Saturated LHS EClass: " <> show (lid <&> \id -> lookupEClass id graph')
+        step $ "Saturated RHS EClassId: " <> show rid
+        step $ "Saturated RHS EClass: " <> show (rid <&> \id -> lookupEClass id graph')
         let eqv = equivalent graph' lhs rhs
         assertBool ("Expected to be equal, but got: " <> show eqv) (eqv == Just True)
     , testCase "(a + 2) * 5 == 10 + 5 * a" do
@@ -219,10 +235,6 @@ test_constantFolding =
             rhs = 10 + 5 * var "a"
             graph = fromList @ConstantFolding [lhs]
         graph' <- either throwIO pure $ saturate SaturationConfig {maxIterations = Nothing} ringRules graph
-        let lid = lookupTerm lhs graph'
-        let rid = lookupTerm rhs graph'
-        putStrLn $ "LHS EClassId: " <> show lid
-        putStrLn $ "RHS EClassId: " <> show rid
         let eqv = equivalent graph' lhs rhs
         assertBool ("Expected to be equal, but got: " <> show eqv) (eqv == Just True)
     ]

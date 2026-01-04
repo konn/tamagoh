@@ -22,10 +22,14 @@ newtype EClassId = EClassId {getKey :: Key}
     , PL.Consumable
     , PL.Dupable
     , PL.Movable
-    , Show
     , Copyable
     )
   deriving (Display) via AsCopyableShow EClassId
+
+instance Show EClassId where
+  showsPrec d (EClassId k) =
+    showParen (d > 10) $
+      showString "EClassId " . showsPrec 11 k
 
 idToWord :: EClassId -> PL.Word
 idToWord = coerce

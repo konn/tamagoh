@@ -56,7 +56,6 @@ data DeriveTarget
   | DvHashable1
   | DvMovable1
   | DvCopyable1
-  | DvHasDatabase
   | DvMatchable
   deriving (Show, Eq, Ord, Enum, Bounded)
 
@@ -83,7 +82,6 @@ classHead langDef = \case
   DvHashable1 -> (''Hashable1, [langDef.rank1Type])
   DvMovable1 -> (''Movable1, [langDef.rank1Type])
   DvCopyable1 -> (''Copyable1, [langDef.rank1Type])
-  DvHasDatabase -> (''HasDatabase, [langDef.rank1Type])
   DvMatchable -> (''Matchable, [langDef.rank1Type])
 
 {- |
@@ -127,7 +125,6 @@ derive lang DvHashable = [d|deriving anyclass instance (_) => Hashable $(pure la
 derive lang DvHashable1 = [d|deriving anyclass instance (_) => Hashable1 $(pure lang.rank1Type)|]
 derive lang DvMovable1 = [d|deriving via GHC.Generically1 $(pure lang.rank1Type) instance (_) => Movable1 $(pure lang.rank1Type)|]
 derive lang DvCopyable1 = [d|deriving via GHC.Generically1 $(pure lang.rank1Type) instance (_) => Copyable1 $(pure lang.rank1Type)|]
-derive lang DvHasDatabase = [d|deriving via GHC.Generically1 $(pure lang.rank1Type) instance (_) => HasDatabase $(pure lang.rank1Type)|]
 derive lang DvMatchable = [d|deriving via GHC.Generically1 $(pure lang.rank1Type) instance (_) => Matchable $(pure lang.rank1Type)|]
 
 data LanguageDef = LanguageDef

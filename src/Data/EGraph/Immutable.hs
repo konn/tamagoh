@@ -1,6 +1,8 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE QualifiedDo #-}
+{-# LANGUAGE RankNTypes #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Data.EGraph.Immutable (
@@ -25,6 +27,8 @@ module Data.EGraph.Immutable (
   canonicalize,
   equivalent,
   lookupTerm,
+  ematch,
+  buildDatabase,
 
   -- * In-place update
   modify,
@@ -52,7 +56,10 @@ import Control.Functor.Linear (StateT (..), evalStateT)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure (BO, Linearly, Mut, Share, linearly, modifyLinearOnlyBO, modifyLinearOnlyBO_, sharing)
 import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
-import Data.EGraph.EMatch.Relational.Database (HasDatabase)
+import Data.EGraph.EMatch.Relational qualified as Rel
+import Data.EGraph.EMatch.Relational.Database (Database, HasDatabase)
+import Data.EGraph.EMatch.Relational.Database qualified as RawDb
+import Data.EGraph.EMatch.Types (Substitution)
 import Data.EGraph.Saturation hiding (saturate)
 import Data.EGraph.Saturation qualified as Raw
 import Data.EGraph.Types (EClassId (..), ENode (..), unwrapTerm, wrapTerm)
@@ -72,11 +79,15 @@ import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
 import GHC.Exts (Multiplicity (..))
 import Prelude.Linear (Dupable, Movable)
 import Prelude.Linear qualified as PL
+import Text.Show.Borrowed (Display, displayPrec)
 import Unsafe.Linear qualified as Unsafe
 import Prelude as P hiding (lookup)
 
 data EGraph d l where
   EG :: !(Raw.EGraph d l) %'Many -> EGraph d l
+
+instance (Display d, Copyable1 l, Show1 l) => Show (EGraph d l) where
+  showsPrec d = withRaw PL.$ displayPrec d
 
 new ::
   (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Movable a) =>
@@ -202,3 +213,16 @@ saturate cfg rules = do
     Right rules ->
       Right . (\(Ur x) -> x) . modify \egraph ->
         Control.void PL.$ Raw.saturate cfg rules egraph
+
+ematch ::
+  (Language l, Show1 l, Hashable v, Show v) =>
+  Pattern l v ->
+  EGraph d l ->
+  [(EClassId, Substitution v)]
+ematch pat = withRaw PL.$ Rel.ematch pat
+
+buildDatabase ::
+  (HasDatabase l, Movable1 l, Traversable l) =>
+  EGraph d l ->
+  Database l
+buildDatabase = withRaw RawDb.buildDatabase
