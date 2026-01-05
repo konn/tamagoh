@@ -20,6 +20,7 @@ import Data.EGraph.Immutable
 import Data.Maybe (isNothing)
 import Tamagoh.Bench.Math
 import Test.Tasty
+import Test.Tasty.ExpectedFailure (ignoreTestBecause)
 import Test.Tasty.HUnit
 import Test.Tasty.HUnit qualified as Tasty
 import Prelude hiding (lookup)
@@ -53,4 +54,25 @@ test_Math =
         _eid <- maybe (assertFailure "x + y not found") pure $ lookupTerm (var "x" + var "y") graph
         let xDIVy = lookupTerm (var "x" / var "y") graph
         isNothing xDIVy Tasty.@? "x / y should not be found, but got: " <> show xDIVy
+    , ignoreTestBecause "It takes too much time" $ testCase "math_simplify_root" do
+        let x = var "x"
+        let lhs = 1 / (((1 + sqrt x) / 2) - ((1 - sqrt x) / 2))
+        !graph <-
+          either throwIO pure $
+            saturate simple {nodeLimit = Just 75_000, maxIterations = Just 9} mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "1 / sqrt x not found") pure $ lookupTerm (1 / sqrt x) graph
+        equivalent graph lid rid @?= Just True
+    , testCase "math_simplify_factor" do
+        let x = var "x"
+            lhs = (x + 3) * (x + 1)
+            rhs = ((x * x) + (4 * x)) + 3
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
     ]

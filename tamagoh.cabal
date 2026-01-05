@@ -152,6 +152,7 @@ test-suite tamagoh-test
     Data.UnionFind.Linear.BorrowedSpec
 
   build-depends:
+    tasty-expected-failure,
     data-fix,
     deriving-compat,
     falsify,
@@ -161,6 +162,7 @@ test-suite tamagoh-test
     tamagoh,
     tamagoh:benchmark-utils,
     tasty,
+    tasty-expected-failure,
     tasty-hunit,
 
   build-tool-depends: tasty-discover:tasty-discover
