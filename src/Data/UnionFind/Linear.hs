@@ -152,18 +152,18 @@ unsafeUnion x y uf =
         else unionRoots rootX rootY uf
   where
     unionRoots :: Key -> Key -> UnionFind %1 -> (Ur Key, UnionFind)
-    unionRoots rx ry (UnionFind n parent rank) = DataFlow.do
-      (Ur rankX, rank) <- Vector.get (keyToInt rx) rank
-      (Ur rankY, rank) <- Vector.get (keyToInt ry) rank
-      let (pid, cid)
-            | rankX < rankY = (ry, rx)
-            | otherwise = (rx, ry)
-      parent <- Vector.set (keyToInt cid) pid parent
-      rank <-
-        if rankX == rankY
-          then Vector.modify_ (+ 1) (keyToInt pid) rank
-          else rank
-      (Ur pid, UnionFind n parent rank)
+    unionRoots rx ry (UnionFind n parent rank) =
+      Vector.get (keyToInt rx) rank & \(Ur rankX, rank) ->
+        Vector.get (keyToInt ry) rank & \(Ur rankY, rank) -> DataFlow.do
+          let (pid, cid)
+                | rankX < rankY = (ry, rx)
+                | otherwise = (rx, ry)
+          parent <- Vector.set (keyToInt cid) pid parent
+          rank <-
+            if rankX == rankY
+              then Vector.modify_ (+ 1) (keyToInt pid) rank
+              else rank
+          (Ur pid, UnionFind n parent rank)
 
 {- | Unite the sets containing the two given elements using union-by-rank.
 Returns Nothing if either key is out of bounds, otherwise returns Just the representative key of the unified set.
