@@ -55,7 +55,7 @@ test_Math =
         _eid <- maybe (assertFailure "x + y not found") pure $ lookupTerm (var "x" + var "y") graph
         let xDIVy = lookupTerm (var "x" / var "y") graph
         isNothing xDIVy Tasty.@? "x / y should not be found, but got: " <> show xDIVy
-    , ignoreTestBecause "It takes too much time" $ testCase "math_simplify_root" do
+    , testCase "math_simplify_root" do
         let x = var "x"
         let lhs = 1 / (((1 + sqrt x) / 2) - ((1 - sqrt x) / 2))
         !graph <-

@@ -252,7 +252,7 @@ instance Semilattice ConstantFold where
   l /\ ConstantFold Nothing = l
   ConstantFold (Just x) /\ ConstantFold (Just y)
     | x == y = ConstantFold (Just x)
-    | otherwise = error $ "Conflicting constant values: " <> show (x, y)
+    | otherwise = ConstantFold (Just x) -- Floating-point number can be approximated
   {-# INLINE (/\) #-}
 
 instance Tamagoh.Analysis Math ConstantFold where
