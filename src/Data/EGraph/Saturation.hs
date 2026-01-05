@@ -173,8 +173,10 @@ saturate config rules = go (St.toStrict config.maxIterations)
     go remaining !egraph = Control.do
       (Ur results, egraph) <- sharing egraph \egraph -> Control.do
         Ur db <- buildDatabase egraph
+        -- () <- DT.trace ("Current DB " <> show db) PL.$ Control.pure ()
         Ur anals <- EC.analyses (egraph .# #classes)
         Control.pure (Ur $ collect anals db)
+      -- () <- DT.trace ("Collected matches: " <> show (PL.map PL.unur results) <> " matches") PL.$ Control.pure ()
       if null results
         then Control.pure egraph
         else Control.do
@@ -209,28 +211,33 @@ saturate config rules = go (St.toStrict config.maxIterations)
                 ) ->
               Nothing
         _ -> Just $ Ur (eid, subs, rule)
+
     substitute ::
       Mut α (EGraph d l) %1 ->
       [Ur (EClassId, Substitution v, CompiledRule l d v)] %1 ->
       BO α (Bool, Mut α (EGraph d l))
-    substitute egraph results = Control.do
-      reborrowing' egraph \egraph -> Control.do
-        !(var, lend) <- asksLinearly \lin ->
-          borrowLinearOnly (Ref.new False lin)
-        (var, egraph) <- forRebor2_ var egraph results \var egraph (Ur (eid, subs, CompiledRule {..})) ->
-          case substPattern subs rhs of
-            Failure _ -> Control.pure (var `lseq` consume egraph)
-            Success pat -> Control.do
-              (Ur meid, egraph) <- addPattern pat egraph
-              meid PL.& \case
-                Nothing -> Control.pure (var `lseq` consume egraph)
-                Just newEid -> Control.do
-                  (Ur resl, egraph) <- unsafeMerge eid newEid egraph
-                  case resl of
-                    Merged {} -> Control.void (modifyRef (`lseq` True) var)
-                    AlreadyMerged {} -> Control.pure PL.$ consume var
-                  Control.pure (consume egraph)
-        Control.pure \end -> var `lseq` egraph `lseq` freeRef (reclaim lend (upcast end))
+    substitute egraph results = reborrowing' egraph \egraph -> Control.do
+      !(var, lend) <- asksLinearly PL.$ borrowLinearOnly PL.. Ref.new False
+      (var, egraph) <- forRebor2_ var egraph results \var egraph (Ur (eid, subs, CompiledRule {..})) ->
+        case substPattern subs rhs of
+          Failure _ -> var `lseq` egraph `lseq` error "Substitution produces invalid expression"
+          Success pat -> Control.do
+            -- () <- DT.trace "-----" PL.$ Control.pure ()
+            -- (Ur egDisp, egraph) <- display <$~ egraph
+            -- () <- DT.trace ("egraph = " <> egDisp) PL.$ Control.pure ()
+            -- () <- DT.trace ("Rule " <> show name <> " applied to EClass " <> show eid <> " and get: " <> show pat) PL.$ Control.pure ()
+            (Ur meid, egraph) <- addNestedENode pat egraph
+            -- () <- DT.trace (show pat <> " ==> " <> show meid) PL.$ Control.pure ()
+            meid PL.& \case
+              Nothing -> var `lseq` egraph `lseq` error "Invalid substitution"
+              Just newEid -> Control.do
+                (Ur resl, egraph) <- unsafeMerge eid newEid egraph
+                -- () <- DT.trace (show (eid, newEid) <> " ==> " <> show resl) PL.$ Control.pure ()
+                case resl of
+                  Merged {} -> Control.void PL.$ modifyRef (`lseq` True) var
+                  AlreadyMerged {} -> Control.pure PL.$ consume var
+                Control.pure (consume egraph)
+      Control.pure \end -> var `lseq` egraph `lseq` freeRef (reclaim lend (upcast end))
 
 newtype ExtractBest l cost = ExtractBest
   { optimal :: ArgMin cost (ENode l)

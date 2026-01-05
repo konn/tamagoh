@@ -18,6 +18,10 @@ newtype EClassId = EClassId {getKey :: Key}
   deriving newtype
     ( PL.Eq
     , PL.Ord
+    , Num
+    , Enum
+    , Integral
+    , Real
     , Hashable
     , PL.Consumable
     , PL.Dupable

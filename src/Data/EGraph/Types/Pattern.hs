@@ -13,7 +13,7 @@ module Data.EGraph.Types.Pattern (
   matchOneStep,
   matchNode,
   embedTerm,
-  addPattern,
+  addNestedENode,
 ) where
 
 import Control.DeepSeq (NFData, NFData1)
@@ -76,13 +76,13 @@ matchNode ::
 matchNode (Metavar v) node = Just $ Left (v, node)
 matchNode (PNode p) (ENode node) = Right . FML.toList <$> tryMatch p node
 
-addPattern ::
+addNestedENode ::
   forall d l α.
   (Analysis l d, Hashable1 l, Movable1 l) =>
   Pattern l EClassId ->
   Mut α (EGraph d l) %1 ->
   BO α (Ur (Maybe EClassId), Mut α (EGraph d l))
-addPattern pat egraph =
+addNestedENode pat egraph =
   PL.flip Control.runStateT egraph PL.$ runUrT PL.$ runMaybeT do
     go pat
   where

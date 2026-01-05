@@ -4,6 +4,7 @@ module Data.Trie (
   Trie (),
   empty,
   toRows,
+  fromRows,
   cons,
   member,
   singleton,
@@ -12,9 +13,9 @@ module Data.Trie (
   project,
 ) where
 
-import Data.Bifunctor qualified as Bi
+import Control.Foldl qualified as L
+import Control.Lens hiding (cons, indices)
 import Data.EGraph.Types.EClassId (EClassId)
-import Data.FMList (FMList)
 import Data.FMList qualified as FML
 import Data.Foldable (foldMap')
 import Data.Foldable qualified as F
@@ -23,8 +24,10 @@ import Data.HashMap.Strict qualified as HM
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HashSet
 import Data.IntSet qualified as IntSet
-import Data.List.NonEmpty (NonEmpty)
-import Data.Strict.Maybe qualified as Strict
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.List.NonEmpty qualified as NE
+import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Monoid (Alt (Alt))
 import GHC.Generics
 
 -- Invariant: keys are subset of branches's keys
@@ -74,37 +77,50 @@ insert (i : is) (Trie vec) =
   Trie $ HM.alter (Just . maybe (singleton is) (insert is)) i vec
 {-# INLINE insert #-}
 
-focus :: [Maybe EClassId] -> Trie -> Trie
-focus [] trie = trie
-focus (Nothing : xs) (Trie vec) = Trie $ focus xs <$> vec
-focus (Just i : xs) (Trie vec) =
-  if HM.member i vec
-    then Trie (HM.singleton i $ focus xs $ vec HM.! i)
-    else empty
+{- | Focus the trie on the given indices.
+__Invariant__: The indices in the first coordinate MUST be sorted in strictly ascending order.
+-}
+focus :: NonEmpty (Int, EClassId) -> Trie -> Trie
+focus = fmap (fromMaybe empty) . go 0 . NE.toList
+  where
+    wrapTrie = \hm ->
+      if HM.null hm
+        then Nothing
+        else Just $ Trie hm
+    go :: Int -> [(Int, EClassId)] -> Trie -> Maybe Trie
+    go !_ [] trie = Just trie
+    go !i kks@((k, eid) : ks) (Trie vec)
+      | i < k = wrapTrie $ HM.mapMaybe (go (i + 1) kks) vec
+      | otherwise =
+          fmap (Trie . HM.singleton eid) . go (i + 1) ks =<< HM.lookup eid vec
 {-# INLINE focus #-}
 
 project :: NonEmpty Int -> Trie -> HashSet EClassId
 project indices =
-  Strict.fromJust
-    . go 0 (IntSet.toAscList $ IntSet.fromList $ F.toList indices) Strict.Nothing
-    . FML.singleton
+  HashSet.fromList
+    . probe 0 (NE.fromList $ IntSet.toAscList $ IntSet.fromList $ F.toList indices)
   where
-    go :: Int -> [Int] -> Strict.Maybe (HashSet EClassId) -> FMList Trie -> Strict.Maybe (HashSet EClassId)
-    go !_ [] !acc _ = acc
-    go !n (i : is) !acc tries
-      | n == i =
-          let (keys, chs) =
-                foldMap'
-                  (Bi.bimap HashSet.fromList FML.fromList . unzip . HM.toList . (.branches))
-                  tries
-              !acc' =
-                Strict.Just $
-                  Strict.maybe keys (HashSet.intersection keys) acc
-           in go (n + 1) is acc' chs
+    probe :: Int -> NonEmpty Int -> Trie -> [EClassId]
+    probe !n (i :| is) trie
+      | n == i = mapMaybe (uncurry $ go (n + 1) is) $ HM.toList trie.branches
+      | otherwise = foldMap' (probe (n + 1) (i :| is)) trie.branches
+    go :: Int -> [Int] -> EClassId -> Trie -> Maybe EClassId
+    go !_ [] !eid _ = pure eid
+    go !n (i : is) !eid !trie
+      | n == i = do
+          trie' <- HM.lookup eid trie.branches
+          go (n + 1) is eid trie'
       | otherwise =
-          go (n + 1) (i : is) acc $!
-            foldMap' (FML.fromList . F.toList . (.branches)) tries
+          alaf Alt foldMap (go (n + 1) (i : is) eid) trie.branches
 
 cons :: EClassId -> Trie -> Trie
 {-# INLINE cons #-}
 cons i = Trie . HM.singleton i
+
+fromRows :: [Row] -> Trie
+fromRows = go
+  where
+    go [] = Trie HM.empty
+    go ([] : _) = Trie HM.empty
+    go rows =
+      L.fold (L.premap uncons $ L.handles _Just $ Trie <$> L.foldByKeyHashMap (go <$> L.list)) rows

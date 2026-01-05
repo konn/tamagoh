@@ -53,6 +53,7 @@ library
     deriving-compat,
     dlist,
     fmlist,
+    foldl,
     functor-combinators,
     generic-lens,
     hashable,
@@ -63,13 +64,16 @@ library
     linear-witness,
     recursion-schemes,
     selective,
+    semialign,
     strict,
     template-haskell,
     th-abstraction,
     th-desugar,
+    these,
     transformers,
     unordered-containers,
     validation-selective,
+    vector,
 
   hs-source-dirs: src
   -- cabal-gild: discover src --exclude=src/**/Internal.hs

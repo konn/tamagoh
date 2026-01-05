@@ -10,6 +10,7 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE QualifiedDo #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -25,11 +26,10 @@ module Data.EGraph.EMatch.Relational.Database (
   Operator (..),
   newDatabase,
   getTrie,
-  insertDb,
   toOperator,
 ) where
 
-import Control.Arrow ((>>>))
+import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as Control
 import Control.Lens hiding (universe)
 import Control.Monad.Borrow.Pure
@@ -44,7 +44,6 @@ import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.HashSet (HashSet)
-import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.Maybe (fromMaybe)
@@ -121,7 +120,17 @@ universe :: Database l -> HashSet EClassId
 universe = (.universe)
 
 fromRelations :: (HasDatabase l) => [Relation l EClassId] -> Database l
-fromRelations = foldr (\MkRel {id, args} -> insertDb id $ ENode args) newDatabase
+fromRelations rels =
+  let (universe, database) =
+        L.fold
+          ( (,)
+              <$> L.handles folded L.hashSet
+              <*> L.premap
+                (\rel@MkRel {args} -> (toOperator args, F.toList rel))
+                (L.foldByKeyHashMap (Trie.fromRows <$> L.list))
+          )
+          rels
+   in Database {..}
 
 newDatabase :: forall l. (HasDatabase l) => Database l
 newDatabase = Database mempty mempty
@@ -132,10 +141,14 @@ toOperator = Operator . (fmap (const Wildcard))
 getTrie :: forall l. (HasDatabase l) => Operator l -> Database l -> Trie
 getTrie l (Database db _) = HM.lookupDefault Trie.empty l db
 
-insertDb :: forall l. (HasDatabase l) => EClassId -> ENode l -> Database l -> Database l
-insertDb eid (ENode enode) =
-  let row = F.toList $ MkRel {id = eid, args = enode}
-   in #database . at (toOperator enode) %~ Just . maybe (Trie.singleton row) (Trie.insert row)
-        >>> #universe %~ \universe -> foldl' (flip HS.insert) (HS.insert eid universe) enode
+type instance Index (Database l) = Operator l
+
+type instance IxValue (Database l) = Trie
+
+instance (HasDatabase l) => Ixed (Database l)
+
+instance (HasDatabase l) => At (Database l) where
+  at op = #database . at op
+  {-# INLINE at #-}
 
 type HasDatabase l = (Hashable1 l, Functor l, Foldable l)

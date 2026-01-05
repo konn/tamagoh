@@ -67,9 +67,7 @@ ringRules =
   [ named "add-zero" $ a + 0 ==> a
   , named "+-comm" $ a + b ==> b + a
   , named "*-comm" $ a * b ==> b * a
-  , named "+-assoc-r" $ (a + b) + c ==> a + (b + c)
   , named "+-assoc-l" $ a + (b + c) ==> (a + b) + c
-  , named "*-assoc-r" $ (a * b) * c ==> a * (b * c)
   , named "*-assoc-l" $ a * (b * c) ==> (a * b) * c
   , named "distrib" $ a * (b + c) ==> a * b + a * c
   , named "mul-one" $ a * 1 ==> a
@@ -112,7 +110,7 @@ test_saturate =
             step "Checking (non-)equivalence before saturation..."
             equivalent graph l r @?= Just False
             step "Saturating..."
-            let result = saturate SaturationConfig {maxIterations = Nothing} ringRules graph
+            let !result = saturate SaturationConfig {maxIterations = Nothing} ringRules graph
             step "Checking equivalence after saturation"
             case result of
               Left err -> assertFailure $ "saturation failed: " <> show err
@@ -140,7 +138,7 @@ test_saturate =
           (_, Just _) -> assertFailure "RHS term should not be registered, but found!"
           (Just l, Nothing) -> do
             step "Saturating..."
-            let result = saturate SaturationConfig {maxIterations = Nothing} ringRules graph
+            let !result = saturate SaturationConfig {maxIterations = Nothing} ringRules graph
             step "Checking equivalence after saturation"
             case result of
               Left err -> assertFailure $ "saturation failed: " <> show err
@@ -214,7 +212,7 @@ test_constantFolding =
 checkFolding :: String -> Term Expr -> Term Expr -> TestTree
 checkFolding name lhs rhs = testCase name do
   let graph = fromList @ConstantFolding [lhs]
-  graph' <- either throwIO pure $ saturate SaturationConfig {maxIterations = Nothing} ringRules graph
+  !graph' <- either throwIO pure $ saturate SaturationConfig {maxIterations = Nothing} ringRules graph
   let eqv = equivalent graph' lhs rhs
   assertBool ("Expected to be equal, but got: " <> show eqv) (eqv == Just True)
 
@@ -249,7 +247,7 @@ test_extractBest =
             extractBest eid graph
         count @?= 3
         bestTerm @?= term
-        graph' <-
+        !graph' <-
           either throwIO pure $
             saturate SaturationConfig {maxIterations = Nothing} ringRules $
               PL.unur PL.$

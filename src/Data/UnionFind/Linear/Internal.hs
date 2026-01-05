@@ -49,6 +49,8 @@ newtype Key = Key {getKey :: Word}
     , Prelude.Num
     , Show
     , Enum
+    , Integral
+    , Real
     , Bounded
     , Hashable
     , Consumable

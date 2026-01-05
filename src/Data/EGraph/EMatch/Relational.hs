@@ -4,6 +4,8 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -18,25 +20,37 @@ module Data.EGraph.EMatch.Relational (
   compile,
 ) where
 
+import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as Control
+import Control.Lens (at, folded, indexing, withIndex, (%~), (&), (^.))
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Utils (nubHash)
+import Data.Bifunctor qualified as Bi
 import Data.EGraph.EMatch.Relational.Database
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types
 import Data.EGraph.Types
+import Data.Foldable (foldMap')
 import Data.Foldable qualified as F
 import Data.Foldable1 (foldl1')
+import Data.Functor qualified as Functor
 import Data.Functor.Classes (Show1)
 import Data.Functor.Compose (Compose (Compose))
 import Data.Functor.Product (Product (..))
+import Data.Generics.Labels ()
+import Data.HashMap.Strict qualified as HM
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
+import Data.List (sortOn)
+import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Trie (project)
+import Data.Trie qualified as Trie
+import Data.Tuple qualified as Tuple
 import Data.Unrestricted.Linear (Ur (..))
 import Data.Unrestricted.Linear.Lifted (Movable1)
+import GHC.Generics (Generic)
 import Prelude.Linear qualified as PL
 
 ematch ::
@@ -70,24 +84,55 @@ query ::
 query (Conj cq) = genericJoin cq
 query (SelectAll v) = map (singletonVar v) . HS.toList . universe
 
+data RelationState l v = RelationState
+  { atom :: !(Atom l v)
+  , database :: !Trie.Trie
+  , positions :: !(HM.HashMap v (NonEmpty Int))
+  }
+  deriving (Show, Eq, Ord, Generic)
+
+buildQueryState ::
+  (HasDatabase l, Hashable v) =>
+  Database l -> Atom l v -> Maybe (RelationState l v)
+buildQueryState db atom@(Atom MkRel {args}) = do
+  !database <- db ^. at (toOperator args)
+  let !positions = L.foldOver (indexing folded . withIndex) (L.premap Tuple.swap $ L.foldByKeyHashMap $ NE.fromList <$> L.list) atom
+  pure RelationState {..}
+
 genericJoin ::
   forall l v.
   (Hashable v, HasDatabase l) =>
   ConjunctiveQuery l v ->
   Database l ->
   [Substitution v]
-genericJoin (hd :- qs) db = go (nubHash $ F.toList $ Pair hd (Compose qs)) mempty
+genericJoin (hd :- qs) db = fromMaybe [] do
+  rels <- mapM (buildQueryState db) qs
+  pure $ go (nubHash $ F.toList $ Pair hd (Compose qs)) rels mempty
   where
     -- TODO: consider some selection strategy
-    go :: [v] -> Substitution v -> [Substitution v]
-    go [] sub = [sub]
-    go (v : vs) sub =
-      let atms = mapMaybe (\atm -> (atm,) <$> findVars v atm) $ NE.toList qs
-          domain = case NE.nonEmpty atms of
-            Nothing -> universe db
-            Just xs' ->
-              foldl1' HS.intersection $
-                NE.map
-                  (\(Atom (MkRel _ node), poss) -> project poss (getTrie (toOperator node) db))
-                  xs'
-       in concatMap (\eid -> go vs $ insertVar v eid sub) domain
+    go :: [v] -> NonEmpty (RelationState l v) -> Substitution v -> [Substitution v]
+    go [] !_ sub = [sub]
+    go (v : vs) qs sub =
+      let
+       in -- !() = DT.trace ("Substituting " <> show v <> " in query: " <> show qs <> " with subs" <> show sub) ()
+          let (!doms, !qs') =
+                Bi.first (sortOn HS.size . catMaybes . NE.toList) $
+                  Functor.unzip $
+                    fmap
+                      ( \q ->
+                          case HM.lookup v q.positions of
+                            Nothing -> (Nothing, const q)
+                            Just poss ->
+                              ( Just $ project poss q.database
+                              , \eid ->
+                                  q
+                                    & #atom %~ substAtom v eid
+                                    & #database %~ Trie.focus ((,eid) <$> poss)
+                              )
+                      )
+                      qs
+              !domain = case NE.nonEmpty doms of
+                Nothing -> universe db
+                Just xs' -> foldl1' HS.intersection xs'
+           in -- !() = DT.trace ("    Domain for " <> show v <> ": " <> show domain) ()
+              foldMap' (\eid -> go vs (($ eid) <$> qs') (insertVar v eid sub)) domain

@@ -18,6 +18,8 @@ module Data.EGraph.EMatch.Relational.Query (
   PatternQuery (..),
   compile,
   findVars,
+  substAtom,
+  substRelation,
 ) where
 
 import Control.Monad.Trans.State.Strict (State, StateT (..), evalState, state)
@@ -30,9 +32,9 @@ import Data.Functor.Classes
 import Data.HashSet qualified as HashSet
 import Data.Hashable
 import Data.Hashable.Lifted
+import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (mapMaybe)
 import GHC.Generics
 import Text.Show.Deriving
 
@@ -56,7 +58,7 @@ data CompiledVar v = Fresh !Word | PVar v
 deriveShow1 ''CompiledVar
 
 data EClassIdOrVar v
-  = EClassId !EClassId
+  = EId !EClassId
   | QVar !v
   deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
   deriving anyclass (Hashable, Hashable1)
@@ -64,7 +66,7 @@ data EClassIdOrVar v
 
 deriveShow1 ''EClassIdOrVar
 
-data Atom l v = Atom (Relation l (EClassIdOrVar v))
+newtype Atom l v = Atom (Relation l (EClassIdOrVar v))
   deriving (Generic, Generic1, Functor, Foldable, Traversable)
   deriving (Eq1, Ord1) via Generically1 (Atom l)
 
@@ -98,14 +100,7 @@ deriveShow1 ''Query
 
 findVars :: (Eq v, Foldable l) => v -> Atom l v -> Maybe (NonEmpty Int)
 findVars v (Atom pattern) =
-  NE.nonEmpty
-    $ mapMaybe
-      ( uncurry \cases
-          !i (QVar v') | v == v' -> Just i
-          _ _ -> Nothing
-      )
-    $ zip [0 ..]
-    $ F.toList pattern
+  NE.nonEmpty $ List.elemIndices (QVar v) $ F.toList pattern
 
 newtype FreshM a = FreshM (State Word a)
   deriving newtype (Functor, Applicative, Monad)
@@ -147,3 +142,14 @@ compile = \pat0 ->
               foldMap' snd vsatmss
       pure (v, atms)
     aux (Metavar v) = pure (PVar v, mempty)
+
+substAtom :: forall l v. (Functor l, Eq v) => v -> EClassId -> Atom l v -> Atom l v
+substAtom = coerce $ substRelation @l @v
+
+substRelation ::
+  forall l v.
+  (Functor l, Eq v) =>
+  v -> EClassId -> Relation l (EClassIdOrVar v) -> Relation l (EClassIdOrVar v)
+substRelation v eid (MkRel hd args) =
+  let subs = \case QVar v' | v == v' -> EId eid; x -> x
+   in MkRel (subs hd) (fmap subs args)

@@ -31,7 +31,7 @@ test_Math :: TestTree
 test_Math =
   testGroup
     "Math tests from egraphs-good/egg"
-    [ testCaseSteps "math_associate_adds" \step -> do
+    [ testCase "math_associate_adds" do
         let a = Metavar "a"
             b = Metavar "b"
             c = Metavar "c"
@@ -44,8 +44,6 @@ test_Math =
             !rhs = foldr1 (+) $ map lit [7, 6 .. 1] :: Term Math
         graph <- either throwIO pure $ saturate simple rules $ fromList [lhs]
         equivalent graph lhs rhs @?= Just True
-        step $ "Saturated EGraph: " <> show graph
-        step $ "Saturated Db: " <> show (buildDatabase graph)
         numEClasses graph @?= 127
     , testCase "math_fail" do
         graph <-

@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE LambdaCase #-} 
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
@@ -249,7 +249,7 @@ instance Semilattice ConstantFold where
   l /\ ConstantFold Nothing = l
   ConstantFold (Just x) /\ ConstantFold (Just y)
     | x == y = ConstantFold (Just x)
-    | otherwise = error "Conflicting constant values in ConstantFold semilattice"
+    | otherwise = error $ "Conflicting constant values: " <> show (x, y)
   {-# INLINE (/\) #-}
 
 instance Tamagoh.Analysis Math ConstantFold where
