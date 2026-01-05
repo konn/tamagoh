@@ -179,7 +179,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , ignoreTestBecause "It takes too much time" $ testCase "diff_power_harder" do
+      , ignoreTestBecause "TIMEOUT" $ testCase "diff_power_harder" do
           let x = var "x"
               lhs = diff x ((x ** 3) - (7 * (x ** 2)))
               rhs = x * ((3 * x) - 14)
@@ -212,7 +212,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , ignoreTestBecause "TIMEOUT" $ testCase "integ_x" do
+      , testCase "integ_x" do
           let x = var "x"
               lhs = integral (x ** 1) x
               rhs = (x ** 2) / 2
