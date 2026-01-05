@@ -241,7 +241,10 @@ foldConstF = \case
   l :+ r -> liftBin (+) l r
   l :- r -> liftBin (-) l r
   l :* r -> liftBin (*) l r
-  l :/ r -> if r /= ConstantFold (Just 0.0) then liftBin (/) l r else ConstantFold Nothing
+  l :/ r ->
+    if r /= ConstantFold (Just 0.0)
+      then liftBin (/) l r
+      else ConstantFold Nothing
   _ -> ConstantFold Nothing
 
 instance Semilattice ConstantFold where
@@ -300,13 +303,13 @@ mathRulesTamagoh =
   , -- Canonisation
     named "sub-canon" $ a - b ==> a + (-1 * b)
   , named "div-canon" $ a / b ==> a * (b ** (-1)) @? isNonZero "b"
-  , -- Constants on Left
+  , -- Identities & Absoptions
     named "zero-add" $ 0 + a ==> a
   , named "zero-mul" $ 0 * a ==> 0
   , named "one-mul" $ 1 * a ==> a
-  , -- Constants on Right
-    named "add-zero" $ a + 0 ==> a
-  , named "mul-one" $ a * 1 ==> a
+  , -- Opposite identities
+    named "add-zero" $ a ==> a + 0
+  , named "mul-one" $ a ==> a * 1
   , -- Cancel laws
     named "cancel-sub" $ a - a ==> 0
   , named "cancel-div" $ a / a ==> 1 @? isNonZero "a"

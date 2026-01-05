@@ -75,4 +75,183 @@ test_Math =
         lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
         rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
         equivalent graph lid rid @?= Just True
+    , testCase "math_simplify_add" do
+        let x = var "x"
+            lhs = x + (x + (x + x))
+            rhs = 4 * x
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "math_powers" do
+        let x = var "x"
+            y = var "y"
+            lhs = (2 ** x) * (2 ** y)
+            rhs = 2 ** (x + y)
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "math_simplify_const" do
+        let a = var "a"
+            lhs = 1 + (a - ((2 - 1) * a))
+            rhs = 1 :: Term Math
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "math_diff_same" do
+        let x = var "x"
+            lhs = diff x x
+            rhs = 1 :: Term Math
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "math_diff_different" do
+        let x = var "x"
+            y = var "y"
+            lhs = diff x y
+            rhs = 0 :: Term Math
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "math_diff_simple1" do
+        let x = var "x"
+            lhs = diff x (1 + (2 * x))
+            rhs = 2 :: Term Math
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "math_diff_simple2" do
+        let x = var "x"
+            y = var "y"
+            lhs = diff x (1 + (y * x))
+            rhs = y
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "math_diff_ln" do
+        let x = var "x"
+            lhs = diff x (lnE x)
+            rhs = 1 / x
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "diff_power_simple" do
+        let x = var "x"
+            lhs = diff x (x ** 3)
+            rhs = 3 * (x ** 2)
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , ignoreTestBecause "It takes too much time" $ testCase "diff_power_harder" do
+        let x = var "x"
+            lhs = diff x ((x ** 3) - (7 * (x ** 2)))
+            rhs = x * ((3 * x) - 14)
+        !graph <-
+          either throwIO pure $
+            saturate simple {nodeLimit = Just 100_000, maxIterations = Just 60} mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "integ_one" do
+        let x = var "x"
+            lhs = integral 1 x
+            rhs = x
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "integ_sin" do
+        let x = var "x"
+            lhs = integral (cos x) x
+            rhs = sin x
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "integ_x" do
+        let x = var "x"
+            lhs = integral (x ** 1) x
+            rhs = (x ** 2) / 2
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "integ_part1" do
+        let x = var "x"
+            lhs = integral (x * cos x) x
+            rhs = (x * sin x) + cos x
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "integ_part2" do
+        let x = var "x"
+            lhs = integral (cos x * x) x
+            rhs = (x * sin x) + cos x
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
+    , testCase "integ_part3" do
+        let x = var "x"
+            lhs = integral (lnE x) x
+            rhs = (x * lnE x) - x
+        !graph <-
+          either throwIO pure $
+            saturate simple mathRulesTamagoh $
+              fromList [lhs]
+        lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+        rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+        equivalent graph lid rid @?= Just True
     ]

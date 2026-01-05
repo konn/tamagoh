@@ -3,6 +3,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -22,6 +23,8 @@ module Data.EGraph.EMatch.Relational.Query (
   substRelation,
 ) where
 
+import Control.Lens (preview)
+import Control.Lens.Extras (is)
 import Control.Monad.Trans.State.Strict (State, StateT (..), evalState, state)
 import Data.Coerce (coerce)
 import Data.DList qualified as DL
@@ -29,6 +32,7 @@ import Data.EGraph.Types
 import Data.Foldable (Foldable (foldMap'))
 import Data.Foldable qualified as F
 import Data.Functor.Classes
+import Data.Generics.Labels ()
 import Data.HashSet qualified as HashSet
 import Data.Hashable
 import Data.Hashable.Lifted
@@ -124,24 +128,31 @@ data PatternQuery l v = PatternQuery
 compile ::
   forall l v.
   (Hashable v, Traversable l) =>
-  Pattern l v -> PatternQuery l v
-compile = \pat0 ->
-  let (root, atms) = runFreshM (aux pat0)
-      vs = HashSet.toList $ foldMap' (HashSet.singleton . PVar) pat0
-      patQuery = case NE.nonEmpty $ DL.toList atms of
-        Nothing -> SelectAll root
-        Just atms' -> Conj $ vs :- atms'
-   in PatternQuery {..}
-  where
-    aux :: Pattern l v -> FreshM (CompiledVar v, DL.DList (Atom l (CompiledVar v)))
-    aux (PNode l) = do
-      v <- fresh
-      vsatmss <- mapM aux l
-      let atms =
-            DL.cons (Atom (MkRel (QVar v) $ QVar . fst <$> vsatmss)) $
-              foldMap' snd vsatmss
-      pure (v, atms)
-    aux (Metavar v) = pure (PVar v, mempty)
+  Pattern l v ->
+  PatternQuery l v
+compile = \case
+  PNode ls
+    | Just vars <- mapM (fmap PVar . preview #_Metavar) ls ->
+        -- Not a nested query - no join required!
+        let root = Fresh 0
+         in PatternQuery {root, patQuery = Conj $ (root : F.toList vars) :- NE.singleton (Atom $ QVar <$> MkRel {id = root, args = vars})}
+  pat0 ->
+    let (root, atms) = runFreshM (aux pat0)
+        vs = HashSet.toList $ foldMap' (HashSet.singleton . PVar) pat0
+        patQuery = case NE.nonEmpty $ DL.toList atms of
+          Nothing -> SelectAll root
+          Just atms' -> Conj $ vs :- atms'
+     in PatternQuery {..}
+    where
+      aux :: Pattern l v -> FreshM (CompiledVar v, DL.DList (Atom l (CompiledVar v)))
+      aux (PNode l) = do
+        v <- fresh
+        vsatmss <- mapM aux l
+        let atms =
+              DL.cons (Atom (MkRel (QVar v) $ QVar . fst <$> vsatmss)) $
+                foldMap' snd vsatmss
+        pure (v, atms)
+      aux (Metavar v) = pure (PVar v, mempty)
 
 substAtom :: forall l v. (Functor l, Eq v) => v -> EClassId -> Atom l v -> Atom l v
 substAtom = coerce $ substRelation @l @v

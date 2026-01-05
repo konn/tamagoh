@@ -152,7 +152,6 @@ test-suite tamagoh-test
     Data.UnionFind.Linear.BorrowedSpec
 
   build-depends:
-    tasty-expected-failure,
     data-fix,
     deriving-compat,
     falsify,
