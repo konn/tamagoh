@@ -24,7 +24,8 @@ import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as Control
 import Control.Lens (at, folded, indexing, withIndex, (%~), (&), (^.))
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Utils (nubHash)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Writer (WriterT (..), tell)
 import Data.Bifunctor qualified as Bi
 import Data.Coerce (coerce)
 import Data.EGraph.EMatch.Relational.Database
@@ -36,22 +37,25 @@ import Data.Foldable qualified as F
 import Data.Foldable1 (foldl1')
 import Data.Functor qualified as Functor
 import Data.Functor.Classes (Show1)
-import Data.Functor.Compose (Compose (Compose))
-import Data.Functor.Product (Product (..))
 import Data.Generics.Labels ()
+import Data.HashMap.Monoidal (MonoidalHashMap (..))
+import Data.HashMap.Monoidal qualified as MHM
 import Data.HashMap.Strict qualified as HM
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
+import Data.Heap qualified as Heap
 import Data.List (sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (catMaybes, fromMaybe)
+import Data.Ord (Down (..))
+import Data.Semigroup (Min (..), Sum (..))
 import Data.Trie (project)
 import Data.Trie qualified as Trie
 import Data.Tuple qualified as Tuple
 import Data.Unrestricted.Linear (Ur (..))
 import Data.Unrestricted.Linear.Lifted (Movable1)
-import GHC.Generics (Generic)
+import GHC.Generics (Generic, Generically (..))
 import Prelude.Linear qualified as PL
 
 ematch ::
@@ -92,12 +96,29 @@ data RelationState l v = RelationState
   }
   deriving (Show, Eq, Ord, Generic)
 
+data VarWeight = VarWeight
+  { numRels :: !(Down (Sum Word))
+  , smallestDbSize :: !(Min Word)
+  }
+  deriving (Show, Eq, Ord, Generic)
+  deriving (Semigroup, Monoid) via Generically VarWeight
+
+type VarStats v = MonoidalHashMap v VarWeight
+
 buildQueryState ::
   (HasDatabase l, Hashable v) =>
-  Database l -> Atom l v -> Maybe (RelationState l v)
+  Database l ->
+  Atom l v ->
+  WriterT (VarStats v) Maybe (RelationState l v)
 buildQueryState db atom@(Atom MkRel {args}) = do
-  !database <- db ^. at (toOperator args)
+  !database <- lift $ db ^. at (toOperator args)
   let !positions = L.foldOver (indexing folded . withIndex) (L.premap Tuple.swap $ L.foldByKeyHashMap $ NE.fromList <$> L.list) atom
+      weight =
+        VarWeight
+          { numRels = Down (Sum 1)
+          , smallestDbSize = Min (Trie.size database)
+          }
+  tell $ weight <$ MonoidalHashMap positions
   pure RelationState {..}
 
 genericJoin ::
@@ -124,30 +145,35 @@ genericJoin (hd :- (atm@(Atom rel@MkRel {args}) :| [])) db = fromMaybe [] do
       then matches
       else (<>) <$> matches <*> frees
 genericJoin (hd :- qs) db = fromMaybe [] do
-  rels <- mapM (buildQueryState db) qs
-  pure $ go (nubHash $ F.toList $ Pair hd (Compose qs)) rels mempty
+  (rels, varStat) <- runWriterT $ mapM (buildQueryState db) qs
+  let vs =
+        Heap.fromList $
+          map (uncurry $ flip Heap.Entry) $
+            MHM.toList $
+              varStat <> MHM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) $ F.toList hd)
+  pure $ go vs rels mempty
   where
     -- TODO: consider some selection strategy
-    go :: [v] -> NonEmpty (RelationState l v) -> Substitution v -> [Substitution v]
-    go [] !_ sub = [sub]
-    go (v : vs) qs sub =
-      let (!doms, !qs') =
-            Bi.first (sortOn HS.size . catMaybes . NE.toList) $
-              Functor.unzip $
-                fmap
-                  ( \q ->
-                      case HM.lookup v q.positions of
-                        Nothing -> (Nothing, const q)
-                        Just poss ->
-                          ( Just $ project poss q.database
-                          , \eid ->
-                              q
-                                & #atom %~ substAtom v eid
-                                & #database %~ Trie.focus ((,eid) <$> poss)
-                          )
-                  )
-                  qs
-          !domain = case NE.nonEmpty doms of
-            Nothing -> universe db
-            Just xs' -> foldl1' HS.intersection xs'
-       in foldMap' (\eid -> go vs (($ eid) <$> qs') (insertVar v eid sub)) domain
+    go !vvs !qs sub = case Heap.viewMin vvs of
+      Nothing -> [sub]
+      Just (Heap.Entry {payload = v}, vs) ->
+        let (!doms, !qs') =
+              Bi.first (sortOn HS.size . catMaybes . NE.toList) $
+                Functor.unzip $
+                  fmap
+                    ( \q ->
+                        case HM.lookup v q.positions of
+                          Nothing -> (Nothing, const q)
+                          Just poss ->
+                            ( Just $ project poss q.database
+                            , \eid ->
+                                q
+                                  & #atom %~ substAtom v eid
+                                  & #database %~ Trie.focus ((,eid) <$> poss)
+                            )
+                    )
+                    qs
+            !domain = case NE.nonEmpty doms of
+              Nothing -> universe db
+              Just xs' -> foldl1' HS.intersection xs'
+         in foldMap' (\eid -> go vs (($ eid) <$> qs') (insertVar v eid sub)) domain

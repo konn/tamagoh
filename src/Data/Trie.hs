@@ -1,7 +1,9 @@
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE NoFieldSelectors #-}
 
 module Data.Trie (
   Trie (),
+  size,
   empty,
   toRows,
   fromRows,
@@ -36,8 +38,11 @@ import Data.Monoid (Alt (Alt))
 import GHC.Generics
 
 -- Invariant: keys are subset of branches's keys
-newtype Trie = Trie {branches :: HashMap EClassId Trie}
+data Trie = Trie {size :: {-# UNPACK #-} !Word, branches :: {-# UNPACK #-} !(HashMap EClassId Trie)}
   deriving (Eq, Ord, Generic)
+
+size :: Trie -> Word
+size = (.size)
 
 instance Show Trie where
   showsPrec d trie =
@@ -49,7 +54,7 @@ type Row = [EClassId]
 toRows :: Trie -> [Row]
 toRows = FML.toList . go
   where
-    go (Trie hm)
+    go (Trie _ hm)
       | HM.null hm = FML.singleton []
       | otherwise =
           foldMap'
@@ -60,26 +65,26 @@ toRows = FML.toList . go
 {-# INLINE toRows #-}
 
 empty :: Trie
-empty = Trie HM.empty
+empty = Trie 0 HM.empty
 {-# INLINE empty #-}
 
 member :: [EClassId] -> Trie -> Bool
 member [] _ = True
-member (i : is) (Trie vec) =
+member (i : is) (Trie _ vec) =
   if HM.member i vec
     then member is $ vec HM.! i
     else False
 {-# INLINE member #-}
 
 singleton :: [EClassId] -> Trie
-singleton [] = Trie HM.empty
-singleton (i : is) = Trie $ HM.singleton i (singleton is)
+singleton [] = Trie 0 HM.empty
+singleton (i : is) = Trie 1 $ HM.singleton i (singleton is)
 {-# INLINE singleton #-}
 
 insert :: [EClassId] -> Trie -> Trie
 insert [] trie = trie
-insert (i : is) (Trie vec) =
-  Trie $ HM.alter (Just . maybe (singleton is) (insert is)) i vec
+insert (i : is) (Trie n vec) =
+  Trie (n + 1) $ HM.alter (Just . maybe (singleton is) (insert is)) i vec
 {-# INLINE insert #-}
 
 {- | Focus the trie on the given indices.
@@ -88,16 +93,16 @@ __Invariant__: The indices in the first coordinate MUST be sorted in strictly as
 focus :: NonEmpty (Int, EClassId) -> Trie -> Trie
 focus = fmap (fromMaybe empty) . go 0 . NE.toList
   where
-    wrapTrie = \hm ->
+    wrapTrie n = \hm ->
       if HM.null hm
         then Nothing
-        else Just $ Trie hm
+        else Just $ Trie n hm
     go :: Int -> [(Int, EClassId)] -> Trie -> Maybe Trie
     go !_ [] trie = Just trie
-    go !i kks@((k, eid) : ks) (Trie vec)
-      | i < k = wrapTrie $ HM.mapMaybe (go (i + 1) kks) vec
+    go !i kks@((k, eid) : ks) (Trie n vec)
+      | i < k = wrapTrie n $ HM.mapMaybe (go (i + 1) kks) vec
       | otherwise =
-          fmap (Trie . HM.singleton eid) . go (i + 1) ks =<< HM.lookup eid vec
+          fmap (\t -> Trie t.size $ HM.singleton eid t) . go (i + 1) ks =<< HM.lookup eid vec
 {-# INLINE focus #-}
 
 project :: NonEmpty Int -> Trie -> HashSet EClassId
@@ -120,21 +125,27 @@ project indices =
 
 cons :: EClassId -> Trie -> Trie
 {-# INLINE cons #-}
-cons i = Trie . HM.singleton i
+cons i = Trie <$> (.size) <*> HM.singleton i
 
 fromRows :: [Row] -> Trie
 fromRows = go
   where
-    go [] = Trie HM.empty
-    go ([] : _) = Trie HM.empty
+    go [] = Trie 0 HM.empty
+    go ([] : _) = Trie 0 HM.empty
     go rows =
-      L.fold (L.premap uncons $ L.handles _Just $ Trie <$> L.foldByKeyHashMap (go <$> L.list)) rows
+      L.fold
+        ( L.premap uncons $
+            L.handles _Just $
+              L.foldByKeyHashMap (go <$> L.list) <&> \dic ->
+                Trie (sum (fmap (.size) dic)) dic
+        )
+        rows
 
 match :: (Hashable v) => [EClassIdOrVar v] -> Trie -> [Substitution v]
 match = go mempty
   where
     go !sub [] _ = [sub]
-    go !sub (x : xs) (Trie hm) = case x of
+    go !sub (x : xs) (Trie _ hm) = case x of
       EId eid -> fromMaybe [] $ go sub xs <$!> HM.lookup eid hm
       QVar v ->
         foldMap

@@ -62,6 +62,7 @@ library
     lens,
     linear-generics,
     linear-witness,
+    monoidal-containers,
     recursion-schemes,
     selective,
     semialign,
