@@ -23,6 +23,7 @@ module Data.EGraph.Types.EGraph (
   EGraph (..),
   new,
   numEClasses,
+  size,
   find,
   addTerm,
   getAnalysis,
@@ -456,3 +457,10 @@ numEClasses :: Borrow k α (EGraph d l) %m -> BO α (Ur Int)
 numEClasses egraph = Control.do
   let clss = egraph .# #classes
   EC.size clss
+
+-- | # of (raw) e-nodes in the e-graph.
+size :: Borrow k α (EGraph d l) %m -> BO α (Ur Int)
+{-# INLINE size #-}
+size egraph =
+  share egraph & \(Ur egraph) -> Control.do
+    HMB.size (egraph .# #hashcons)

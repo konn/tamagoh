@@ -113,26 +113,23 @@ genericJoin (hd :- qs) db = fromMaybe [] do
     go :: [v] -> NonEmpty (RelationState l v) -> Substitution v -> [Substitution v]
     go [] !_ sub = [sub]
     go (v : vs) qs sub =
-      let
-       in -- !() = DT.trace ("Substituting " <> show v <> " in query: " <> show qs <> " with subs" <> show sub) ()
-          let (!doms, !qs') =
-                Bi.first (sortOn HS.size . catMaybes . NE.toList) $
-                  Functor.unzip $
-                    fmap
-                      ( \q ->
-                          case HM.lookup v q.positions of
-                            Nothing -> (Nothing, const q)
-                            Just poss ->
-                              ( Just $ project poss q.database
-                              , \eid ->
-                                  q
-                                    & #atom %~ substAtom v eid
-                                    & #database %~ Trie.focus ((,eid) <$> poss)
-                              )
-                      )
-                      qs
-              !domain = case NE.nonEmpty doms of
-                Nothing -> universe db
-                Just xs' -> foldl1' HS.intersection xs'
-           in -- !() = DT.trace ("    Domain for " <> show v <> ": " <> show domain) ()
-              foldMap' (\eid -> go vs (($ eid) <$> qs') (insertVar v eid sub)) domain
+      let (!doms, !qs') =
+            Bi.first (sortOn HS.size . catMaybes . NE.toList) $
+              Functor.unzip $
+                fmap
+                  ( \q ->
+                      case HM.lookup v q.positions of
+                        Nothing -> (Nothing, const q)
+                        Just poss ->
+                          ( Just $ project poss q.database
+                          , \eid ->
+                              q
+                                & #atom %~ substAtom v eid
+                                & #database %~ Trie.focus ((,eid) <$> poss)
+                          )
+                  )
+                  qs
+          !domain = case NE.nonEmpty doms of
+            Nothing -> universe db
+            Just xs' -> foldl1' HS.intersection xs'
+       in foldMap' (\eid -> go vs (($ eid) <$> qs') (insertVar v eid sub)) domain

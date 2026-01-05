@@ -25,7 +25,7 @@ import Test.Tasty.HUnit qualified as Tasty
 import Prelude hiding (lookup)
 
 simple :: SaturationConfig
-simple = SaturationConfig {maxIterations = Nothing}
+simple = defaultConfig
 
 test_Math :: TestTree
 test_Math =
@@ -42,7 +42,7 @@ test_Math =
               ]
             !lhs = foldr1 (+) $ map lit [1 .. 7] :: Term Math
             !rhs = foldr1 (+) $ map lit [7, 6 .. 1] :: Term Math
-        graph <- either throwIO pure $ saturate simple rules $ fromList [lhs]
+        graph <- either throwIO pure $ saturate simple {maxIterations = Just 8} rules $ fromList [lhs]
         equivalent graph lhs rhs @?= Just True
         numEClasses graph @?= 127
     , testCase "math_fail" do

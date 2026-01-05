@@ -29,6 +29,8 @@ module Data.EGraph.Immutable (
   lookupTerm,
   ematch,
   buildDatabase,
+  numEClasses,
+  size,
 
   -- * In-place update
   modify,
@@ -36,6 +38,7 @@ module Data.EGraph.Immutable (
   -- * Equality saturation
   saturate,
   SaturationConfig (..),
+  defaultConfig,
   SaturationError (..),
   HasDatabase,
   Language,
@@ -58,7 +61,6 @@ module Data.EGraph.Immutable (
   Term,
   wrapTerm,
   unwrapTerm,
-  numEClasses,
 ) where
 
 import Control.Functor.Linear (StateT (..), evalStateT)
@@ -262,3 +264,7 @@ buildDatabase = withRaw RawDb.buildDatabase
 numEClasses :: EGraph d l -> Int
 {-# INLINE numEClasses #-}
 numEClasses = withRaw Raw.numEClasses
+
+size :: EGraph d l -> Int
+{-# INLINE size #-}
+size = withRaw Raw.size

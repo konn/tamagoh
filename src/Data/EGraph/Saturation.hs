@@ -23,6 +23,7 @@ module Data.EGraph.Saturation (
   extractBest_,
   extractBestOf,
   SaturationConfig (..),
+  defaultConfig,
   SaturationError (..),
   Rule (..),
   (==>),
@@ -156,8 +157,12 @@ compileRule Rule {..} = do
 
 data SaturationConfig = SaturationConfig
   { maxIterations :: {-# UNPACK #-} !(Maybe Word)
+  , nodeLimit :: {-# UNPACK #-} !(Maybe Int)
   }
   deriving (Show, Eq, Ord, Generic)
+
+defaultConfig :: SaturationConfig
+defaultConfig = SaturationConfig {maxIterations = Just 30, nodeLimit = Just 10_000}
 
 saturate ::
   forall d l v α.
@@ -170,22 +175,24 @@ saturate config rules = go (St.toStrict config.maxIterations)
   where
     go :: St.Maybe Word -> Mut α (EGraph d l) %1 -> BO α (Mut α (EGraph d l))
     go (St.Just 0) !egraph = Control.pure egraph
-    go remaining !egraph = Control.do
-      (Ur results, egraph) <- sharing egraph \egraph -> Control.do
-        Ur db <- buildDatabase egraph
-        -- () <- DT.trace ("Current DB " <> show db) PL.$ Control.pure ()
-        Ur anals <- EC.analyses (egraph .# #classes)
-        Control.pure (Ur $ collect anals db)
-      -- () <- DT.trace ("Collected matches: " <> show (PL.map PL.unur results) <> " matches") PL.$ Control.pure ()
-      if null results
+    go remaining egraph = Control.do
+      (Ur size, egraph) <- size <$~ egraph
+      if maybe False (size >) config.nodeLimit
         then Control.pure egraph
         else Control.do
-          (progress, egraph) <- substitute egraph results
-          if progress
-            then Control.do
-              egraph <- rebuild egraph
-              go (subtract 1 <$> remaining) egraph
-            else Control.pure egraph
+          (Ur results, egraph) <- sharing egraph \egraph -> Control.do
+            Ur db <- buildDatabase egraph
+            Ur anals <- EC.analyses (egraph .# #classes)
+            Control.pure (Ur $ collect anals db)
+          if null results
+            then Control.pure egraph
+            else Control.do
+              (progress, egraph) <- substitute egraph results
+              if progress
+                then Control.do
+                  egraph <- rebuild egraph
+                  go (subtract 1 <$> remaining) egraph
+                else Control.pure egraph
 
     collect ::
       PHM.HashMap EClassId ([ENode l], d) ->
@@ -222,17 +229,11 @@ saturate config rules = go (St.toStrict config.maxIterations)
         case substPattern subs rhs of
           Failure _ -> var `lseq` egraph `lseq` error "Substitution produces invalid expression"
           Success pat -> Control.do
-            -- () <- DT.trace "-----" PL.$ Control.pure ()
-            -- (Ur egDisp, egraph) <- display <$~ egraph
-            -- () <- DT.trace ("egraph = " <> egDisp) PL.$ Control.pure ()
-            -- () <- DT.trace ("Rule " <> show name <> " applied to EClass " <> show eid <> " and get: " <> show pat) PL.$ Control.pure ()
             (Ur meid, egraph) <- addNestedENode pat egraph
-            -- () <- DT.trace (show pat <> " ==> " <> show meid) PL.$ Control.pure ()
             meid PL.& \case
               Nothing -> var `lseq` egraph `lseq` error "Invalid substitution"
               Just newEid -> Control.do
                 (Ur resl, egraph) <- unsafeMerge eid newEid egraph
-                -- () <- DT.trace (show (eid, newEid) <> " ==> " <> show resl) PL.$ Control.pure ()
                 case resl of
                   Merged {} -> Control.void PL.$ modifyRef (`lseq` True) var
                   AlreadyMerged {} -> Control.pure PL.$ consume var
