@@ -18,7 +18,7 @@ module Data.EGraph.Egg.MathSpec (module Data.EGraph.Egg.MathSpec) where
 import Control.Exception (throwIO)
 import Data.EGraph.Immutable
 import Data.Maybe (isNothing)
-import Tamagoh.Bench.Math
+import Tamagoh.Bench.Math hiding (Rule, named, (==>))
 import Test.Tasty
 import Test.Tasty.ExpectedFailure (ignoreTestBecause)
 import Test.Tasty.HUnit
@@ -27,6 +27,9 @@ import Prelude hiding (lookup)
 
 simple :: SaturationConfig
 simple = defaultConfig
+
+theRules :: [Rule Math ConstantFold String]
+theRules = mathRulesTamagoh
 
 test_Math :: TestTree
 test_Math =
@@ -50,7 +53,7 @@ test_Math =
       , testCaseSteps "math_fail" \step -> do
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [var "x" + var "y"]
           step "Checking that x / y is not found"
           _eid <- maybe (assertFailure "x + y not found") pure $ lookupTerm (var "x" + var "y") graph
@@ -61,7 +64,7 @@ test_Math =
           let lhs = 1 / (((1 + sqrt x) / 2) - ((1 - sqrt x) / 2))
           !graph <-
             either throwIO pure $
-              saturate simple {nodeLimit = Just 75_000, maxIterations = Just 9} mathRulesTamagoh $
+              saturate simple {nodeLimit = Just 75_000, maxIterations = Just 9} theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "1 / sqrt x not found") pure $ lookupTerm (1 / sqrt x) graph
@@ -72,7 +75,7 @@ test_Math =
               rhs = ((x * x) + (4 * x)) + 3
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -83,7 +86,7 @@ test_Math =
               rhs = 4 * x
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -95,7 +98,7 @@ test_Math =
               rhs = 2 ** (x + y)
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -106,7 +109,7 @@ test_Math =
               rhs = 1 :: Term Math
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -117,7 +120,7 @@ test_Math =
               rhs = 1 :: Term Math
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -129,7 +132,7 @@ test_Math =
               rhs = 0 :: Term Math
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -140,7 +143,7 @@ test_Math =
               rhs = 2 :: Term Math
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -152,7 +155,7 @@ test_Math =
               rhs = y
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -163,7 +166,7 @@ test_Math =
               rhs = 1 / x
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -174,7 +177,7 @@ test_Math =
               rhs = 3 * (x ** 2)
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -185,7 +188,7 @@ test_Math =
               rhs = x * ((3 * x) - 14)
           !graph <-
             either throwIO pure $
-              saturate simple {nodeLimit = Just 100_000, maxIterations = Just 60} mathRulesTamagoh $
+              saturate simple {nodeLimit = Just 100_000, maxIterations = Just 60} theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -196,7 +199,7 @@ test_Math =
               rhs = x
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -207,7 +210,7 @@ test_Math =
               rhs = sin x
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -218,7 +221,7 @@ test_Math =
               rhs = (x ** 2) / 2
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -229,7 +232,7 @@ test_Math =
               rhs = (x * sin x) + cos x
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -240,7 +243,7 @@ test_Math =
               rhs = (x * sin x) + cos x
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
@@ -251,7 +254,7 @@ test_Math =
               rhs = (x * lnE x) - x
           !graph <-
             either throwIO pure $
-              saturate simple mathRulesTamagoh $
+              saturate simple theRules $
                 fromList [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph

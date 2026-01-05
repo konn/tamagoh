@@ -58,6 +58,7 @@ library
     generic-lens,
     hashable,
     heaps,
+    hegg,
     indexed-traversable,
     lens,
     linear-generics,
@@ -199,7 +200,9 @@ benchmark tamagoh-bench-math
   -- cabal-gild: discover bench --exclude=bench/Main.hs
   other-modules:
   build-depends:
+    deepseq,
     hegg,
+    recursion-schemes,
     tamagoh,
     tamagoh:benchmark-utils,
     tasty,

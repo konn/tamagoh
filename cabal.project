@@ -18,4 +18,6 @@ source-repository-package
   tag: 5447cb20b9653cdbc1be6166542986c7327741ea
 
 allow-newer:
-  falsify:*
+  falsify:*,
+  optparse-applicative,
+  text,

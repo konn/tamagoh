@@ -43,6 +43,7 @@ module Data.EGraph.Immutable (
   HasDatabase,
   Language,
   Rule (..),
+  SideCondition (..),
   (==>),
   named,
   (@?),

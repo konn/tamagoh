@@ -17,11 +17,12 @@ module Tamagoh.Bench.Math (
 
 import Algebra.Semilattice
 import Control.Arrow ((>>>))
+import Control.DeepSeq (NFData, NFData1)
 import Control.Functor.Linear qualified as Control
-import Control.Lens (view, (^.))
+import Control.Lens (view, (^.), _1, _2)
+import Control.Lens.Lens (Lens')
 import Control.Monad.Borrow.Pure (Copyable, (<$~))
 import Data.Coerce (coerce)
-import Data.EGraph.Immutable (named, (==>), (@?))
 import Data.EGraph.Immutable qualified as Tamagoh
 import Data.EGraph.Saturation (MatchInfo (..))
 import Data.EGraph.Types.EGraph qualified as Raw
@@ -30,11 +31,15 @@ import Data.Equality.Analysis qualified as Hegg
 import Data.Equality.Extraction qualified as Hegg
 import Data.Equality.Graph qualified as Hegg
 import Data.Equality.Graph.Lens qualified as Hegg
-import Data.Equality.Utils qualified as Hegg
+import Data.Equality.Matching qualified as Hegg
+import Data.Equality.Matching.Database qualified as Hegg
+import Data.Equality.Saturation qualified as Hegg
+import Data.Foldable1 (foldl1')
 import Data.Functor.Foldable
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
-import Data.Maybe (isJust)
+import Data.List.NonEmpty qualified as NE
+import Data.Maybe (fromJust, isJust)
 import Data.Semigroup qualified as Semi
 import Data.Unrestricted.Linear (Consumable, Dupable, Movable, Ur (..), consume)
 import GHC.Generics qualified as GHC
@@ -57,6 +62,7 @@ data Math v
   | Const Double
   | Var String
   deriving (Show, Eq, Ord, GHC.Generic, GHC.Generic1)
+  deriving anyclass (NFData1, NFData)
 
 deriveLanguage ''Math
 
@@ -245,6 +251,10 @@ foldConstF = \case
     if r /= ConstantFold (Just 0.0)
       then liftBin (/) l r
       else ConstantFold Nothing
+  Sin x -> liftUnary P.sin x
+  Cos x -> liftUnary P.cos x
+  Sqrt x | Just y <- x.value, y >= 0 -> liftUnary P.sqrt x
+  Ln x | Just y <- x.value, y > 0 -> liftUnary P.log x
   _ -> ConstantFold Nothing
 
 instance Semilattice ConstantFold where
@@ -293,8 +303,112 @@ instance Tamagoh.CostModel AstSize Math where
   costFunction = coerce astSize
   {-# INLINE costFunction #-}
 
-mathRulesTamagoh :: [Tamagoh.Rule Math ConstantFold String]
-mathRulesTamagoh =
+data SideCond
+  = IsNotZero String
+  | IsSym String
+  | IsConst String
+  | IsConstOrDistinctVar String String
+  deriving (Show, Eq, Ord, GHC.Generic)
+
+data Rule = Rule
+  { name :: String
+  , lhs :: Tamagoh.Pattern Math String
+  , rhs :: Tamagoh.Pattern Math String
+  , conditions :: [SideCond]
+  }
+
+named :: String -> Rule -> Rule
+{-# INLINE named #-}
+named n = \r -> r {name = n}
+
+(==>) :: Tamagoh.Pattern Math String -> Tamagoh.Pattern Math String -> Rule
+{-# INLINE (==>) #-}
+(==>) l r = Rule {name = "", lhs = l, rhs = r, conditions = []}
+
+(@?) :: Rule -> [SideCond] -> Rule
+{-# INLINE (@?) #-}
+(@?) r conditions = r {conditions}
+
+infix 1 @?
+
+infix 5 ==>
+
+toTamagohRule :: (HasConstantFold d) => Rule -> Tamagoh.Rule Math d String
+{-# INLINE toTamagohRule #-}
+toTamagohRule rule =
+  Tamagoh.Rule
+    { Tamagoh.lhs = rule.lhs
+    , Tamagoh.rhs = rule.rhs
+    , Tamagoh.name = rule.name
+    , Tamagoh.condition = toTamagohCondition rule.conditions
+    }
+
+toHeggRule :: (HasConstantFold d) => Rule -> Hegg.Rewrite d Math
+{-# INLINE toHeggRule #-}
+toHeggRule rule =
+  foldl' (Hegg.:|) (toHeggPattern rule.lhs Hegg.:= toHeggPattern rule.rhs) $
+    toHeggCondition rule.conditions
+
+toHeggPattern :: Tamagoh.Pattern Math String -> Hegg.Pattern Math
+{-# INLINE toHeggPattern #-}
+toHeggPattern = \case
+  Tamagoh.Metavar v -> Hegg.VariablePattern v
+  Tamagoh.PNode fpat ->
+    Hegg.NonVariablePattern $ fmap toHeggPattern fpat
+
+toTamagohCondition ::
+  (HasConstantFold d) =>
+  [SideCond] -> Maybe (Tamagoh.SideCondition Math d String)
+toTamagohCondition conds = Tamagoh.SideCondition . foldl1' (.&.) . fmap fromCond <$> NE.nonEmpty conds
+  where
+    fromCond (IsNotZero s) = isNonZero s
+    fromCond (IsSym s) = isSymbol s
+    fromCond (IsConst s) = isConstant s
+    fromCond (IsConstOrDistinctVar s1 s2) = isConstantOrDistinctVar s1 s2
+
+getVar :: String -> Hegg.VarsState -> Hegg.Subst -> Hegg.ClassId
+getVar v vss subst = fromJust $ Hegg.lookupSubst (Hegg.findVarName vss v) subst
+
+toHeggCondition :: (HasConstantFold d) => [SideCond] -> [Hegg.RewriteCondition d Math]
+toHeggCondition conds = fromCond <$> conds
+  where
+    fromCond (IsNotZero s) vss subst egr =
+      egr ^. Hegg._class (getVar s vss subst) . Hegg._data . constFoldL /= ConstantFold (Just 0.0)
+    fromCond (IsSym s) vss subst egr =
+      any (Hegg.unNode >>> \case Var {} -> True; _ -> False) $
+        egr ^. Hegg._class (getVar s vss subst) . Hegg._nodes
+    fromCond (IsConst s) vss subst egr =
+      isJust $
+        (.value) $
+          egr ^. Hegg._class (getVar s vss subst) . Hegg._data . constFoldL
+    fromCond (IsConstOrDistinctVar s1 s2) vss subst egr =
+      let v' = getVar s1 vss subst
+          w' = getVar s2 vss subst
+       in (Hegg.eClassId (egr ^. Hegg._class v') /= Hegg.eClassId (egr ^. Hegg._class w'))
+            && ( isJust (egr ^. Hegg._class v' . Hegg._data . constFoldL).value
+                   || any ((\case Var {} -> True; _ -> False) . Hegg.unNode) (egr ^. Hegg._class v' . Hegg._nodes)
+               )
+
+class HasConstantFold a where
+  constFoldL :: Lens' a ConstantFold
+
+instance HasConstantFold ConstantFold where
+  constFoldL = id
+
+instance HasConstantFold (a, ConstantFold) where
+  constFoldL = _2
+
+instance HasConstantFold (ConstantFold, a) where
+  constFoldL = _1
+
+mathRulesTamagoh :: (HasConstantFold d) => [Tamagoh.Rule Math d String]
+mathRulesTamagoh = toTamagohRule <$> rules
+
+mathRulesHegg :: (HasConstantFold d) => [Hegg.Rewrite d Math]
+mathRulesHegg = toHeggRule <$> rules
+
+rules :: [Rule]
+rules =
   [ -- Basic laws
     named "comm-add" $ a + b ==> b + a
   , named "comm-mul" $ a * b ==> b * a
@@ -302,7 +416,7 @@ mathRulesTamagoh =
   , named "assoc-mul" $ a * (b * c) ==> (a * b) * c
   , -- Canonisation
     named "sub-canon" $ a - b ==> a + (-1 * b)
-  , named "div-canon" $ a / b ==> a * (b ** (-1)) @? isNonZero "b"
+  , named "div-canon" $ a / b ==> a * (b ** (-1)) @? [IsNotZero "b"]
   , -- Identities & Absoptions
     named "zero-add" $ 0 + a ==> a
   , named "zero-mul" $ 0 * a ==> 0
@@ -312,31 +426,31 @@ mathRulesTamagoh =
     named "mul-one" $ a ==> a * 1
   , -- Cancel laws
     named "cancel-sub" $ a - a ==> 0
-  , named "cancel-div" $ a / a ==> 1 @? isNonZero "a"
+  , named "cancel-div" $ a / a ==> 1 @? [IsNotZero "a"]
   , -- Distributive laws and its opposite
     named "dist-mul-over-add" $ a * (b + c) ==> (a * b) + (a * c)
   , named "fact-mul-over-add" $ (a * b) + (a * c) ==> a * (b + c)
   , -- Power  laws
     named "pow-mul" $ (a ** b) * (a ** c) ==> a ** (b + c)
-  , named "pow0" $ a ** 0 ==> 1 @? isNonZero "a"
+  , named "pow0" $ a ** 0 ==> 1 @? [IsNotZero "a"]
   , named "pow1" $ a ** 1 ==> a
   , named "pow2" $ a ** 2 ==> a * a
-  , named "pow-recip" $ a ** (-1) ==> 1 / a @? isNonZero "a"
-  , named "recip-mul-div" $ a * (1 / a) ==> 1 @? isNonZero "a"
+  , named "pow-recip" $ a ** (-1) ==> 1 / a @? [IsNotZero "a"]
+  , named "recip-mul-div" $ a * (1 / a) ==> 1 @? [IsNotZero "a"]
   , -- Derivations
-    named "d-variable" $ diff x x ==> 1 @? isSymbol "x"
-  , named "d-constant" $ diff x c ==> 0 @? isSymbol "x" .&. isConstantOrDistinctVar "c" "x"
+    named "d-variable" $ diff x x ==> 1 @? [IsSym "x"]
+  , named "d-constant" $ diff x c ==> 0 @? [IsSym "x", IsConstOrDistinctVar "c" "x"]
   , named "d-add" $ diff x (a + b) ==> diff x a + diff x b
   , named "d-mul" $ diff x (a * b) ==> a * diff x b + b * diff x a
   , named "d-sin" $ diff x (sin x) ==> cos x
   , named "d-cos" $ diff x (cos x) ==> -1 * sin x
-  , named "d-ln" $ diff x (lnE x) ==> 1 / x @? isNonZero "x"
+  , named "d-ln" $ diff x (lnE x) ==> 1 / x @? [IsNotZero "x"]
   , named "d-power" $
       diff x (f ** g) ==> (f ** g) * ((diff x f * (g / f)) + (diff x g * lnE f))
-        @? isNonZero "f" .&. isNonZero "g"
+        @? [IsNotZero "f", IsNotZero "g"]
   , named "i-one" $ integral 1 x ==> x
   , named "i-power-const" $
-      integral (x ** c) x ==> (x ** (c + 1)) / (c + 1) @? isConstant "c"
+      integral (x ** c) x ==> (x ** (c + 1)) / (c + 1) @? [IsConst "c"]
   , named "i-cos" $ integral (cos x) x ==> sin x
   , named "i-sin" $ integral (sin x) x ==> -1 * cos x
   , named "i-sum" $ integral (f + g) x ==> integral f x + integral g x
@@ -351,44 +465,64 @@ mathRulesTamagoh =
     g = Tamagoh.Metavar "g"
     x = Tamagoh.Metavar "x"
 
-isNonZero :: String -> HM.HashMap String (MatchInfo Math ConstantFold) -> Bool
+isNonZero :: (HasConstantFold d) => String -> HM.HashMap String (MatchInfo Math d) -> Bool
 {-# INLINE isNonZero #-}
-isNonZero v = \vars -> (vars HM.! v).analysis /= ConstantFold (Just 0.0)
+{-# SPECIALIZE INLINE isNonZero :: String -> HM.HashMap String (MatchInfo Math ConstantFold) -> Bool #-}
+isNonZero v = \vars -> view constFoldL (vars HM.! v).analysis /= ConstantFold (Just 0.0)
 
-isSymbol :: String -> HM.HashMap String (MatchInfo Math ConstantFold) -> Bool
+isSymbol :: String -> HM.HashMap String (MatchInfo Math d) -> Bool
 {-# INLINE isSymbol #-}
-isSymbol v = \vars -> isVarNode (vars HM.! v).nodes
+isSymbol v = \vars -> isVarNode $ (vars HM.! v).nodes
 
-isConstant :: String -> HM.HashMap String (MatchInfo Math ConstantFold) -> Bool
+isConstant :: (HasConstantFold d) => String -> HM.HashMap String (MatchInfo Math d) -> Bool
 {-# INLINE isConstant #-}
-isConstant v = \vars -> case (vars HM.! v).analysis of
+isConstant v = \vars -> case (vars HM.! v).analysis ^. constFoldL of
   ConstantFold (Just _) -> True
   ConstantFold Nothing -> False
 
 isConstantOrDistinctVar ::
+  (HasConstantFold d) =>
   String ->
   String ->
-  HM.HashMap String (MatchInfo Math ConstantFold) ->
+  HM.HashMap String (MatchInfo Math d) ->
   Bool
 {-# INLINE isConstantOrDistinctVar #-}
 isConstantOrDistinctVar v1 v2 = \vars ->
   let v = vars HM.! v1
       w = vars HM.! v2
-   in v.eclassId /= w.eclassId && (isFolded v.analysis || isVarNode v.nodes)
+   in v.eclassId /= w.eclassId && (isFolded (v.analysis ^. constFoldL) || isVarNode v.nodes)
 
 isVarNode :: [Tamagoh.ENode Math] -> Bool
 isVarNode = any $ (.unwrap) >>> \case Var {} -> True; _ -> False
 
-type Predicate = HM.HashMap String (MatchInfo Math ConstantFold) -> Bool
+type Predicate d = HM.HashMap String (MatchInfo Math d) -> Bool
 
-(.&.) :: Predicate -> Predicate -> Predicate
+(.&.) :: Predicate d -> Predicate d -> Predicate d
 {-# INLINE (.&.) #-}
 p1 .&. p2 = \vars -> p1 vars && p2 vars
 
 infixr 3 .&.
 
-(.|.) :: Predicate -> Predicate -> Predicate
-{-# INLINE (.|.) #-}
-p1 .|. p2 = \vars -> p1 vars || p2 vars
+newtype BenchCost = BenchCost Word
+  deriving (Show, Eq, Ord, GHC.Generic)
+  deriving newtype (Num, Copyable, Consumable, Dupable, Movable, Hashable, Display)
 
-infixr 2 .|.
+symCost :: Math BenchCost -> BenchCost
+{-# INLINE symCost #-}
+symCost = \case
+  a :^ b -> a + b + 6
+  a :/ b -> a + b + 5
+  a :- b -> a + b + 4
+  a :* b -> a + b + 4
+  a :+ b -> a + b + 2
+  Diff x f -> x + f + 500
+  Integral f x -> f + x + 20000
+  Sin x -> x + 20
+  Cos x -> x + 20
+  Sqrt x -> x + 30
+  Ln x -> x + 30
+  Var {} -> 1
+  Const {} -> 1
+
+instance Tamagoh.CostModel BenchCost Math where
+  costFunction = (+ 1) . sum
