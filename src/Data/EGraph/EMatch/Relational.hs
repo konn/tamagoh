@@ -26,6 +26,7 @@ import Control.Lens (at, folded, indexing, withIndex, (%~), (&), (^.))
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Utils (nubHash)
 import Data.Bifunctor qualified as Bi
+import Data.Coerce (coerce)
 import Data.EGraph.EMatch.Relational.Database
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types
@@ -42,7 +43,7 @@ import Data.HashMap.Strict qualified as HM
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
 import Data.List (sortOn)
-import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Trie (project)
@@ -105,6 +106,23 @@ genericJoin ::
   ConjunctiveQuery l v ->
   Database l ->
   [Substitution v]
+genericJoin (hd :- (atm@(Atom rel@MkRel {args}) :| [])) db = fromMaybe [] do
+  -- Degenerate case: just a lookup!
+  let vs = L.fold L.hashSet atm
+  let frees :: [Substitution v]
+      frees =
+        coerce $
+          filter (not . HM.null) $
+            sequenceA $
+              fmap (const $ HS.toList $ universe db) $
+                HS.toMap $
+                  L.fold L.hashSet hd `HS.difference` vs
+  trie <- db ^. at (toOperator args)
+  let !matches = Trie.match (F.toList rel) trie
+  pure $
+    if null frees
+      then matches
+      else (<>) <$> matches <*> frees
 genericJoin (hd :- qs) db = fromMaybe [] do
   rels <- mapM (buildQueryState db) qs
   pure $ go (nubHash $ F.toList $ Pair hd (Compose qs)) rels mempty

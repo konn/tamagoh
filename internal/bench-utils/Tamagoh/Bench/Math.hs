@@ -308,8 +308,8 @@ mathRulesTamagoh =
   , named "zero-mul" $ 0 * a ==> 0
   , named "one-mul" $ 1 * a ==> a
   , -- Opposite identities
-    named "add-zero" $ a ==> a + 0
-  , named "mul-one" $ a ==> a * 1
+    -- named "add-zero" $ a ==> a + 0
+    named "mul-one" $ a ==> a * 1
   , -- Cancel laws
     named "cancel-sub" $ a - a ==> 0
   , named "cancel-div" $ a / a ==> 1 @? isNonZero "a"

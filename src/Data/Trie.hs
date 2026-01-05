@@ -11,10 +11,14 @@ module Data.Trie (
   insert,
   focus,
   project,
+  match,
 ) where
 
 import Control.Foldl qualified as L
 import Control.Lens hiding (cons, indices)
+import Control.Monad ((<$!>))
+import Data.EGraph.EMatch.Relational.Query
+import Data.EGraph.EMatch.Types (Substitution, insertVar, lookupVar)
 import Data.EGraph.Types.EClassId (EClassId)
 import Data.FMList qualified as FML
 import Data.Foldable (foldMap')
@@ -23,6 +27,7 @@ import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HashSet
+import Data.Hashable (Hashable)
 import Data.IntSet qualified as IntSet
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
@@ -124,3 +129,20 @@ fromRows = go
     go ([] : _) = Trie HM.empty
     go rows =
       L.fold (L.premap uncons $ L.handles _Just $ Trie <$> L.foldByKeyHashMap (go <$> L.list)) rows
+
+match :: (Hashable v) => [EClassIdOrVar v] -> Trie -> [Substitution v]
+match = go mempty
+  where
+    go !sub [] _ = [sub]
+    go !sub (x : xs) (Trie hm) = case x of
+      EId eid -> fromMaybe [] $ go sub xs <$!> HM.lookup eid hm
+      QVar v ->
+        foldMap
+          ( \(eid, trie') ->
+              case lookupVar v sub of
+                Nothing -> go (insertVar v eid sub) xs trie'
+                Just eid'
+                  | eid == eid' -> go sub xs trie'
+                  | otherwise -> []
+          )
+          (HM.toList hm)

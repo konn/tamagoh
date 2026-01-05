@@ -24,7 +24,6 @@ module Data.EGraph.EMatch.Relational.Query (
 ) where
 
 import Control.Lens (preview)
-import Control.Lens.Extras (is)
 import Control.Monad.Trans.State.Strict (State, StateT (..), evalState, state)
 import Data.Coerce (coerce)
 import Data.DList qualified as DL
@@ -131,11 +130,12 @@ compile ::
   Pattern l v ->
   PatternQuery l v
 compile = \case
-  PNode ls
+  pat0@(PNode ls)
     | Just vars <- mapM (fmap PVar . preview #_Metavar) ls ->
         -- Not a nested query - no join required!
         let root = Fresh 0
-         in PatternQuery {root, patQuery = Conj $ (root : F.toList vars) :- NE.singleton (Atom $ QVar <$> MkRel {id = root, args = vars})}
+            vs = HashSet.toList $ foldMap' (HashSet.singleton . PVar) pat0
+         in PatternQuery {root, patQuery = Conj $ vs :- NE.singleton (Atom $ QVar <$> MkRel {id = root, args = vars})}
   pat0 ->
     let (root, atms) = runFreshM (aux pat0)
         vs = HashSet.toList $ foldMap' (HashSet.singleton . PVar) pat0

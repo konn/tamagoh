@@ -46,11 +46,12 @@ test_Math =
         graph <- either throwIO pure $ saturate simple {maxIterations = Just 8} rules $ fromList [lhs]
         equivalent graph lhs rhs @?= Just True
         numEClasses graph @?= 127
-    , testCase "math_fail" do
-        graph <-
+    , testCaseSteps "math_fail" \step -> do
+        !graph <-
           either throwIO pure $
             saturate simple mathRulesTamagoh $
               fromList [var "x" + var "y"]
+        step "Checking that x / y is not found"
         _eid <- maybe (assertFailure "x + y not found") pure $ lookupTerm (var "x" + var "y") graph
         let xDIVy = lookupTerm (var "x" / var "y") graph
         isNothing xDIVy Tasty.@? "x / y should not be found, but got: " <> show xDIVy
