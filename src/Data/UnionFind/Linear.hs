@@ -90,15 +90,15 @@ unsafeFindMut x (UnionFind n parent rank) =
   findRoot x parent rank
   where
     findRoot :: Key -> Vector Key %1 -> Vector Word %1 -> (Ur Key, UnionFind)
-    findRoot i p r = DataFlow.do
-      (Ur parentKey, p) <- Vector.get (keyToInt i) p
-      if i == parentKey
-        then (Ur i, UnionFind n p r)
-        else DataFlow.do
-          (Ur root, UnionFind _ p r) <- findRoot parentKey p r
-          -- Path compression: make i point directly to root
-          p <- Vector.set (keyToInt i) root p
-          (Ur root, UnionFind n p r)
+    findRoot i p r =
+      Vector.get (keyToInt i) p & \(Ur parentKey, p) ->
+        if i == parentKey
+          then (Ur i, UnionFind n p r)
+          else
+            findRoot parentKey p r & \(Ur root, UnionFind _ p r) ->
+              -- Path compression: make i point directly to root
+              Vector.set (keyToInt i) root p & \p ->
+                (Ur root, UnionFind n p r)
 
 {- | Find the representative (root) of the set containing the given element,
 with path compression for efficiency.
@@ -178,10 +178,10 @@ union (Key x) (Key y) (UnionFind n parent rank)
 __Unsafe__: Does not check bounds. Will crash if keys >= size.
 -}
 unsafeEquivalent :: Key -> Key -> UnionFind %1 -> (Ur Bool, UnionFind)
-unsafeEquivalent x y uf = DataFlow.do
-  (Ur rootX, uf) <- unsafeFind x uf
-  (Ur rootY, uf) <- unsafeFind y uf
-  (Ur (rootX == rootY), uf)
+unsafeEquivalent x y uf =
+  unsafeFind x uf & \(Ur rootX, uf) ->
+    unsafeFind y uf & \(Ur rootY, uf) ->
+      (Ur (rootX == rootY), uf)
 
 {- | Check if two elements are in the same set.
 Returns Nothing if either key is out of bounds.
