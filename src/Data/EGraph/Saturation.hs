@@ -40,6 +40,7 @@ module Data.EGraph.Saturation (
 import Algebra.Semilattice
 import Control.DeepSeq
 import Control.Exception (Exception)
+import Control.Functor.Linear (StateT (..))
 import Control.Functor.Linear qualified as Control
 import Control.Lens (Lens', (?~), (^.), _1)
 import Control.Monad.Borrow.Pure
@@ -66,6 +67,7 @@ import Data.HasField.Linear
 import Data.HashMap.Strict qualified as PHM
 import Data.HashSet qualified as HashSet
 import Data.Hashable
+import Data.Hashable.Lifted (Hashable1)
 import Data.Maybe (mapMaybe)
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
@@ -229,16 +231,31 @@ saturate config rules = go (St.toStrict config.maxIterations)
         case substPattern subs rhs of
           Failure _ -> var `lseq` egraph `lseq` error "Substitution produces invalid expression"
           Success pat -> Control.do
-            (Ur meid, egraph) <- addNestedENode pat egraph
-            meid PL.& \case
-              Nothing -> var `lseq` egraph `lseq` error "Invalid substitution"
-              Just newEid -> Control.do
-                (Ur resl, egraph) <- unsafeMerge eid newEid egraph
-                case resl of
-                  Merged {} -> Control.void PL.$ modifyRef (`lseq` True) var
-                  AlreadyMerged {} -> Control.pure PL.$ consume var
-                Control.pure (consume egraph)
+            (Ur newEid, egraph) <- addNestedENode pat egraph
+            (Ur resl, egraph) <- unsafeMerge eid newEid egraph
+            case resl of
+              Merged {} -> Control.void PL.$ modifyRef (`lseq` True) var
+              AlreadyMerged {} -> Control.pure PL.$ consume var
+            Control.pure (consume egraph)
       Control.pure \end -> var `lseq` egraph `lseq` freeRef (reclaim lend (upcast end))
+
+addNestedENode ::
+  forall d l α.
+  (Analysis l d, Hashable1 l, Movable1 l) =>
+  Pattern l EClassId ->
+  Mut α (EGraph d l) %1 ->
+  BO α (Ur EClassId, Mut α (EGraph d l))
+{-# INLINE addNestedENode #-}
+addNestedENode pat egraph =
+  Control.runStateT (runUrT PL.$ go pat) egraph
+  where
+    go ::
+      Pattern l EClassId ->
+      UrT (StateT (Mut α (EGraph d l)) (BO α)) EClassId
+    go (Metavar eid) = UrT PL.$ StateT \egraph -> sharing egraph \egraph -> unsafeFind egraph eid
+    go (PNode p) = do
+      eids <- ENode <$> P.traverse go p
+      UrT PL.$ StateT \egraph -> addCanonicalNode eids egraph
 
 newtype ExtractBest l cost = ExtractBest
   { optimal :: ArgMin cost (ENode l)
