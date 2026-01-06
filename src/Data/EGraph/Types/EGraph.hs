@@ -34,6 +34,7 @@ module Data.EGraph.Types.EGraph (
   canonicalize,
   unsafeCanonicalize,
   addNode,
+  addCanonicalNode,
   merges,
   merge,
   unsafeMerge,
