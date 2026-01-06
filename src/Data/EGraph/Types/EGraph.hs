@@ -69,7 +69,6 @@ import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
-import Data.Maybe (fromJust)
 import Data.Maybe qualified as P
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
 import Data.Traversable qualified as P
@@ -374,8 +373,7 @@ rebuild = loop
     loop egraph = Control.do
       (Ur isNull, egraph) <- sharing egraph \e -> Set.null $ e .# #worklist
       if isNull
-        then Control.do
-          Control.pure egraph
+        then Control.pure egraph
         else Control.do
           (Ur todos, egraph) <- reborrowing egraph \egraph -> Control.do
             todos <- Set.take_ (egraph .# #worklist)
@@ -384,8 +382,8 @@ rebuild = loop
             Ur todos <-
               Ur.lift nubHash
                 . move
-                . mapMaybe unur
-                Control.<$> Data.mapM (\k -> move k & \(Ur k) -> find egraph k) todos
+                . map unur
+                Control.<$> Data.mapM (\k -> move k & \(Ur k) -> unsafeFind egraph k) todos
             Data.mapM
               ( \k ->
                   move k & \(Ur k) ->
@@ -407,9 +405,9 @@ repair egraph eid parents = Control.do
   egraph <- forRebor_ egraph parents $ \egraph (Ur (p_node, p_class)) -> Control.do
     egraph <- reborrowing_ egraph \egraph ->
       void $ HMB.delete p_node (egraph .# #hashcons)
-    (Ur (fromMaybe (error "repair: canonicalize failed") -> p_node), egraph) <- canonicalize p_node <$~ egraph
+    (Ur p_node, egraph) <- unsafeCanonicalize p_node <$~ egraph
     (Ur p_class, egraph) <- sharing egraph \egraph ->
-      Data.fmap (fromMaybe (error "EGraph.repair: find failed")) Control.<$> find egraph p_class
+      unsafeFind egraph p_class
     void $ HMB.insert p_node p_class (egraph .# #hashcons)
   (newParents, egraph) <- reborrowing' egraph \egraph -> Control.do
     (newPs, newPsLend) <- asksLinearlyM \lin -> Control.do
@@ -417,7 +415,7 @@ repair egraph eid parents = Control.do
       Control.pure $ borrow ps lin
     (egraph, newPs) <- forRebor2_ egraph newPs parents $
       \egraph newPs (Ur (p_node, p_class)) -> Control.do
-        (Ur (fromJust -> p_node), egraph) <- canonicalize p_node <$~ egraph
+        (Ur p_node, egraph) <- unsafeCanonicalize p_node <$~ egraph
         (mem, newPs) <- sharing newPs \newPs ->
           Data.fmap copy Control.<$> HMB.lookup p_node newPs
         Ur newId <- case mem of
