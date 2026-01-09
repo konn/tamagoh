@@ -48,6 +48,7 @@ instance Consumable (Set k) where
 instance Dupable (Set k) where
   -- NOTE: Contrary to HashMap, we do not need deep duplication here,
   -- because Set only contains keys, and keys are nonlinear by convention.
+  {-# NOINLINE dup2 #-}
   dup2 = Unsafe.toLinear \(Set !ref) -> DataFlow.do
     (lin, !ref) <- withLinearly ref
     (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, freeRef ref)) ref
@@ -92,8 +93,8 @@ askRaw_ ::
   Borrow bk α (Set k) %m ->
   BO α a
 askRaw_ f dic = case share dic of
-  Ur dic -> Control.do
-    Ur (UnsafeAlias dic) <- readSharedRef (coerceBor dic)
+  Ur !dic -> Control.do
+    Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
     case f dic of
       !res -> Control.pure res
 
