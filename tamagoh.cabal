@@ -101,6 +101,7 @@ library
     Data.EGraph.Types.Term
     Data.HasField.Linear
     Data.HashMap.Mutable.Linear.Borrowed
+    Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue
     Data.Linear.Witness.Compat
     Data.Set.Mutable.Linear.Borrowed
     Data.Trie
