@@ -33,10 +33,10 @@ import Data.EGraph.Types.EClasses.Internal (EClasses)
 import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
 import Data.HasField.Linear
-import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
+import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.UnionFind.Linear.Borrowed (UnionFind)
-import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
+import Data.Unrestricted.Linear.Lifted (Copyable1)
 import GHC.Generics (Generic, Generically (..))
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
@@ -54,7 +54,7 @@ data EGraph d l = EGraph
 
   Invariant: only the canonical EClassIds resides in the e-class.
   -}
-  , nodes :: !(HashMap EClassId (ENode l))
+  , nodes :: !(HashMapUr EClassId (ENode l))
   {- ^ A map from eclass-id to the _original_ enode.
   Associated e-node MUST BE canonical AFTER rebuilding.
 
@@ -62,7 +62,7 @@ data EGraph d l = EGraph
   but it is needed to recover the hashcons invariant on the nodes
   that are being unioned.
   -}
-  , hashcons :: !(HashMap (ENode l) EClassId)
+  , hashcons :: !(HashMapUr (ENode l) EClassId)
   {- ^
   A map from _canonical_ enodes to eclass-ids.
   Keys MUST BE canonical AFTER rebuilding.
@@ -81,9 +81,9 @@ deriving via
 
 deriving via Generically (EGraph d l) instance Consumable (EGraph d l)
 
-deriving via Generically (EGraph d l) instance (Movable1 l, Dupable d) => Dupable (EGraph d l)
+deriving via Generically (EGraph d l) instance (Dupable d) => Dupable (EGraph d l)
 
-hashconsL :: RecordLabel (EGraph d l) "hashcons" (HashMap (ENode l) EClassId)
+hashconsL :: RecordLabel (EGraph d l) "hashcons" (HashMapUr (ENode l) EClassId)
 hashconsL = #hashcons
 
 {- |

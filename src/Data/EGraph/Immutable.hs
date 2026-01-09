@@ -103,7 +103,7 @@ instance (Display d, Copyable1 l, Show1 l) => Show (EGraph d l) where
   showsPrec d = withRaw PL.$ displayPrec d
 
 new ::
-  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d, Movable a) =>
+  (Hashable1 l, Movable1 l, Analysis l d, Movable a) =>
   (forall α. Mut α (Raw.EGraph d l) %1 -> BO α a) %1 ->
   Ur (EGraph d l, a)
 {-# INLINE new #-}
@@ -113,7 +113,7 @@ new f = linearly \lin ->
    in Ur (frozen, a)
 
 modify ::
-  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d) =>
+  (Hashable1 l, Movable1 l, Analysis l d) =>
   (forall α. Mut α (Raw.EGraph d l) %1 -> BO α ()) %1 ->
   EGraph d l ->
   Ur (EGraph d l)
@@ -128,7 +128,7 @@ empty = unur (linearly \l -> Unsafe.toLinear (Ur . EG) (Raw.new l))
 
 fromList ::
   forall d l.
-  (Analysis l d, Hashable1 l, Movable1 l) =>
+  (Analysis l d, Hashable1 l) =>
   [Raw.Term l] -> EGraph d l
 {-# INLINE fromList #-}
 fromList terms = unur PL.$ linearly \l ->
@@ -142,7 +142,7 @@ fromList terms = unur PL.$ linearly \l ->
 
 -- | _O(1)_. Freezes a mutable EGraph into an immutable one.
 freeze ::
-  (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d) =>
+  (Hashable1 l, Movable1 l, Analysis l d) =>
   Raw.EGraph d l %1 -> Ur (EGraph d l)
 {-# INLINE freeze #-}
 freeze egraph =
@@ -150,7 +150,7 @@ freeze egraph =
    in Unsafe.toLinear (Ur . EG) eg
 
 -- | _O(n)_. Clones the immutable EGraph into a mutable one.
-thaw :: (Movable1 l, Dupable d) => EGraph d l -> Linearly %1 -> Raw.EGraph d l
+thaw :: (Dupable d) => EGraph d l -> Linearly %1 -> Raw.EGraph d l
 {-# INLINE thaw #-}
 thaw egraph lin =
   let %1 !(!old, !new) = dup (unsafeThaw egraph lin)

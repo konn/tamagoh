@@ -27,6 +27,7 @@ import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
+import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.Unrestricted.Linear.Lifted (Copyable1)
 import GHC.Generics qualified as GHC
@@ -47,7 +48,7 @@ new = EClasses . HMB.empty 16
 data EClass d l
   = EClass
   { nodes :: {-# UNPACK #-} !(Set (ENode l))
-  , parents :: {-# UNPACK #-} !(HashMap (ENode l) EClassId)
+  , parents :: {-# UNPACK #-} !(HashMapUr (ENode l) EClassId)
   , analysis :: !(Ref d)
   }
   deriving (GHC.Generic)

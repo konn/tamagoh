@@ -241,7 +241,7 @@ saturate config rules = go (St.toStrict config.maxIterations)
 
 addNestedENode ::
   forall d l α.
-  (Analysis l d, Hashable1 l, Movable1 l) =>
+  (Analysis l d, Hashable1 l) =>
   Pattern l EClassId ->
   Mut α (EGraph d l) %1 ->
   BO α (Ur EClassId, Mut α (EGraph d l))

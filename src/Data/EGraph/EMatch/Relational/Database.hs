@@ -40,7 +40,7 @@ import Data.Functor.Classes
 import Data.Functor.Linear qualified as Data
 import Data.Generics.Labels ()
 import Data.HasField.Linear ((.#))
-import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
+import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.HashSet (HashSet)
@@ -82,7 +82,7 @@ buildDatabase ::
   BO α (Ur (Database l))
 buildDatabase egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
-    Ur nodes <- HMB.toList (egraph .# hashconsL)
+    Ur nodes <- HMUr.toList (egraph .# hashconsL)
     Ur nodes <- Control.fmap move PL.$
       Data.forM nodes \(enode, id) ->
         move (enode, id) PL.& \(Ur (enode, id)) ->

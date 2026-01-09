@@ -51,8 +51,9 @@ import Data.EGraph.Types.ENode
 import Data.Foldable (Foldable)
 import Data.Functor.Linear qualified as Data
 import Data.HasField.Linear
-import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
+import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
+import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
 import Data.HashMap.Strict qualified as PHM
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
@@ -125,7 +126,7 @@ parents clss0 eid = Control.do
   mclass <- HMB.lookup eid clss
   case mclass of
     Nothing -> Control.pure (Ur [])
-    Just eclass -> HMB.toList (eclass .# #parents)
+    Just eclass -> HMUr.toList (eclass .# #parents)
 
 delete ::
   forall α d l.
@@ -154,7 +155,7 @@ setParents ::
   forall d l α.
   (Hashable1 l) =>
   EClassId ->
-  HashMap (ENode l) EClassId %1 ->
+  HashMapUr (ENode l) EClassId %1 ->
   Mut α (EClasses d l) %1 ->
   BO α (Mut α (EClasses d l))
 setParents eid ps clss = Control.do
@@ -164,7 +165,7 @@ setParents eid ps clss = Control.do
     case mclass of
       Nothing -> Control.pure $ consume ps
       Just eclass -> Control.do
-        void $ HMB.swap ps (eclass .# #parents)
+        void $ HMUr.swap ps (eclass .# #parents)
 
 addParent ::
   (Hashable1 l) =>
@@ -175,7 +176,7 @@ addParent ::
 addParent pid enode eclass = Control.do
   eclass <- reborrowing_ eclass \eclass -> Control.do
     let %1 !parentsSet = eclass .# #parents
-    void $ HMB.insert enode pid parentsSet
+    void $ HMUr.insert enode pid parentsSet
   Control.pure eclass
 
 member ::
@@ -206,7 +207,7 @@ insertIfNew eid enode analysis clss = Control.do
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
       nodes <- asksLinearly $ Set.singleton enode
-      parents <- asksLinearly $ HMB.empty 16
+      parents <- asksLinearly $ HMUr.empty 16
       analysis <- asksLinearly $ Ref.new analysis
       (mop, clss) <- HMB.insert eid EClass {parents, nodes, analysis} $ coerceLin clss
       clss <- reborrowing_ clss \clss -> Control.do
@@ -262,15 +263,15 @@ unsafeMerge eid1 eid2 clss
             (lnodes, l) <- reborrowing l \l -> Set.take_ (l .# #nodes)
             let %1 !nodes = Set.union lnodes rnodes
 
-            (lparents, l) <- reborrowing l \l -> HMB.take_ (l .# #parents)
-            let %1 !parents = HMB.union lparents rparents
+            (lparents, l) <- reborrowing l \l -> HMUr.take_ (l .# #parents)
+            let %1 !parents = HMUr.union lparents rparents
             l <- reborrowing_ l \l -> Control.do
               void $ modifyRef (\la -> move la & \(Ur la) -> la /\ ranalysis) (l .# #analysis)
 
             l <- reborrowing_ l \l -> Control.do
               void $ Set.swap nodes (l .# #nodes)
             Control.void $ reborrowing_ l \l -> Control.do
-              void $ HMB.swap parents $ l .# #parents
+              void $ HMUr.swap parents $ l .# #parents
 
       Control.pure clss
 
