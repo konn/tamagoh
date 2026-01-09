@@ -18,9 +18,9 @@ import Control.Monad.Borrow.Pure (Copyable (..), Share)
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
 import Data.Foldable qualified as F
-import Data.Functor.Classes (Eq1, Ord1, Show1, compare1, eq1, showsPrec1)
+import Data.Functor.Classes (Eq1, Ord1, Show1)
 import Data.Hashable (Hashable (..))
-import Data.Hashable.Lifted (Hashable1, hashWithSalt1)
+import Data.Hashable.Lifted (Hashable1)
 import Data.Unrestricted.Linear (AsMovable)
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted
@@ -55,21 +55,13 @@ deriving via
     (Copyable1 l, Show1 l) =>
     Display (ENode l)
 
-instance (Hashable1 l) => Hashable (ENode l) where
-  hashWithSalt = coerce P.$ hashWithSalt1 @l @EClassId
-  {-# INLINE hashWithSalt #-}
+deriving newtype instance (Show1 l) => Show (ENode l)
 
-instance (Show1 l) => Show (ENode l) where
-  showsPrec = coerce P.$ showsPrec1 @l @EClassId
-  {-# INLINE showsPrec #-}
+deriving newtype instance (Eq1 l) => Eq (ENode l)
 
-instance (Eq1 l) => Eq (ENode l) where
-  (==) = coerce P.$ eq1 @l @EClassId
-  {-# INLINE (==) #-}
+deriving newtype instance (Ord1 l) => Ord (ENode l)
 
-instance (Ord1 l) => Ord (ENode l) where
-  compare = coerce P.$ compare1 @l @EClassId
-  {-# INLINE compare #-}
+deriving newtype instance (Hashable1 l) => Hashable (ENode l)
 
 coerceShr :: (Coercible a b) => Share α a %1 -> Share α b
 coerceShr = Unsafe.toLinear \ !a -> coerce a

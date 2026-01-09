@@ -185,7 +185,7 @@ find :: EClassId -> EGraph d l -> Maybe EClassId
 {-# INLINE find #-}
 find eid = withRaw (\egraph -> Raw.find egraph eid)
 
-lookupEClass :: (Movable1 l) => EClassId -> EGraph d l -> Maybe (NonEmpty (ENode l))
+lookupEClass :: (Hashable1 l) => EClassId -> EGraph d l -> Maybe (NonEmpty (ENode l))
 {-# INLINE lookupEClass #-}
 lookupEClass eid = withRaw (\egraph -> Raw.lookupEClass eid egraph)
 
@@ -215,21 +215,21 @@ lookupTerm ::
 lookupTerm t = withRaw (Raw.lookupTerm t)
 
 extractBest_ ::
-  (Language l, CostModel cost l) =>
+  (Language l) =>
   EClassId ->
   EGraph (ExtractBest l cost) l ->
   Maybe (Term l, cost)
 extractBest_ eid = withRaw (Raw.extractBest_ eid)
 
 extractBest ::
-  (Analysis l d, Language l, CostModel cost l) =>
+  (Language l) =>
   EClassId ->
   EGraph (ExtractBest l cost, d) l ->
   Maybe (Term l, cost)
 extractBest eid = withRaw (Raw.extractBest eid)
 
 extractBestOf ::
-  (Analysis l d, Language l) =>
+  (Language l) =>
   Lens' d (ExtractBest l cost) ->
   EClassId ->
   EGraph d l ->

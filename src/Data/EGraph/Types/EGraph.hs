@@ -143,7 +143,6 @@ lookupTerm term egraph =
     runUrT $ runMaybeT (go term)
 
 getAnalysis ::
-  (Copyable d) =>
   EClassId ->
   Borrow k α (EGraph d l) %m ->
   BO α (Ur (Maybe d))
@@ -154,7 +153,7 @@ getAnalysis eid egraph =
     MaybeT $ UrT $ EC.lookupAnalysis clss eid
 
 lookupEClass ::
-  (Movable1 l) =>
+  (Hashable1 l) =>
   EClassId ->
   Borrow k α (EGraph d l) %m ->
   BO α (Ur (Maybe (NonEmpty (ENode l))))
@@ -375,9 +374,10 @@ rebuild = loop
       if isNull
         then Control.pure egraph
         else Control.do
-          (Ur todos, egraph) <- reborrowing egraph \egraph -> Control.do
+          ((Ur numPs, Ur todos), egraph) <- reborrowing egraph \egraph -> Control.do
+            (Ur size, egraph) <- Set.size . (.# #worklist) <$~ egraph
             todos <- Set.take_ (egraph .# #worklist)
-            Control.pure $ move $ Set.toListUnborrowed todos
+            Control.pure (Ur size, Set.toListUnborrowed todos)
           (todos, egraph) <- sharing egraph \egraph -> Control.do
             Ur todos <-
               Ur.lift nubHash
@@ -391,31 +391,32 @@ rebuild = loop
               )
               todos
           egraph <- forRebor_ egraph todos \egraph (Ur eid, Ur ps) ->
-            repair egraph eid ps
+            repair egraph eid numPs ps
           loop egraph
 
 repair ::
   (Hashable1 l, Movable1 l, Copyable1 l, Analysis l d) =>
   Mut α (EGraph d l) %1 ->
   EClassId ->
+  Int ->
   [(ENode l, EClassId)] ->
   BO α ()
-repair egraph eid parents = Control.do
+repair egraph eid numParents parents = Control.do
   Ur parents <- Control.pure $ move $ map move parents
   egraph <- forRebor_ egraph parents $ \egraph (Ur (p_node, p_class)) -> Control.do
     egraph <- reborrowing_ egraph \egraph ->
       void $ HMB.delete p_node (egraph .# #hashcons)
-    (Ur p_node, egraph) <- unsafeCanonicalize p_node <$~ egraph
+    (Ur p_node, egraph) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize p_node <$~ egraph
     (Ur p_class, egraph) <- sharing egraph \egraph ->
       unsafeFind egraph p_class
-    void $ HMB.insert p_node p_class (egraph .# #hashcons)
+    void $ {-# SCC "update_hashcons/insert" #-} HMB.insert p_node p_class (egraph .# #hashcons)
   (newParents, egraph) <- reborrowing' egraph \egraph -> Control.do
     (newPs, newPsLend) <- asksLinearlyM \lin -> Control.do
-      ps <- asksLinearly $ HMB.empty @(ENode _) @EClassId 16
+      ps <- asksLinearly $ HMB.empty @(ENode _) @EClassId numParents
       Control.pure $ borrow ps lin
     (egraph, newPs) <- forRebor2_ egraph newPs parents $
       \egraph newPs (Ur (p_node, p_class)) -> Control.do
-        (Ur p_node, egraph) <- unsafeCanonicalize p_node <$~ egraph
+        (Ur p_node, egraph) <- {-# SCC "repair/loop2/unsafeCanon" #-} unsafeCanonicalize p_node <$~ egraph
         (mem, newPs) <- sharing newPs \newPs ->
           Data.fmap copy Control.<$> HMB.lookup p_node newPs
         Ur newId <- case mem of
@@ -424,15 +425,13 @@ repair egraph eid parents = Control.do
               (Ur eid, egraph) <- unsafeMerge p_class class' egraph
               Control.pure $ egraph `lseq` Ur (getMergedId eid)
           Nothing -> unsafeFind egraph p_class
-        Control.void $ HMB.insert p_node newId newPs
+        Control.void $ {-# SCC "upwardMerge/insert" #-} HMB.insert p_node newId newPs
 
     egraph <- newPs `lseq` reborrowing_ egraph (modifyAnalysis id eid)
     -- Rebuild analysis after modification
-    (Ur ps, egraph) <- sharing egraph \eg ->
-      EC.parents (eg .# #classes) eid
+    (Ur ps, egraph) <- sharing egraph \eg -> EC.parents (eg .# #classes) eid
     void $ forRebor_ egraph ps \egraph parent ->
       move parent & \(Ur (pNode, pClass)) -> Control.do
-        (Ur pNode, egraph) <- sharing egraph $ unsafeCanonicalize pNode
         (newAnal, egraph) <- sharing egraph \egraph -> Control.do
           Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
           Ur old <- EC.lookupAnalysis (egraph .# #classes) pClass
@@ -445,7 +444,7 @@ repair egraph eid parents = Control.do
           Just (Ur d) -> Control.do
             egraph <- reborrowing_ egraph \egraph -> Control.do
               void $ EC.setAnalysis pClass d (egraph .# #classes)
-            !set <- Set.insert pClass (egraph .# #worklist)
+            !set <- {-# SCC "update_worklist/insert" #-} Set.insert pClass (egraph .# #worklist)
             Control.pure $ consume set
 
     Control.pure (\end -> reclaim newPsLend (upcast end))

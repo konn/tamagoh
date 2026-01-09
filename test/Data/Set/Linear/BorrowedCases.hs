@@ -51,7 +51,7 @@ case1 :: Mut α (Set Int) %1 -> BO α (Ur SetCaseResult)
 case1 dic = Control.do
   dic <- Set.insert 1 dic
   (Ur finalAnswer, dic) <- sharing dic \dic -> Set.member 1 dic
-  Ur finalEnts <- move Control.<$> Set.toList dic
+  Ur finalEnts <- Set.toList dic
   Control.pure $
     move finalAnswer
       & \(Ur finalAnswer) ->
@@ -61,7 +61,7 @@ case2 :: Mut α (Set Int) %1 -> BO α (Ur SetCaseResult)
 case2 dic = Control.do
   dic <- Set.insert 2 dic
   (Ur finalAnswer, dic) <- sharing dic \dic -> Set.member 2 dic
-  Ur finalEnts <- move Control.<$> Set.toList dic
+  Ur finalEnts <- Set.toList dic
   Control.pure $
     move finalAnswer
       & \(Ur finalAnswer) -> Ur SetCaseResult {..}
@@ -86,15 +86,15 @@ deriving via Generically SetDupResult instance Movable SetDupResult
 copyCase :: Mut α (Set Int) %1 -> BO α (Ur SetDupResult)
 copyCase dic = Control.do
   (result, dic) <- reborrowing' dic \dic -> Control.do
-    (initOrig, dic) <- sharing dic $ \dic -> Set.toList dic
+    (Ur initOrig, dic) <- sharing dic $ \dic -> Set.toList dic
     dic <- Set.insert 1 dic
-    (insertedOrig, dic) <- sharing dic $ \dic -> Set.toList dic
+    (Ur insertedOrig, dic) <- sharing dic $ \dic -> Set.toList dic
     (dupedRaw, dic) <- sharing dic $ \dic -> Control.pure $ copy dic
     let %1 !(duped, lentDuped) = borrowLinearOnly dupedRaw
-    (initDup, duped) <- sharing duped \duped -> Set.toList duped
+    (Ur initDup, duped) <- sharing duped \duped -> Set.toList duped
     dic <- Set.insert 2 dic
-    (twiceInsertedOrig, dic) <- sharing dic $ \dic -> Set.toList dic
-    (finalDup, duped) <- sharing duped \duped -> Set.toList duped
+    (Ur twiceInsertedOrig, dic) <- sharing dic $ \dic -> Set.toList dic
+    (Ur finalDup, duped) <- sharing duped \duped -> Set.toList duped
 
     Control.pure $ \end ->
       reclaim lentDuped (upcast end) `lseq`

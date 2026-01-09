@@ -29,17 +29,12 @@ module Data.Set.Mutable.Linear.Borrowed (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
-import Control.Monad.Borrow.Pure.Utils (deepCloneArray', unsafeLeak)
+import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
-import Data.Array.Mutable.Linear qualified as Array
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (Coercible, coerce)
-import Data.Function qualified as P
 import Data.Functor.Linear qualified as Data
-import Data.HashMap.Mutable.Linear.Borrowed.Internal (dupRobinVal)
-import Data.HashMap.Mutable.Linear.Internal qualified as RawHM
 import Data.Linear.Witness.Compat (fromPB)
-import Data.Maybe qualified as P
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear (Keyed)
@@ -48,7 +43,6 @@ import Data.Set.Mutable.Linear.Internal qualified as Raw
 import Data.Set.Mutable.Linear.Witness qualified as Raw
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, null, take)
 import Unsafe.Linear qualified as Unsafe
-import Prelude qualified as P
 
 inner :: Set k %1 -> Ref (Raw.Set k)
 {-# INLINE inner #-}
@@ -102,20 +96,11 @@ member ::
   BO α (Ur Bool)
 member key = askRaw (Raw.member key)
 
-toList :: Borrow bk α (Set k) %m -> BO α [k]
-toList =
-  askRaw_
-    ( \(Raw.Set (RawHM.HashMap _ _ robinArr)) ->
-        deepCloneArray' dupRobinVal robinArr & Unsafe.toLinear \(_, !robinArr) ->
-          Array.toList robinArr
-            & \(Ur elems) ->
-              elems
-                P.& P.catMaybes
-                P.& P.map (\(RawHM.RobinVal _ !k ()) -> k)
-    )
+toList :: (Keyed k) => Borrow bk α (Set k) %m -> BO α (Ur [k])
+toList = askRaw_ (Raw.toList)
 
-toListUnborrowed :: (Keyed k) => Set k %1 -> [k]
-toListUnborrowed (Set ref) = unur $ Raw.toList (freeRef ref)
+toListUnborrowed :: (Keyed k) => Set k %1 -> Ur [k]
+toListUnborrowed (Set ref) = Raw.toList (freeRef ref)
 
 null :: (Keyed k) => Borrow bk α (Set k) %m -> BO α (Ur Bool)
 {-# INLINE null #-}

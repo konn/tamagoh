@@ -328,7 +328,7 @@ instance
 To get the maximal term, use 'Data.Ord.Down' as the cost type.
 -}
 extractBest_ ::
-  (Language l, CostModel cost l) =>
+  (Language l) =>
   EClassId ->
   Borrow k α (EGraph (ExtractBest l cost) l) %m ->
   BO α (Ur (Maybe (Term l, cost)))
@@ -338,7 +338,7 @@ extractBest_ = extractBestOf id
 To get the maximal term, use 'Data.Ord.Down' as the cost type.
 -}
 extractBest ::
-  (Analysis l d, Language l, CostModel cost l) =>
+  (Language l) =>
   EClassId ->
   Borrow k α (EGraph (ExtractBest l cost, d) l) %m ->
   BO α (Ur (Maybe (Term l, cost)))
@@ -348,7 +348,7 @@ extractBest = extractBestOf _1
 To get the maximal term, use 'Data.Ord.Down' as the cost type.
 -}
 extractBestOf ::
-  (Analysis l d, Language l) =>
+  (Language l) =>
   Lens' d (ExtractBest l cost) ->
   EClassId ->
   Borrow k α (EGraph d l) %m ->

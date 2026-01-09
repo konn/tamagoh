@@ -19,7 +19,6 @@ import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear qualified as Array
 import Data.Function qualified as P
 import Data.Functor.Linear qualified as Data
-import Data.HashMap.Mutable.Linear.Borrowed.Internal (deepCloneHashMap)
 import Data.HashMap.Mutable.Linear.Internal qualified as RawHM
 import Data.List.Linear qualified as List
 import Data.Maybe qualified as P
@@ -35,6 +34,10 @@ import Prelude qualified as P
 -- NOTE: we need indirection here, because 'Raw.Set' uses Array behind the scenes,
 -- and regrows new array. If the our 'Set' is stored in another mutable borrows,
 -- then just threading through 'Raw.Set' would discard the change to the outer borrow.
+
+{- | A mutable set that can be used in the 'Control.Monad.Borrow.Pure' monad.
+This accepts only nonlinear keys only
+-}
 newtype Set k = Set (Ref (Raw.Set k))
   deriving newtype (LinearOnly)
 
@@ -43,25 +46,25 @@ instance Consumable (Set k) where
   {-# INLINE consume #-}
 
 instance Dupable (Set k) where
-  -- NOTE: we need to duplicate underlying array deeply, to dup the inner mutable arrays properly.
-  -- otherwise, the duplicated cells would be 'consume'd earlier and can (and actually) cause SEGV.
+  -- NOTE: Contrary to HashMap, we do not need deep duplication here,
+  -- because Set only contains keys, and keys are nonlinear by convention.
   dup2 = Unsafe.toLinear \(Set !ref) -> DataFlow.do
     (lin, !ref) <- withLinearly ref
     (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, freeRef ref)) ref
     case hm of
       Raw.Set hm -> DataFlow.do
-        !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ deepCloneHashMap hm
+        !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
         (Set ref, Set $! Ref.new (Raw.Set hm') lin)
 
 instance Copyable (Set k) where
-  -- NOTE: we need to duplicate underlying array deeply, to dup the inner mutable arrays properly.
-  -- otherwise, the duplicated cells would be 'consume'd earlier and can (and actually) cause SEGV.
+  -- NOTE: Contrary to HashMap, we do not need deep duplication here,
+  -- because Set only contains keys, and keys are nonlinear by convention.
   copy = Unsafe.toLinear \(UnsafeAlias (Set !ref)) -> DataFlow.do
     (lin, !ref) <- withLinearly ref
     !hm <- freeRef ref
     case hm of
       Raw.Set hm -> DataFlow.do
-        !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ deepCloneHashMap hm
+        !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
         Set $! Ref.new (Raw.Set hm') lin
 
 instance (Display k) => Display (Set k) where

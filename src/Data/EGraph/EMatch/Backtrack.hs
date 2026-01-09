@@ -27,17 +27,17 @@ import Data.EGraph.EMatch.Types
 import Data.EGraph.Types
 import Data.Foldable hiding (find)
 import Data.Hashable (Hashable)
+import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (catMaybes, maybeToList)
 import Data.Unrestricted.Linear (Ur (..), UrT (..), runUrT)
-import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear ()
 import Prelude.Linear qualified as PL
 import Prelude as P
 
 ematchBacktrack ::
   forall d l bk v α m.
-  (Movable1 l, Matchable l, Hashable v) =>
+  (Hashable1 l, Matchable l, Hashable v) =>
   Borrow bk α (EGraph d l) %m ->
   Pattern l v ->
   EClassId ->

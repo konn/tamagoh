@@ -41,6 +41,7 @@ import Algebra.Semilattice
 import Control.Functor.Linear (void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Internal (Alias (..))
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
@@ -77,7 +78,7 @@ analyses clss =
       Control.<$> Data.mapM
         ( \(Ur k, bor) ->
             move bor & \(Ur bor) -> Control.do
-              nodes <- Set.toList (bor .# #nodes)
+              Ur nodes <- Set.toList (bor .# #nodes)
               Ur anal <- Data.fmap copy Control.<$> readSharedRef (bor .# #analysis)
               Control.pure (k, (nodes, anal))
         )
@@ -85,7 +86,6 @@ analyses clss =
 
 lookupAnalysis ::
   forall bk α d l m.
-  (Copyable d) =>
   Borrow bk α (EClasses d l) %m ->
   EClassId ->
   BO α (Ur (Maybe d))
@@ -96,8 +96,8 @@ lookupAnalysis classes eid =
     case mclass of
       Nothing -> Control.pure (Ur Nothing)
       Just eclass -> Control.do
-        Ur a <- readSharedRef (eclass .# #analysis)
-        Control.pure (Ur (Just $ copy a))
+        Ur (UnsafeAlias !a) <- readSharedRef (eclass .# #analysis)
+        Control.pure (Ur (Just a))
 
 setAnalysis ::
   forall α d l.
@@ -138,7 +138,7 @@ delete clss eid = Control.do
 
 nodes ::
   forall bk α d l m.
-  (Movable1 l) =>
+  (Hashable1 l) =>
   Borrow bk α (EClasses d l) %m ->
   EClassId ->
   BO α (Ur (Maybe (NonEmpty (ENode l))))
@@ -148,8 +148,8 @@ nodes clss0 eid = Control.do
   case mclass of
     Nothing -> Control.pure (Ur Nothing)
     Just eclass -> Control.do
-      Ur ns <- move Control.<$> Set.toList (eclass .# #nodes)
-      Control.pure $ Ur (NonEmpty.nonEmpty ns)
+      Ur ns <- Set.toList (eclass .# #nodes)
+      Control.pure $ Ur $ NonEmpty.nonEmpty ns
 
 setParents ::
   forall d l α.
