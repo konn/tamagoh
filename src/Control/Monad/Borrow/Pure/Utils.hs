@@ -3,6 +3,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE OverloadedLabels #-}
@@ -15,6 +16,7 @@
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 {-# OPTIONS_GHC -fprint-explicit-kinds #-}
 
 module Control.Monad.Borrow.Pure.Utils (
@@ -22,12 +24,15 @@ module Control.Monad.Borrow.Pure.Utils (
   forRebor_,
   forRebor2,
   forRebor2_,
+  forReborN,
+  forReborN_,
   unsafeLeak,
   deepCloneArray,
   deepCloneArray',
   swapTuple,
   nubHash,
   coerceLin,
+  Borrows (..),
 ) where
 
 import Control.Functor.Linear (StateT (..), runStateT)
@@ -37,10 +42,12 @@ import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear (Array)
 import Data.Array.Mutable.Linear qualified as Array
 import Data.Coerce (Coercible, coerce)
-import Data.Coerce.Directed (upcast)
+import Data.Coerce.Directed (SubtypeWitness (..), upcast, type (<:) (..))
 import Data.Functor.Linear qualified as Data
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
+import Data.Kind (Type)
+import Data.Proxy (Proxy (..))
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
@@ -74,6 +81,48 @@ forRebor2 bor bor' tb k = flip runStateT (bor, bor') Control.do
   Data.forM tb \b -> StateT \(bor, bor') -> Control.do
     (\((a, b), c) -> (a, (c, b))) Control.<$> reborrowing bor \bor -> Control.do
       reborrowing bor' \bor' -> assocRBO $ k (assocBorrowL $ upcast bor) (assocBorrowL $ upcast bor') b
+
+forReborN ::
+  (Data.Traversable t) =>
+  Borrows bk α xs %1 ->
+  t b %1 ->
+  ( forall β.
+    Borrows bk (β /\ α) xs %1 ->
+    b %1 ->
+    BO (β /\ α) c
+  ) ->
+  BO α (t c, Borrows bk α xs)
+{-# INLINE forReborN #-}
+forReborN !bors tb k = flip runStateT bors do
+  Data.forM tb \b -> StateT $ Unsafe.toLinear \ !bors -> srunBO \(Proxy :: Proxy β) -> Control.do
+    !c <- k (upcast bors) b
+    Control.pure \ !_ -> (c, bors)
+
+forReborN_ ::
+  (Data.Traversable t, Consumable (t ())) =>
+  Borrows bk α xs %1 ->
+  t b %1 ->
+  ( forall β.
+    Borrows bk (β /\ α) xs %1 ->
+    b %1 ->
+    BO (β /\ α) ()
+  ) ->
+  BO α (Borrows bk α xs)
+{-# INLINE forReborN_ #-}
+forReborN_ bors tb k = Control.fmap (uncurry lseq) $ forReborN bors tb k
+
+type Borrows :: BorrowKind -> Lifetime -> [Type] -> Type
+data Borrows bk α xs where
+  BNil :: Borrows bk α '[]
+  (:-) :: !(Borrow bk α x) %1 -> !(Borrows bk α xs) %1 -> Borrows bk α (x ': xs)
+
+instance (β <= α) => Borrows bk α xs <: Borrows bk' β xs where
+  subtype = UnsafeSubtype
+
+infixr 5 :-
+
+-- >>> let !x = UnsafeAlias () :- undefined :- BNil in 42
+-- Prelude.undefined
 
 forRebor_ ::
   (Data.Traversable t, Consumable (t ())) =>
