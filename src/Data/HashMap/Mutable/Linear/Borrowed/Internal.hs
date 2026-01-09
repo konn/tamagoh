@@ -4,6 +4,7 @@
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
@@ -15,15 +16,16 @@ module Data.HashMap.Mutable.Linear.Borrowed.Internal (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
-import Control.Monad.Borrow.Pure.Utils (coerceLin, deepCloneArray')
+import Control.Monad.Borrow.Pure.Utils (coerceLin, deepCloneArray', unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear qualified as Array
+import Data.DList (DList)
+import Data.DList qualified as DL
 import Data.Function qualified as P
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear qualified as Raw
 import Data.HashMap.Mutable.Linear.Internal qualified as Raw
 import Data.List.Linear qualified as List
-import Data.Maybe qualified as P
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Unrestricted.Linear qualified as Ur
@@ -84,18 +86,23 @@ instance (Dupable v) => Dupable (HashMap k v) where
     (HM ref, HM $ Ref.new hm' lin)
 
 toBorrowList ::
+  forall bk α k v m.
   Borrow bk α (HashMap k v) %m ->
-  BO α [(Ur k, (Borrow bk α v))]
+  BO α [(Ur k, Borrow bk α v)]
 toBorrowList ref =
   share ref & \(Ur dic) -> Control.do
     Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
     Unsafe.toLinear
-      ( \(Raw.HashMap _ _ !robinArr) ->
-          Array.toList robinArr
-            & \(Ur elems) ->
-              Control.pure $!
-                P.map (\(Raw.RobinVal _ !k !v) -> (Ur k, UnsafeAlias v)) $!
-                  P.catMaybes elems
+      ( \(Raw.HashMap _ n !robinArr) ->
+          let go :: Int -> Array.Array (Maybe (Raw.RobinVal k v)) %1 -> DList (Ur k, Borrow bk α v) -> BO α [(Ur k, Borrow bk α v)]
+              go !i !arr !acc
+                | i < n =
+                    Array.unsafeGet i arr & \case
+                      (Ur (Just (Raw.RobinVal !_ !k !v)), !arr) ->
+                        go (i + 1) arr (DL.snoc acc (Ur k, UnsafeAlias v))
+                      (Ur Nothing, !arr) -> go (i + 1) arr acc
+                | otherwise = unsafeLeak arr `lseq` Control.pure (DL.toList acc)
+           in go 0 robinArr P.mempty
       )
       dic
 

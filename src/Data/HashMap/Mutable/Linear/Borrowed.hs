@@ -4,6 +4,7 @@
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
@@ -33,12 +34,13 @@ import Control.Functor.Linear (StateT (..), runStateT)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
-import Control.Monad.Borrow.Pure.Utils (deepCloneArray', swapTuple, unsafeLeak)
+import Control.Monad.Borrow.Pure.Utils (swapTuple, unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear qualified as Array
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (coerce)
-import Data.Function qualified as P
+import Data.DList (DList)
+import Data.DList qualified as DL
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear (Keyed)
 import Data.HashMap.Mutable.Linear qualified as Raw
@@ -47,7 +49,6 @@ import Data.HashMap.Mutable.Linear.Internal qualified as Raw
 import Data.HashMap.Mutable.Linear.Witness qualified as Raw
 import Data.HashSet qualified as IHS
 import Data.Linear.Witness.Compat (fromPB)
-import Data.Maybe qualified as P
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
@@ -178,15 +179,22 @@ askRaw_ f dic = case share dic of
 toList ::
   (Movable v) =>
   Borrow bk α (HashMap k v) %m -> BO α (Ur [(k, v)])
-toList =
-  askRaw_ \(Raw.HashMap _ _ !robinArr) ->
-    deepCloneArray' dupRobinVal robinArr & Unsafe.toLinear \(_, !robinArr) ->
-      Array.toList robinArr
-        & \(Ur elems) ->
-          elems
-            P.& P.catMaybes
-            P.& P.map (\(Raw.RobinVal _ !k !v) -> (k, v))
-            P.& Ur
+toList = askRaw_ rawToList'
+
+-- Uses DList and tail-recursion, forces thunks via `move v`.
+rawToList' :: forall k v. (Movable v) => Raw.HashMap k v %1 -> Ur [(k, v)]
+{-# INLINE rawToList' #-}
+rawToList' = \(Raw.HashMap _ n !robinArr) ->
+  let go :: Int -> Array.Array (Maybe (Raw.RobinVal k v)) %1 -> DList (k, v) -> Ur [(k, v)]
+      go !i !arr !acc
+        | i < n =
+            Array.unsafeGet i arr & \case
+              (Ur (Just (Raw.RobinVal !_ !k !v)), !arr) ->
+                case move v of
+                  Ur !v' -> go (i + 1) arr (DL.snoc acc (k, v'))
+              (Ur Nothing, !arr) -> go (i + 1) arr acc
+        | otherwise = unsafeLeak arr `lseq` Ur (DL.toList acc)
+   in go 0 robinArr P.mempty
 
 swap ::
   forall k v α.
