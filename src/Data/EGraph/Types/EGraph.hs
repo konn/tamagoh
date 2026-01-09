@@ -153,7 +153,6 @@ getAnalysis eid egraph =
     MaybeT $ UrT $ EC.lookupAnalysis clss eid
 
 lookupEClass ::
-  (Hashable1 l) =>
   EClassId ->
   Borrow k α (EGraph d l) %m ->
   BO α (Ur (Maybe (NonEmpty (ENode l))))

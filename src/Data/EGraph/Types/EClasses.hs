@@ -138,7 +138,6 @@ delete clss eid = Control.do
 
 nodes ::
   forall bk α d l m.
-  (Hashable1 l) =>
   Borrow bk α (EClasses d l) %m ->
   EClassId ->
   BO α (Ur (Maybe (NonEmpty (ENode l))))

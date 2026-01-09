@@ -185,7 +185,7 @@ find :: EClassId -> EGraph d l -> Maybe EClassId
 {-# INLINE find #-}
 find eid = withRaw (\egraph -> Raw.find egraph eid)
 
-lookupEClass :: (Hashable1 l) => EClassId -> EGraph d l -> Maybe (NonEmpty (ENode l))
+lookupEClass :: EClassId -> EGraph d l -> Maybe (NonEmpty (ENode l))
 {-# INLINE lookupEClass #-}
 lookupEClass eid = withRaw (\egraph -> Raw.lookupEClass eid egraph)
 

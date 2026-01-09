@@ -37,11 +37,9 @@ import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (Coercible, coerce)
 import Data.DList (DList)
 import Data.DList qualified as DL
-import Data.Function qualified as P
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Internal qualified as RawHM
 import Data.Linear.Witness.Compat (fromPB)
-import Data.Maybe qualified as P
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear (Keyed)
