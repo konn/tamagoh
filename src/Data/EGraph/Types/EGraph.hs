@@ -416,7 +416,8 @@ repair egraph eid = Control.do
     Ur !parents <-
       share classes & \(Ur classes) -> Control.do
         mpare <- EC.lookupParents classes eid
-        case mpare of
+        -- This is safe because the parents are not modified in this region
+        FHMUr.unsafeFreeze . unur Control.<$> case mpare of
           Nothing ->
             -- FIXME: id MUST be present in classes - please review the invariant.
 
@@ -425,11 +426,11 @@ repair egraph eid = Control.do
                 share $ borrow_ (HMUr.empty 16 lin) lin'
           -- error $ "Impossible mpare None in Parents (divide): " <> P.show eid
           Just pare -> Control.pure $ share pare
-    void $ forRebor2Of_ (HMUr.ifoldedBorrow P.. withIndex) hashcons uf parents \hashcons uf ncs ->
-      move ncs & \(Ur (p_node, p_class)) -> Control.do
-        hashcons <- void . HMUr.delete p_node <%= hashcons
-        (Ur p_node, uf) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node <$~ uf
-        (Ur p_class, uf) <- UFB.unsafeFind (coerce p_class) <$~ uf
+    void $ forRebor2Of_ (ifolded P.. withIndex) hashcons uf parents \ !hashcons !uf !ncs ->
+      move ncs & \(Ur (!p_node, !p_class)) -> Control.do
+        !hashcons <- void . HMUr.delete p_node <%= hashcons
+        (Ur !p_node, uf) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node <$~ uf
+        (Ur !p_class, uf) <- UFB.unsafeFind (coerce p_class) <$~ uf
         Control.pure (consume uf)
         void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node (coerce p_class) hashcons
 

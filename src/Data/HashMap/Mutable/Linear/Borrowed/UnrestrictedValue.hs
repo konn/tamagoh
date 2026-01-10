@@ -41,9 +41,6 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (
 
   -- * Iteration
   toList,
-  NonLinearIndexedFold,
-  ifoldedBorrow,
-  foldedBorrow,
 
   -- * Bulk operations
   swap,
@@ -54,25 +51,18 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (
 
 import Control.Functor.Linear (StateT (..), runStateT)
 import Control.Functor.Linear qualified as Control
-import Control.Lens qualified as Lens
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal
 import Control.Syntax.DataFlow qualified as DataFlow
-import Data.Array.Mutable.Linear qualified as Array
 import Data.Bifunctor.Linear qualified as Bi
-import Data.Function qualified as P
-import Data.Functor.Contravariant (phantom)
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear (Keyed)
 import Data.HashMap.Mutable.Linear qualified as Raw
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal
-import Data.HashMap.Mutable.Linear.Internal qualified as Raw
 import Data.HashMap.Mutable.Linear.Witness qualified as Raw
 import Data.Linear.Witness.Compat (fromPB)
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
-import Prelude qualified as P
 
 -- * Construction
 
@@ -195,21 +185,3 @@ union :: (Keyed k) => HashMapUr k v %1 -> HashMapUr k v %1 -> HashMapUr k v
 union (HM ref1) (HM ref2) = DataFlow.do
   (l, ref1) <- withLinearly ref1
   HM $! Ref.new (Raw.union (freeRef ref1) (freeRef ref2)) l
-
-type NonLinearIndexedFold i s a = Lens.IndexedFold i s a
-
-ifoldedBorrow :: NonLinearIndexedFold k (Borrow bk α (HashMapUr k v)) v
-ifoldedBorrow f (UnsafeAlias (HM bor)) =
-  freeRef bor & \(Raw.HashMap _ !n !robinArr) ->
-    let go !i
-          | i >= n = phantom (P.pure ())
-          | otherwise =
-              case Array.unsafeGet i robinArr of
-                (Ur (Just (Raw.RobinVal !_ !k !v)), !_) ->
-                  let !fv = Lens.indexed f k v
-                   in fv P.*> go (i + 1)
-                (Ur Nothing, !_) -> go (i + 1)
-     in go 0
-
-foldedBorrow :: Lens.Fold (Borrow bk α (HashMapUr k v)) (k, v)
-foldedBorrow = ifoldedBorrow P.. Lens.withIndex
