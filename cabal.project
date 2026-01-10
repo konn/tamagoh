@@ -21,3 +21,6 @@ allow-newer:
   falsify:*,
   optparse-applicative,
   text,
+
+package hashable
+  flags: +arch-native
