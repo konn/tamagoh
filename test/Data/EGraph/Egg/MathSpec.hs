@@ -20,7 +20,7 @@ import Data.EGraph.Immutable
 import Data.Maybe (isNothing)
 import Tamagoh.Bench.Math hiding (Rule, named, (==>))
 import Test.Tasty
-import Test.Tasty.ExpectedFailure (ignoreTestBecause)
+import Test.Tasty.ExpectedFailure (expectFailBecause)
 import Test.Tasty.HUnit
 import Test.Tasty.HUnit qualified as Tasty
 import Prelude hiding (lookup)
@@ -59,7 +59,7 @@ test_Math =
           _eid <- maybe (assertFailure "x + y not found") pure $ lookupTerm (var "x" + var "y") graph
           let xDIVy = lookupTerm (var "x" / var "y") graph
           isNothing xDIVy Tasty.@? "x / y should not be found, but got: " <> show xDIVy
-      , ignoreTestBecause "Timeout" $ testCase "math_simplify_root" do
+      , expectFailBecause "Timeout" $ testCase "math_simplify_root" do
           let x = var "x"
           let lhs = 1 / (((1 + sqrt x) / 2) - ((1 - sqrt x) / 2))
           !graph <-
@@ -114,7 +114,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , ignoreTestBecause "TIMEOUT" $ testCase "math_diff_same" do
+      , expectFailBecause "TIMEOUT" $ testCase "math_diff_same" do
           let x = var "x"
               lhs = diff x x
               rhs = 1 :: Term Math
@@ -125,7 +125,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , ignoreTestBecause "TIMEOUT" $ testCase "math_diff_different" do
+      , expectFailBecause "TIMEOUT" $ testCase "math_diff_different" do
           let x = var "x"
               y = var "y"
               lhs = diff x y
@@ -137,7 +137,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , ignoreTestBecause "TIMEOUT" $ testCase "math_diff_simple1" do
+      , expectFailBecause "TIMEOUT" $ testCase "math_diff_simple1" do
           let x = var "x"
               lhs = diff x (1 + (2 * x))
               rhs = 2 :: Term Math
@@ -160,7 +160,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , ignoreTestBecause "TIMEOUT" $ testCase "math_diff_ln" do
+      , expectFailBecause "TIMEOUT" $ testCase "math_diff_ln" do
           let x = var "x"
               lhs = diff x (lnE x)
               rhs = 1 / x
@@ -171,7 +171,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , ignoreTestBecause "TIMEOUT" $ testCase "diff_power_simple" do
+      , expectFailBecause "TIMEOUT" $ testCase "diff_power_simple" do
           let x = var "x"
               lhs = diff x (x ** 3)
               rhs = 3 * (x ** 2)
@@ -182,7 +182,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , ignoreTestBecause "TIMEOUT" $ testCase "diff_power_harder" do
+      , expectFailBecause "TIMEOUT" $ testCase "diff_power_harder" do
           let x = var "x"
               lhs = diff x ((x ** 3) - (7 * (x ** 2)))
               rhs = x * ((3 * x) - 14)
