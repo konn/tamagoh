@@ -116,8 +116,8 @@ new :: forall d l. (Hashable1 l) => Linearly %1 -> EGraph d l
 new = runReader Control.do
   unionFind <- asks UFB.empty
   classes <- asks $ EC.new
-  nodes <- asks $ HMUr.empty 16
-  hashcons <- asks $ HMUr.empty 16
+  nodes <- asks $ HMUr.empty 128
+  hashcons <- asks $ HMUr.empty 128
   worklist <- asks $ Set.empty 128
   Control.pure EGraph {..}
 
@@ -278,10 +278,9 @@ addCanonicalNode enode egraph = Control.do
         Control.pure $ uf `lseq` Ur.lift EClassId eid
       egraph <- reborrowing_ egraph \egraph -> Control.do
         (Ur !d, egraph) <- sharing egraph $ unsafeMakeAnalyzeNode enode
-        (Ur _, classes) <- EC.insertIfNew eid enode d $ egraph .# #classes
-        Control.pure $ consume classes
+        void $ EC.insertIfNew eid enode d $ egraph .# #classes
       egraph <- reborrowing_ egraph \egraph -> Control.do
-        Control.void $ HMUr.insert enode eid (egraph .# #hashcons)
+        void $ HMUr.insert enode eid (egraph .# #hashcons)
       egraph <- reborrowing_ egraph \egraph -> Control.do
         !dic <- HMUr.insert eid enode (egraph .# #nodes)
         Control.pure $! consume dic
@@ -380,12 +379,15 @@ rebuild = loop
   where
     loop :: Mut α (EGraph d l) %1 -> BO α (Mut α (EGraph d l))
     loop egraph = Control.do
-      (Ur isNull, egraph) <- sharing egraph \e -> Set.null $ e .# #worklist
+      ((Ur isNull, Ur curCapa), egraph) <- sharing egraph \e -> Control.do
+        isNull <- Set.null $ e .# #worklist
+        curCapa <- Set.capacity $ e .# #worklist
+        Control.pure (isNull, curCapa)
       if isNull
         then Control.pure egraph
         else Control.do
           (Ur todos, egraph) <- reborrowing egraph \egraph -> Control.do
-            todos <- Set.takeWithCapa_ 128 (egraph .# #worklist)
+            todos <- Set.takeWithCapa_ curCapa (egraph .# #worklist)
             Control.pure (Set.toListUnborrowed todos)
           (Ur todos, egraph) <- sharing egraph \egraph -> runUrT do
             nubHash
@@ -469,22 +471,21 @@ repair egraph eid = Control.do
           . fromMaybe (error "Must be just") -}
         maybe (asksLinearly $ HMUr.empty 16) (Control.pure . copy) mps
       Control.pure $! FHMUr.freeze ps
-    void $ forReborOf_ (ifolded P.. withIndex) egraph ps \egraph parent ->
-      move parent & \(Ur (pNode, pClass)) -> Control.do
-        (newAnal, egraph) <- sharing egraph \egraph -> Control.do
-          Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
-          Ur old <- EC.lookupAnalysis (egraph .# #classes) pClass
-          let !d = P.maybe analysis (/\ analysis) old
-          if Just d P.== old
-            then Control.pure Nothing
-            else Control.pure $ Just $ Ur d
-        case newAnal of
-          Nothing -> Control.pure $ consume egraph
-          Just (Ur d) -> Control.do
-            egraph <- reborrowing_ egraph \egraph -> Control.do
-              void $ EC.setAnalysis pClass d (egraph .# #classes)
-            !set <- {-# SCC "update_worklist/insert" #-} Set.insert pClass (egraph .# #worklist)
-            Control.pure $ consume set
+    void $ iforRebor_ egraph ps \(Ur pNode) egraph (Ur pClass) -> Control.do
+      (newAnal, egraph) <- sharing egraph \egraph -> Control.do
+        Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
+        Ur old <- EC.lookupAnalysis (egraph .# #classes) pClass
+        let !d = P.maybe analysis (/\ analysis) old
+        if Just d P.== old
+          then Control.pure Nothing
+          else Control.pure $ Just $ Ur d
+      case newAnal of
+        Nothing -> Control.pure $ consume egraph
+        Just (Ur d) -> Control.do
+          egraph <- reborrowing_ egraph \egraph -> Control.do
+            void $ EC.setAnalysis pClass d (egraph .# #classes)
+          !set <- {-# SCC "update_worklist/insert" #-} Set.insert pClass (egraph .# #worklist)
+          Control.pure $ consume set
 
     Control.pure (\end -> reclaim newPsLend (upcast end))
 

@@ -18,6 +18,7 @@ module Data.Set.Mutable.Linear.Borrowed (
   member,
   null,
   size,
+  capacity,
   toList,
   toBorrowList,
   toListUnborrowed,
@@ -133,6 +134,10 @@ null set = askRaw (Bi.first (Data.fmap (== 0)) . Raw.size) set
 size :: (Keyed k) => Borrow bk α (Set k) %m -> BO α (Ur Int)
 {-# INLINE size #-}
 size = askRaw Raw.size
+
+capacity :: Borrow bk α (Set k) %m -> BO α (Ur Int)
+{-# INLINE capacity #-}
+capacity = askRaw \(Raw.Set hm) -> Bi.second Raw.Set $ RawHM.capacity hm
 
 -- | Takes all elements from the set, leaving it empty.
 take :: forall k α. (Keyed k) => Mut α (Set k) %1 -> BO α (Set k, Mut α (Set k))

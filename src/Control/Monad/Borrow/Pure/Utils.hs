@@ -22,6 +22,7 @@
 module Control.Monad.Borrow.Pure.Utils (
   forRebor,
   forRebor_,
+  iforRebor_,
   forReborOf_,
   forRebor2,
   forRebor2_,
@@ -40,6 +41,7 @@ module Control.Monad.Borrow.Pure.Utils (
 
 import Control.Functor.Linear (StateT (..), execStateT, runStateT)
 import Control.Functor.Linear qualified as Control
+import Control.Lens (FoldableWithIndex, ifor_)
 import Control.Lens qualified as Lens
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Affine (Affine (..), AsAffine (..))
@@ -84,6 +86,20 @@ forReborOf_ f bor s k =
         Lens.forOf_ f s \ !b ->
           UrT $ StateT \ !bor -> reborrowing bor \bor ->
             move Control.<$> k bor b
+
+iforRebor_ ::
+  (FoldableWithIndex k t) =>
+  Mut α a %1 ->
+  t b ->
+  (forall β. Ur k -> Mut (β /\ α) a %1 -> Ur b %1 -> BO (β /\ α) ()) ->
+  BO α (Mut α a)
+{-# INLINE iforRebor_ #-}
+iforRebor_ bor tb k = flip execStateT bor $
+  Control.fmap unur $
+    runUrT $
+      ifor_ tb \i b -> UrT $ StateT \ !bor -> Control.do
+        reborrowing bor \bor -> Control.do
+          move Control.<$> k (Ur i) bor (Ur b)
 
 forRebor2 ::
   (Data.Traversable t) =>
