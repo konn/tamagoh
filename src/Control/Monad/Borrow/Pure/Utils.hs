@@ -25,6 +25,7 @@ module Control.Monad.Borrow.Pure.Utils (
   forReborOf_,
   forRebor2,
   forRebor2_,
+  forRebor2Of_,
   forReborN,
   forReborN_,
   forReborNOf_,
@@ -41,6 +42,8 @@ import Control.Functor.Linear (StateT (..), execStateT, runStateT)
 import Control.Functor.Linear qualified as Control
 import Control.Lens qualified as Lens
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Affine (Affine (..), AsAffine (..))
+import Control.Monad.Borrow.Pure.Affine.Internal (Aff (..))
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear (Array)
 import Data.Array.Mutable.Linear qualified as Array
@@ -147,10 +150,33 @@ forReborNOf_ fld !bors tb k = flip execStateT bors $
         () <- k (upcast bors) b
         Control.pure \ !_ -> (Ur (), bors)
 
+forRebor2Of_ ::
+  Lens.Fold s b ->
+  Borrow bk α x %1 ->
+  Borrow bk α y %1 ->
+  s ->
+  ( forall β.
+    Borrow bk (β /\ α) x %1 ->
+    Borrow bk (β /\ α) y %1 ->
+    b %1 ->
+    BO (β /\ α) ()
+  ) ->
+  BO α (Borrow bk α x, Borrow bk α y)
+{-# INLINE forRebor2Of_ #-}
+forRebor2Of_ fld !bor1 !bor2 tb k = Control.do
+  resl <- forReborNOf_ fld (bor1 :- bor2 :- BNil) tb $ \(x :- y :- BNil) -> k x y
+  case resl of
+    bor1 :- bor2 :- BNil -> Control.pure (bor1, bor2)
+
 type Borrows :: BorrowKind -> Lifetime -> [Type] -> Type
 data Borrows bk α xs where
   BNil :: Borrows bk α '[]
   (:-) :: !(Borrow bk α x) %1 -> !(Borrows bk α xs) %1 -> Borrows bk α (x ': xs)
+
+instance Affine (Borrows bk α xs) where
+  aff = UnsafeAff
+
+deriving via AsAffine (Borrows bk α xs) instance Consumable (Borrows bk α xs)
 
 instance (β <= α) => Borrows bk α xs <: Borrows bk' β xs where
   subtype = UnsafeSubtype

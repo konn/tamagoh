@@ -28,11 +28,13 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen (
 
   -- * Unsafe operations
   unsafeThaw,
+  unsafeFreeze,
 ) where
 
 import Control.Lens (FoldableWithIndex)
 import Control.Lens qualified as Lens
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Internal
 import Data.Array.Mutable.Linear qualified as Array
 import Data.Function ((&))
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr, Keyed)
@@ -42,12 +44,17 @@ import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Prelude.Linear (Ur (..), dup)
 import Prelude.Linear qualified as PL
+import Unsafe.Linear qualified as Unsafe
 import Prelude hiding (lookup)
 
 newtype ImmutableHashMapUr k v = ImmutableHashMapUr (RawLin.HashMap k v)
 
-freeze :: HashMapUr k v %1 -> ImmutableHashMapUr k v
-freeze (Raw.HM ref) = ImmutableHashMapUr (freeRef ref)
+unsafeFreeze :: Share α (Raw.HashMapUr k v) %m -> Ur (ImmutableHashMapUr k v)
+unsafeFreeze (UnsafeAlias (Raw.HM ref)) =
+  Unsafe.toLinear Ur (ImmutableHashMapUr (freeRef ref))
+
+freeze :: HashMapUr k v %1 -> Ur (ImmutableHashMapUr k v)
+freeze (Raw.HM ref) = Unsafe.toLinear Ur (ImmutableHashMapUr (freeRef ref))
 
 thaw :: ImmutableHashMapUr k v -> Linearly %1 -> HashMapUr k v
 thaw (ImmutableHashMapUr hm) =

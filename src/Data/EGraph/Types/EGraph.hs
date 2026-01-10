@@ -50,9 +50,11 @@ module Data.EGraph.Types.EGraph (
 import Algebra.Semilattice
 import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
 import Control.Functor.Linear qualified as Control
+import Control.Lens (ifolded, withIndex)
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Utils
 import Control.Monad.Trans.Maybe (MaybeT (..))
+import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (coerce)
 import Data.Coerce.Directed (upcast)
@@ -66,12 +68,14 @@ import Data.Fix (foldFixM)
 import Data.Foldable1 (Foldable1, foldlM1)
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
+import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen qualified as FHMUr
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe qualified as P
 import Data.Record.Linear
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
 import Data.Traversable qualified as P
+import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.UnionFind.Linear.Borrowed qualified as UFB
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear qualified as Ur
@@ -209,9 +213,17 @@ unsafeCanonicalize ::
   ENode l ->
   Borrow bk α (EGraph d l) %m ->
   BO α (Ur (ENode l))
-unsafeCanonicalize (ENode node) egraph =
-  share egraph & \(Ur egraph) -> Control.do
-    let uf = egraph .# #unionFind
+unsafeCanonicalize enode egraph =
+  unsafeCanonicalize' enode (egraph .# #unionFind)
+
+-- | A variant of 'unsafeCanonicalize' that uses underlying 'UnionFind'.
+unsafeCanonicalize' ::
+  (P.Traversable l) =>
+  ENode l ->
+  Borrow bk α UnionFind %m ->
+  BO α (Ur (ENode l))
+unsafeCanonicalize' (ENode node) uf =
+  share uf & \(Ur uf) -> Control.do
     runUrT $
       coerce
         P.<$> P.mapM
@@ -372,57 +384,79 @@ rebuild = loop
       if isNull
         then Control.pure egraph
         else Control.do
-          ((Ur numPs, Ur todos), egraph) <- reborrowing egraph \egraph -> Control.do
-            (Ur size, egraph) <- Set.size . (.# #worklist) <$~ egraph
+          (Ur todos, egraph) <- reborrowing egraph \egraph -> Control.do
             todos <- Set.take_ (egraph .# #worklist)
-            Control.pure (Ur size, Set.toListUnborrowed todos)
-          (todos, egraph) <- sharing egraph \egraph -> Control.do
-            Ur todos <-
-              Ur.lift nubHash
-                . move
-                . map unur
-                Control.<$> Data.mapM (\k -> move k & \(Ur k) -> unsafeFind egraph k) todos
-            Data.mapM
-              ( \k ->
-                  move k & \(Ur k) ->
-                    (Ur k,) Control.<$> parents (egraph .# #classes) k
-              )
-              todos
-          egraph <- forRebor_ egraph todos \egraph (Ur eid, Ur ps) ->
-            repair egraph eid numPs ps
+            Control.pure (Set.toListUnborrowed todos)
+          (Ur todos, egraph) <- sharing egraph \egraph -> runUrT do
+            nubHash
+              P.<$> P.mapM (\k -> move k & \(Ur k) -> UrT $ unsafeFind egraph k) todos
+
+          egraph <- forRebor_ egraph todos \egraph eid ->
+            move eid & \(Ur eid) -> repair egraph eid
           loop egraph
 
 repair ::
   (Hashable1 l, Movable1 l, Analysis l d) =>
   Mut α (EGraph d l) %1 ->
   EClassId ->
-  Int ->
-  [(ENode l, EClassId)] ->
   BO α ()
-repair egraph eid numParents parents = Control.do
-  Ur parents <- Control.pure $ move $ map move parents
-  egraph <- forRebor_ egraph parents $ \egraph (Ur (p_node, p_class)) -> Control.do
-    egraph <- reborrowing_ egraph \egraph ->
-      void $ HMUr.delete p_node (egraph .# #hashcons)
-    (Ur p_node, egraph) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize p_node <$~ egraph
-    (Ur p_class, egraph) <- sharing egraph \egraph ->
-      unsafeFind egraph p_class
-    void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node p_class (egraph .# #hashcons)
+repair egraph eid = Control.do
+  (Ur numParents, egraph) <- sharing egraph \egraph -> Control.do
+    mpare <- EC.lookupParents (egraph .# #classes) eid
+    case mpare of
+      -- FIXME: id MUST be present in classes - please review the invariant.
+      Nothing -> Control.pure $ Ur 0
+      Just pare -> HMUr.size pare
+  egraph <- reborrowing_ egraph \egraph -> Control.do
+    let %1 !(!hashcons, !classes, !uf) = DataFlow.do
+          (hashcons, egraph) <- splitRecord egraph -# #hashcons
+          (classes, egraph) <- egraph -# #classes
+          uf <- egraph !# #unionFind
+          (hashcons, classes, uf)
+    Ur !parents <-
+      share classes & \(Ur classes) -> Control.do
+        mpare <- EC.lookupParents classes eid
+        case mpare of
+          Nothing ->
+            -- FIXME: id MUST be present in classes - please review the invariant.
+
+            asksLinearly \lin ->
+              dup lin & \(lin, lin') ->
+                share $ borrow_ (HMUr.empty 16 lin) lin'
+          -- error $ "Impossible mpare None in Parents (divide): " <> P.show eid
+          Just pare -> Control.pure $ share pare
+    void $ forRebor2Of_ (HMUr.ifoldedBorrow P.. withIndex) hashcons uf parents \hashcons uf ncs ->
+      move ncs & \(Ur (p_node, p_class)) -> Control.do
+        hashcons <- void . HMUr.delete p_node <%= hashcons
+        (Ur p_node, uf) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node <$~ uf
+        (Ur p_class, uf) <- UFB.unsafeFind (coerce p_class) <$~ uf
+        Control.pure (consume uf)
+        void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node (coerce p_class) hashcons
+
+  (Ur parents, egraph) <- sharing egraph \egraph -> Control.do
+    -- FIXME: id MUST be present in classes - please review the invariant.
+    !mps <- EC.lookupParents (egraph .# #classes) eid
+    !ps <-
+      {- copy
+        . fromMaybe (error "Must be just") -}
+      maybe (asksLinearly $ HMUr.empty 16) (Control.pure . copy) mps
+    Control.pure $! FHMUr.freeze ps
   (newParents, egraph) <- reborrowing' egraph \egraph -> Control.do
     (newPs, newPsLend) <- asksLinearlyM \lin -> Control.do
       ps <- asksLinearly $ HMUr.empty @(ENode _) @EClassId numParents
       Control.pure $ borrow ps lin
-    (egraph, newPs) <- forRebor2_ egraph newPs parents $
-      \egraph newPs (Ur (p_node, p_class)) -> Control.do
-        (Ur p_node, egraph) <- {-# SCC "repair/loop2/unsafeCanon" #-} unsafeCanonicalize p_node <$~ egraph
-        (Ur mem, newPs) <- sharing newPs \newPs -> HMUr.lookup p_node newPs
-        Ur newId <- case mem of
-          Just class' ->
-            move class' & \(Ur class') -> Control.do
-              (Ur eid, egraph) <- unsafeMerge p_class class' egraph
-              Control.pure $ egraph `lseq` Ur (getMergedId eid)
-          Nothing -> unsafeFind egraph p_class
-        Control.void $ {-# SCC "upwardMerge/insert" #-} HMUr.insert p_node newId newPs
+    (egraph, newPs) <- forRebor2Of_ (ifolded P.. withIndex) egraph newPs parents $
+      \egraph newPs ncs ->
+        move ncs & \(Ur (p_node, p_class)) -> Control.do
+          (Ur p_node, egraph) <- {-# SCC "repair/loop2/unsafeCanon" #-} unsafeCanonicalize p_node <$~ egraph
+          (Ur mem, newPs) <- sharing newPs \newPs -> HMUr.lookup p_node newPs
+          Ur newId <- case mem of
+            Just class' ->
+              move class' & \(Ur class') -> Control.do
+                (Ur eid, egraph) <- unsafeMerge p_class class' egraph
+                Control.pure $ egraph `lseq` Ur (getMergedId eid)
+            Nothing -> unsafeFind egraph p_class
+          Control.void $ {-# SCC "upwardMerge/insert" #-} HMUr.insert p_node newId newPs
 
     egraph <- newPs `lseq` reborrowing_ egraph (modifyAnalysis id eid)
     -- Rebuild analysis after modification

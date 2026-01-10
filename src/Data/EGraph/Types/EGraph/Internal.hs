@@ -74,6 +74,8 @@ data EGraph d l = EGraph
 
 deriveGeneric ''EGraph
 
+deriving anyclass instance SplittableRecord (EGraph l d)
+
 deriving via
   Generically (EGraph d l)
   instance

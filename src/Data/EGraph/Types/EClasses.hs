@@ -23,6 +23,7 @@ module Data.EGraph.Types.EClasses (
   analyses,
   new,
   lookupAnalysis,
+  lookupParents,
   setAnalysis,
   nodes,
   delete,
@@ -84,6 +85,19 @@ analyses clss =
               Control.pure (k, (nodes, anal))
         )
         dic
+
+lookupParents ::
+  forall bk α d l m.
+  Borrow bk α (EClasses d l) %m ->
+  EClassId ->
+  BO α (Maybe (Borrow bk α (HashMapUr (ENode l) EClassId)))
+lookupParents classes eid =
+  share classes & \(Ur classes) -> Control.do
+    let %1 clss = coerceLin classes :: Borrow bk α (Raw d l)
+    mclass <- HMB.lookup eid clss
+    case mclass of
+      Nothing -> Control.pure Nothing
+      Just eclass -> Control.pure (Just (eclass .# #parents))
 
 lookupAnalysis ::
   forall bk α d l m.

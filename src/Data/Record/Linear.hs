@@ -27,6 +27,7 @@ module Data.Record.Linear (
   SplittableRecord (),
   (-#),
   (+#),
+  (!#),
 ) where
 
 import Control.Monad.Borrow.Pure.Internal
@@ -144,13 +145,13 @@ instance
 instance (GSplittableRecord f, GSplittableRecord g) => GSplittableRecord (f GL.:*: g) where
   type GFields (f GL.:*: g) = GFields f ++ GFields g
 
-splitRecord :: (SplittableRecord a) => Borrow bk α a -> SplitRecord a bk α (Fields a)
+splitRecord :: (SplittableRecord a) => Borrow bk α a %m -> SplitRecord a bk α (Fields a)
 splitRecord !bor = SplitRecord bor
 {-# INLINE splitRecord #-}
 
 (-#) ::
   (SplittableRecord a, Lookup field fs ~ 'Just '( 'One, x)) =>
-  SplitRecord a bk α fs %1 ->
+  SplitRecord a bk α fs %m ->
   RecordLabel a field x ->
   (Borrow bk α x, SplitRecord a bk α (Delete field fs))
 (-#) = Unsafe.toLinear \(SplitRecord !bor) lab ->
@@ -159,9 +160,19 @@ splitRecord !bor = SplitRecord bor
    in (fieldBor, restBor)
 {-# INLINE (-#) #-}
 
+(!#) ::
+  (SplittableRecord a, Lookup field fs ~ 'Just '( 'One, x)) =>
+  SplitRecord a bk α fs %m ->
+  RecordLabel a field x ->
+  Borrow bk α x
+(!#) = Unsafe.toLinear \(SplitRecord !bor) lab ->
+  let !fieldBor = bor .# lab
+   in bor `lseq` fieldBor
+{-# INLINE (!#) #-}
+
 (+#) ::
   (SplittableRecord a, Lookup field fs ~ 'Just '( 'Many, Ur x)) =>
-  SplitRecord a bk α fs %1 ->
+  SplitRecord a bk α fs %m ->
   RecordLabel a field (Ur x) ->
   (Ur x, SplitRecord a bk α fs)
 (+#) = Unsafe.toLinear \recd@(SplitRecord !bor) lab ->
