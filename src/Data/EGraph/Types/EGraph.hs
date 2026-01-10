@@ -425,11 +425,15 @@ repair egraph eid = Control.do
           -- error $ "Impossible mpare None in Parents (divide): " <> P.show eid
           Just pare -> Control.pure $ share pare
     void $ iforRebor2_ hashcons uf parents \ !hashcons !uf !p_node !p_class -> Control.do
-      !hashcons <- void . HMUr.delete p_node <%= hashcons
-      (Ur !p_node, uf) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node <$~ uf
+      (Ur !p_node', uf) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node <$~ uf
+      -- Removes old entry only if the canonicalized node is different.
+      hashcons <-
+        if p_node P./= p_node'
+          then uncurry lseq Control.<$> HMUr.delete p_node hashcons
+          else Control.pure hashcons
       (Ur !p_class, uf) <- UFB.unsafeFind (coerce p_class) <$~ uf
       Control.pure (consume uf)
-      void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node (coerce p_class) hashcons
+      void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node' (coerce p_class) hashcons
 
   (Ur parents, egraph) <- sharing egraph \egraph -> Control.do
     -- FIXME: id MUST be present in classes - please review the invariant.

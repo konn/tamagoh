@@ -114,7 +114,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , expectFailBecause "TIMEOUT" $ testCase "math_diff_same" do
+      , testCase "math_diff_same" do
           let x = var "x"
               lhs = diff x x
               rhs = 1 :: Term Math
@@ -137,7 +137,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , expectFailBecause "TIMEOUT" $ testCase "math_diff_simple1" do
+      , testCase "math_diff_simple1" do
           let x = var "x"
               lhs = diff x (1 + (2 * x))
               rhs = 2 :: Term Math
