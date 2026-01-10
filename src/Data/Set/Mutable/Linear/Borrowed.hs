@@ -22,7 +22,9 @@ module Data.Set.Mutable.Linear.Borrowed (
   toBorrowList,
   toListUnborrowed,
   take,
+  takeWithCapa,
   take_,
+  takeWithCapa_,
   swap,
   union,
   extend,
@@ -134,17 +136,25 @@ size = askRaw Raw.size
 
 -- | Takes all elements from the set, leaving it empty.
 take :: forall k α. (Keyed k) => Mut α (Set k) %1 -> BO α (Set k, Mut α (Set k))
-take set = Control.do
+take = takeWithCapa 16
+
+-- | Takes all elements from the set, leaving it empty with specified capacity.
+takeWithCapa :: forall k α. (Keyed k) => Int -> Mut α (Set k) %1 -> BO α (Set k, Mut α (Set k))
+takeWithCapa n set = Control.do
   Bi.second recoerceBor Control.<$> updateRef go (coerceBor set)
   where
     go :: Raw.Set k %1 -> BO α (Set k, Raw.Set k)
     go s = asksLinearlyM \lin ->
       dup lin & \(lin, lin') -> Control.do
-        Control.pure (Set $ Ref.new s lin, Raw.emptyL 16 $ fromPB lin')
+        Control.pure (Set $ Ref.new s lin, Raw.emptyL n $ fromPB lin')
 
 take_ :: forall k α. (Keyed k) => Mut α (Set k) %1 -> BO α (Set k)
 {-# INLINE take_ #-}
 take_ = Control.fmap (uncurry $ flip lseq) . take
+
+takeWithCapa_ :: forall k α. (Keyed k) => Int -> Mut α (Set k) %1 -> BO α (Set k)
+{-# INLINE takeWithCapa_ #-}
+takeWithCapa_ n = Control.fmap (uncurry $ flip lseq) . takeWithCapa n
 
 swap ::
   forall k α.

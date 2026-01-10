@@ -27,7 +27,6 @@ module Data.EGraph.Types.EClasses (
   setAnalysis,
   nodes,
   delete,
-  parents,
   setParents,
   addParent,
   find,
@@ -130,18 +129,6 @@ setAnalysis eid d classes = Control.do
       ref <- modifyRef (`lseq` d) $ eclass .# #analysis
       Control.pure $ ref `lseq` Ur True
 
-parents ::
-  forall bk α d l m.
-  Borrow bk α (EClasses d l) %m ->
-  EClassId ->
-  BO α (Ur [(ENode l, EClassId)])
-parents clss0 eid = Control.do
-  let %1 clss = coerceLin clss0 :: Borrow bk α (Raw d l)
-  mclass <- HMB.lookup eid clss
-  case mclass of
-    Nothing -> Control.pure (Ur [])
-    Just eclass -> HMUr.toList (eclass .# #parents)
-
 delete ::
   forall α d l.
   Mut α (EClasses d l) %1 ->
@@ -221,7 +208,7 @@ insertIfNew eid enode analysis clss = Control.do
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
       nodes <- asksLinearly $ Set.singleton enode
-      parents <- asksLinearly $ HMUr.empty 16
+      parents <- asksLinearly $ HMUr.empty 128
       analysis <- asksLinearly $ Ref.new analysis
       (mop, clss) <- HMB.insert eid EClass {parents, nodes, analysis} $ coerceLin clss
       clss <- reborrowing_ clss \clss -> Control.do

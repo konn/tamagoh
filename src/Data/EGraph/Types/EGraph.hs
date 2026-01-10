@@ -118,7 +118,7 @@ new = runReader Control.do
   classes <- asks $ EC.new
   nodes <- asks $ HMUr.empty 16
   hashcons <- asks $ HMUr.empty 16
-  worklist <- asks $ Set.empty 16
+  worklist <- asks $ Set.empty 128
   Control.pure EGraph {..}
 
 find :: Borrow k α (EGraph d l) %m -> EClassId -> BO α (Ur (Maybe EClassId))
@@ -385,7 +385,7 @@ rebuild = loop
         then Control.pure egraph
         else Control.do
           (Ur todos, egraph) <- reborrowing egraph \egraph -> Control.do
-            todos <- Set.take_ (egraph .# #worklist)
+            todos <- Set.takeWithCapa_ 128 (egraph .# #worklist)
             Control.pure (Set.toListUnborrowed todos)
           (Ur todos, egraph) <- sharing egraph \egraph -> runUrT do
             nubHash
@@ -461,8 +461,15 @@ repair egraph eid = Control.do
 
     egraph <- newPs `lseq` reborrowing_ egraph (modifyAnalysis id eid)
     -- Rebuild analysis after modification
-    (Ur ps, egraph) <- sharing egraph \eg -> EC.parents (eg .# #classes) eid
-    void $ forRebor_ egraph ps \egraph parent ->
+    (Ur ps, egraph) <- sharing egraph \egraph -> Control.do
+      -- FIXME: id MUST be present in classes - please review the invariant.
+      !mps <- EC.lookupParents (egraph .# #classes) eid
+      !ps <-
+        {- copy
+          . fromMaybe (error "Must be just") -}
+        maybe (asksLinearly $ HMUr.empty 16) (Control.pure . copy) mps
+      Control.pure $! FHMUr.freeze ps
+    void $ forReborOf_ (ifolded P.. withIndex) egraph ps \egraph parent ->
       move parent & \(Ur (pNode, pClass)) -> Control.do
         (newAnal, egraph) <- sharing egraph \egraph -> Control.do
           Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
