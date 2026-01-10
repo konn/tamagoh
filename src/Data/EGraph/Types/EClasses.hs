@@ -274,18 +274,11 @@ unsafeMerge eid1 eid2 clss
         case l of
           Nothing -> error ("EClasses.unsafeMerge: canonical id not found: " <> show eid1) rnodes rparents
           Just l -> Control.do
-            (lnodes, l) <- reborrowing l \l -> Set.take_ (l .# #nodes)
-            let %1 !nodes = Set.union lnodes rnodes
+            l <- reborrowing_ l \l -> void $ Set.extend rnodes (l .# #nodes)
+            l <- reborrowing_ l \l -> void $ HMUr.extend rparents (l .# #parents)
 
-            (lparents, l) <- reborrowing l \l -> HMUr.take_ (l .# #parents)
-            let %1 !parents = HMUr.union lparents rparents
-            l <- reborrowing_ l \l -> Control.do
+            void $ reborrowing_ l \l -> Control.do
               void $ modifyRef (\la -> move la & \(Ur la) -> la /\ ranalysis) (l .# #analysis)
-
-            l <- reborrowing_ l \l -> Control.do
-              void $ Set.swap nodes (l .# #nodes)
-            Control.void $ reborrowing_ l \l -> Control.do
-              void $ HMUr.swap parents $ l .# #parents
 
       Control.pure clss
 

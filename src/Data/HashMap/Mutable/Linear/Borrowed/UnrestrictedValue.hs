@@ -47,6 +47,7 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (
   take,
   take_,
   union,
+  extend,
 ) where
 
 import Control.Functor.Linear (StateT (..), runStateT)
@@ -185,3 +186,9 @@ union :: (Keyed k) => HashMapUr k v %1 -> HashMapUr k v %1 -> HashMapUr k v
 union (HM ref1) (HM ref2) = DataFlow.do
   (l, ref1) <- withLinearly ref1
   HM $! Ref.new (Raw.union (freeRef ref1) (freeRef ref2)) l
+
+extend :: (Keyed k) => HashMapUr k v %1 -> Mut α (HashMapUr k v) %1 -> BO α (Mut α (HashMapUr k v))
+extend (HM dicRef') dic = Control.do
+  let %1 !dic' = freeRef dicRef'
+  !dic <- modifyRef (\ !s -> Raw.union s dic') $ coerceBor dic
+  Control.pure $! recoerceBor dic

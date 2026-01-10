@@ -25,6 +25,7 @@ module Data.Set.Mutable.Linear.Borrowed (
   take_,
   swap,
   union,
+  extend,
 ) where
 
 import Control.Functor.Linear qualified as Control
@@ -153,6 +154,13 @@ swap ::
 swap keys dic = asksLinearlyM \lin -> Control.do
   Bi.second recoerceBor
     Control.<$> updateRef (\old -> Control.pure (Set $! Ref.new old lin, freeRef $ inner keys)) (coerceBor dic)
+
+extend :: forall k α. (Keyed k) => Set k %1 -> Mut α (Set k) %1 -> BO α (Mut α (Set k))
+extend (Set keysRef) dic = Control.do
+  let %1 dic' = coerceLin dic :: Mut α (Ref (Raw.Set k))
+      %1 !keys = freeRef keysRef
+  dic' <- modifyRef (\ !s -> Raw.union s keys) dic'
+  Control.pure $! recoerceBor dic'
 
 coerceLin :: (Coercible a b) => a %1 -> b
 coerceLin = Unsafe.toLinear \ !a -> coerce a
