@@ -29,6 +29,8 @@ module Control.Monad.Borrow.Pure.Utils (
   forRebor2Of_,
   forReborN,
   forReborN_,
+  iforReborN_,
+  iforRebor2_,
   forReborNOf_,
   unsafeLeak,
   deepCloneArray,
@@ -91,7 +93,7 @@ iforRebor_ ::
   (FoldableWithIndex k t) =>
   Mut α a %1 ->
   t b ->
-  (forall β. Ur k -> Mut (β /\ α) a %1 -> Ur b %1 -> BO (β /\ α) ()) ->
+  (forall β. Mut (β /\ α) a %1 -> k -> b -> BO (β /\ α) ()) ->
   BO α (Mut α a)
 {-# INLINE iforRebor_ #-}
 iforRebor_ bor tb k = flip execStateT bor $
@@ -99,7 +101,7 @@ iforRebor_ bor tb k = flip execStateT bor $
     runUrT $
       ifor_ tb \i b -> UrT $ StateT \ !bor -> Control.do
         reborrowing bor \bor -> Control.do
-          move Control.<$> k (Ur i) bor (Ur b)
+          move Control.<$> k bor i b
 
 forRebor2 ::
   (Data.Traversable t) =>
@@ -166,6 +168,25 @@ forReborNOf_ fld !bors tb k = flip execStateT bors $
         () <- k (upcast bors) b
         Control.pure \ !_ -> (Ur (), bors)
 
+iforReborN_ ::
+  (FoldableWithIndex k t) =>
+  Borrows bk α xs %1 ->
+  t b ->
+  ( forall β.
+    Borrows bk (β /\ α) xs %1 ->
+    k ->
+    b ->
+    BO (β /\ α) ()
+  ) ->
+  BO α (Borrows bk α xs)
+{-# INLINE iforReborN_ #-}
+iforReborN_ !bors tb k = flip execStateT bors $
+  Control.fmap unur $
+    runUrT $
+      ifor_ tb \i b -> UrT $ StateT $ Unsafe.toLinear \ !bors -> srunBO \(Proxy :: Proxy β) -> Control.do
+        () <- k (upcast bors) i b
+        Control.pure \ !_ -> (Ur (), bors)
+
 forRebor2Of_ ::
   Lens.Fold s b ->
   Borrow bk α x %1 ->
@@ -181,6 +202,25 @@ forRebor2Of_ ::
 {-# INLINE forRebor2Of_ #-}
 forRebor2Of_ fld !bor1 !bor2 tb k = Control.do
   resl <- forReborNOf_ fld (bor1 :- bor2 :- BNil) tb $ \(x :- y :- BNil) -> k x y
+  case resl of
+    bor1 :- bor2 :- BNil -> Control.pure (bor1, bor2)
+
+iforRebor2_ ::
+  (FoldableWithIndex k t) =>
+  Borrow bk α x %1 ->
+  Borrow bk α y %1 ->
+  t b ->
+  ( forall β.
+    Borrow bk (β /\ α) x %1 ->
+    Borrow bk (β /\ α) y %1 ->
+    k ->
+    b ->
+    BO (β /\ α) ()
+  ) ->
+  BO α (Borrow bk α x, Borrow bk α y)
+{-# INLINE iforRebor2_ #-}
+iforRebor2_ !bor1 !bor2 tb k = Control.do
+  resl <- iforReborN_ (bor1 :- bor2 :- BNil) tb $ \(x :- y :- BNil) -> k x y
   case resl of
     bor1 :- bor2 :- BNil -> Control.pure (bor1, bor2)
 

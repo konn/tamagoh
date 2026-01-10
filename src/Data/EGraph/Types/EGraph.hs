@@ -424,13 +424,12 @@ repair egraph eid = Control.do
                 share $ borrow_ (HMUr.empty 16 lin) lin'
           -- error $ "Impossible mpare None in Parents (divide): " <> P.show eid
           Just pare -> Control.pure $ share pare
-    void $ forRebor2Of_ (ifolded P.. withIndex) hashcons uf parents \ !hashcons !uf !ncs ->
-      move ncs & \(Ur (!p_node, !p_class)) -> Control.do
-        !hashcons <- void . HMUr.delete p_node <%= hashcons
-        (Ur !p_node, uf) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node <$~ uf
-        (Ur !p_class, uf) <- UFB.unsafeFind (coerce p_class) <$~ uf
-        Control.pure (consume uf)
-        void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node (coerce p_class) hashcons
+    void $ iforRebor2_ hashcons uf parents \ !hashcons !uf !p_node !p_class -> Control.do
+      !hashcons <- void . HMUr.delete p_node <%= hashcons
+      (Ur !p_node, uf) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node <$~ uf
+      (Ur !p_class, uf) <- UFB.unsafeFind (coerce p_class) <$~ uf
+      Control.pure (consume uf)
+      void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node (coerce p_class) hashcons
 
   (Ur parents, egraph) <- sharing egraph \egraph -> Control.do
     -- FIXME: id MUST be present in classes - please review the invariant.
@@ -467,7 +466,7 @@ repair egraph eid = Control.do
           . fromMaybe (error "Must be just") -}
         maybe (asksLinearly $ HMUr.empty 16) (Control.pure . copy) mps
       Control.pure $! FHMUr.freeze ps
-    void $ iforRebor_ egraph ps \(Ur pNode) egraph (Ur pClass) -> Control.do
+    void $ iforRebor_ egraph ps \egraph pNode pClass -> Control.do
       (newAnal, egraph) <- sharing egraph \egraph -> Control.do
         Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
         Ur old <- EC.lookupAnalysis (egraph .# #classes) pClass
