@@ -25,6 +25,7 @@ module Data.Vector.Unboxed.Mutable.Growable.Borrowed (
   takeOut_,
   toList,
   borrowToList,
+  freeze,
 ) where
 
 import Control.Functor.Linear (reader, runReader)
@@ -39,6 +40,7 @@ import Data.Functor.Linear qualified as Data
 import Data.Linear.Witness.Compat
 import Data.Ref.Linear qualified as Ref
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
+import Data.Vector.Unboxed qualified as U
 import Prelude.Linear hiding (null)
 import Text.Show.Borrowed
 import Unsafe.Linear qualified as Unsafe
@@ -54,6 +56,9 @@ instance (Unbox a) => Dupable (Vector a) where
     (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, Ref.freeRef ref)) ref
     !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
     (Vector ref, Vector $! Ref.new hm' lin)
+
+freeze :: (U.Unbox a) => Vector a %1 -> Ur (U.Vector a)
+freeze (Vector ref) = LUV.freeze $ Ref.freeRef ref
 
 new :: (Unbox a) => Linearly %1 -> Vector a
 new l = flip runReader l Control.do
