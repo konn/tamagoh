@@ -63,12 +63,12 @@ import Data.Foldable qualified as P
 import Data.Function ((&))
 import Data.Functor.Classes
 import Data.Generics.Labels ()
-import Data.HasField.Linear
 import Data.HashMap.Strict qualified as PHM
 import Data.HashSet qualified as HashSet
 import Data.Hashable
 import Data.Hashable.Lifted (Hashable1)
 import Data.Maybe (mapMaybe)
+import Data.Record.Linear
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Semigroup (Arg (..), ArgMin, Min (..))

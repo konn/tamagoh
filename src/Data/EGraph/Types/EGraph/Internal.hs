@@ -32,8 +32,8 @@ import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.EClasses.Internal (EClasses)
 import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
-import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
+import Data.Record.Linear
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.Unrestricted.Linear.Lifted (Copyable1)

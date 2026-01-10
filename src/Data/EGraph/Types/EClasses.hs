@@ -50,7 +50,6 @@ import Data.EGraph.Types.EGraph.Internal (Analysis (..))
 import Data.EGraph.Types.ENode
 import Data.Foldable (Foldable)
 import Data.Functor.Linear qualified as Data
-import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
@@ -59,6 +58,7 @@ import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe.Linear
+import Data.Record.Linear
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear.Borrowed qualified as Set

@@ -99,10 +99,11 @@ library
     Data.EGraph.Types.Language
     Data.EGraph.Types.Pattern
     Data.EGraph.Types.Term
-    Data.HasField.Linear
     Data.HashMap.Mutable.Linear.Borrowed
     Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue
+    Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen
     Data.Linear.Witness.Compat
+    Data.Record.Linear
     Data.Set.Mutable.Linear.Borrowed
     Data.Trie
     Data.UnionFind.Linear
@@ -117,6 +118,7 @@ library
     Data.EGraph.Types.EClasses.Internal
     Data.EGraph.Types.EGraph.Internal
     Data.HashMap.Mutable.Linear.Borrowed.Internal
+    Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal
     Data.Set.Mutable.Linear.Borrowed.Internal
     Data.UnionFind.Linear.Borrowed.Internal
     Data.UnionFind.Linear.Internal

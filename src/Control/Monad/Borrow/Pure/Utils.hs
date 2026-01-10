@@ -22,10 +22,12 @@
 module Control.Monad.Borrow.Pure.Utils (
   forRebor,
   forRebor_,
+  forReborOf_,
   forRebor2,
   forRebor2_,
   forReborN,
   forReborN_,
+  forReborNOf_,
   unsafeLeak,
   deepCloneArray,
   deepCloneArray',
@@ -35,8 +37,9 @@ module Control.Monad.Borrow.Pure.Utils (
   Borrows (..),
 ) where
 
-import Control.Functor.Linear (StateT (..), runStateT)
+import Control.Functor.Linear (StateT (..), execStateT, runStateT)
 import Control.Functor.Linear qualified as Control
+import Control.Lens qualified as Lens
 import Control.Monad.Borrow.Pure
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear (Array)
@@ -48,6 +51,7 @@ import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
 import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
+import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
@@ -63,6 +67,20 @@ forRebor bor tb k = flip runStateT bor Control.do
   Data.forM tb \b -> StateT \bor -> Control.do
     reborrowing bor \bor -> Control.do
       k bor b
+
+forReborOf_ ::
+  Lens.Fold s b ->
+  Mut α a %1 ->
+  s ->
+  (forall β. Mut (β /\ α) a %1 -> b %1 -> BO (β /\ α) ()) ->
+  BO α (Mut α a)
+forReborOf_ f bor s k =
+  flip execStateT bor $
+    Control.fmap unur $
+      runUrT $
+        Lens.forOf_ f s \ !b ->
+          UrT $ StateT \ !bor -> reborrowing bor \bor ->
+            move Control.<$> k bor b
 
 forRebor2 ::
   (Data.Traversable t) =>
@@ -110,6 +128,24 @@ forReborN_ ::
   BO α (Borrows bk α xs)
 {-# INLINE forReborN_ #-}
 forReborN_ bors tb k = Control.fmap (uncurry lseq) $ forReborN bors tb k
+
+forReborNOf_ ::
+  Lens.Fold s b ->
+  Borrows bk α xs %1 ->
+  s ->
+  ( forall β.
+    Borrows bk (β /\ α) xs %1 ->
+    b %1 ->
+    BO (β /\ α) ()
+  ) ->
+  BO α (Borrows bk α xs)
+{-# INLINE forReborNOf_ #-}
+forReborNOf_ fld !bors tb k = flip execStateT bors $
+  Control.fmap unur $
+    runUrT $
+      Lens.forOf_ fld tb \b -> UrT $ StateT $ Unsafe.toLinear \ !bors -> srunBO \(Proxy :: Proxy β) -> Control.do
+        () <- k (upcast bors) b
+        Control.pure \ !_ -> (Ur (), bors)
 
 type Borrows :: BorrowKind -> Lifetime -> [Type] -> Type
 data Borrows bk α xs where

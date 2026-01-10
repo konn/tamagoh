@@ -39,7 +39,6 @@ import Data.Foldable qualified as F
 import Data.Functor.Classes
 import Data.Functor.Linear qualified as Data
 import Data.Generics.Labels ()
-import Data.HasField.Linear ((.#))
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
@@ -47,6 +46,7 @@ import Data.HashSet (HashSet)
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.Maybe (fromMaybe)
+import Data.Record.Linear ((.#))
 import Data.Trie (Trie)
 import Data.Trie qualified as Trie
 import Data.Unrestricted.Linear

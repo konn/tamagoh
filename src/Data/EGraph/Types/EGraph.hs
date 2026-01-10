@@ -65,11 +65,11 @@ import Data.EGraph.Types.Term
 import Data.Fix (foldFixM)
 import Data.Foldable1 (Foldable1, foldlM1)
 import Data.Functor.Linear qualified as Data
-import Data.HasField.Linear
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe qualified as P
+import Data.Record.Linear
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
 import Data.Traversable qualified as P
 import Data.UnionFind.Linear.Borrowed qualified as UFB
