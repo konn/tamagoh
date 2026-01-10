@@ -171,7 +171,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , expectFailBecause "TIMEOUT" $ testCase "diff_power_simple" do
+      , testCase "diff_power_simple" do
           let x = var "x"
               lhs = diff x (x ** 3)
               rhs = 3 * (x ** 2)
