@@ -272,7 +272,7 @@ unsafeMerge eid1 eid2 clss
         let clss = coerceLin clss0 :: Mut _ (Raw d l)
         l <- HMB.lookup eid1 clss
         case l of
-          Nothing -> Control.pure $ rnodes `lseq` rparents `lseq` ()
+          Nothing -> error ("EClasses.unsafeMerge: canonical id not found: " <> show eid1) rnodes rparents
           Just l -> Control.do
             (lnodes, l) <- reborrowing l \l -> Set.take_ (l .# #nodes)
             let %1 !nodes = Set.union lnodes rnodes
