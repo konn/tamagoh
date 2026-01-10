@@ -42,7 +42,7 @@ newtype EClasses d l = EClasses (Raw d l)
 type Raw d l = HashMap EClassId (EClass d l)
 
 new :: Linearly %1 -> EClasses d l
-new = EClasses . HMB.empty 16
+new = EClasses . HMB.empty 2048
 
 -- TODO: use (unsafe) indirection around Sets to reduce copying cost
 data EClass d l

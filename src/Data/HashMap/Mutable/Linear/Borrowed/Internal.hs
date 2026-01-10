@@ -57,7 +57,6 @@ newtype HashMap k v = HM (Ref (Raw.HashMap k v))
   deriving newtype (LinearOnly)
 
 instance Consumable (HashMap k v) where
-  -- FIXME: stop leaking
   consume = \(HM ref) -> consume $ freeRef ref
   {-# INLINE consume #-}
 

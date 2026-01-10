@@ -34,9 +34,9 @@ import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
 import Data.Record.Linear
-import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.Unrestricted.Linear.Lifted (Copyable1)
+import Data.Vector.Unboxed.Mutable.Growable.Borrowed qualified as BUV
 import GHC.Generics (Generic, Generically (..))
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
@@ -67,7 +67,7 @@ data EGraph d l = EGraph
   A map from _canonical_ enodes to eclass-ids.
   Keys MUST BE canonical AFTER rebuilding.
   -}
-  , worklist :: !(Set EClassId)
+  , worklist :: !(BUV.Vector EClassId)
   -- ^ A set of eclass-ids that need to be repaired.
   }
   deriving (Generic)

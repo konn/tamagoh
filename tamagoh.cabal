@@ -110,6 +110,7 @@ library
     Data.UnionFind.Linear.Borrowed
     Data.UnionFind.Linear.Immutable
     Data.Unrestricted.Linear.Lifted
+    Data.Vector.Unboxed.Mutable.Growable.Borrowed
     Language.Egglog.Core
     Text.Show.Borrowed
 

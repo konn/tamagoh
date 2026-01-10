@@ -73,13 +73,13 @@ import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe qualified as P
 import Data.Record.Linear
-import Data.Set.Mutable.Linear.Borrowed qualified as Set
 import Data.Traversable qualified as P
 import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.UnionFind.Linear.Borrowed qualified as UFB
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted (Movable1)
+import Data.Vector.Unboxed.Mutable.Growable.Borrowed qualified as BUV
 import GHC.Generics (Generic)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Prelude qualified as P
@@ -116,9 +116,9 @@ new :: forall d l. (Hashable1 l) => Linearly %1 -> EGraph d l
 new = runReader Control.do
   unionFind <- asks UFB.empty
   classes <- asks $ EC.new
-  nodes <- asks $ HMUr.empty 128
-  hashcons <- asks $ HMUr.empty 128
-  worklist <- asks $ Set.empty 128
+  nodes <- asks $ HMUr.empty 2048
+  hashcons <- asks $ HMUr.empty 2048
+  worklist <- asks BUV.new
   Control.pure EGraph {..}
 
 find :: Borrow k α (EGraph d l) %m -> EClassId -> BO α (Ur (Maybe EClassId))
@@ -354,9 +354,8 @@ unsafeMerge eid1 eid2 egraph = Control.do
       egraph <- reborrowing_ egraph \egraph -> Control.do
         void $ EC.unsafeMerge eid outdatedId $ egraph .# #classes
 
-      egraph <- reborrowing_ egraph \egraph -> Control.do
-        !set <- Set.insert eid (egraph .# #worklist)
-        Control.pure $! consume set
+      egraph <- reborrowing_ egraph \egraph ->
+        void $ BUV.push eid (egraph .# #worklist)
 
       Control.pure (Ur (Merged eid), egraph)
 
@@ -379,16 +378,13 @@ rebuild = loop
   where
     loop :: Mut α (EGraph d l) %1 -> BO α (Mut α (EGraph d l))
     loop egraph = Control.do
-      ((Ur isNull, Ur curCapa), egraph) <- sharing egraph \e -> Control.do
-        isNull <- Set.null $ e .# #worklist
-        curCapa <- Set.capacity $ e .# #worklist
-        Control.pure (isNull, curCapa)
+      (Ur isNull, egraph) <- sharing egraph \e -> BUV.null $ e .# #worklist
       if isNull
         then Control.pure egraph
         else Control.do
           (Ur todos, egraph) <- reborrowing egraph \egraph -> Control.do
-            todos <- Set.takeWithCapa_ curCapa (egraph .# #worklist)
-            Control.pure (Set.toListUnborrowed todos)
+            todos <- BUV.takeOut_ (egraph .# #worklist)
+            Control.pure (BUV.toList todos)
           (Ur todos, egraph) <- sharing egraph \egraph -> runUrT do
             nubHash
               P.<$> P.mapM (\k -> move k & \(Ur k) -> UrT $ unsafeFind egraph k) todos
@@ -484,7 +480,7 @@ repair egraph eid = Control.do
         Just (Ur d) -> Control.do
           egraph <- reborrowing_ egraph \egraph -> Control.do
             void $ EC.setAnalysis pClass d (egraph .# #classes)
-          !set <- {-# SCC "update_worklist/insert" #-} Set.insert pClass (egraph .# #worklist)
+          !set <- {-# SCC "update_worklist/insert" #-} BUV.push pClass (egraph .# #worklist)
           Control.pure $ consume set
 
     Control.pure (\end -> reclaim newPsLend (upcast end))

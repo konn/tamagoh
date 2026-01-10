@@ -141,7 +141,9 @@ capacity = askRaw \(Raw.Set hm) -> Bi.second Raw.Set $ RawHM.capacity hm
 
 -- | Takes all elements from the set, leaving it empty.
 take :: forall k α. (Keyed k) => Mut α (Set k) %1 -> BO α (Set k, Mut α (Set k))
-take = takeWithCapa 16
+take set = Control.do
+  (Ur capa, set) <- capacity <$~ set
+  takeWithCapa capa set
 
 -- | Takes all elements from the set, leaving it empty with specified capacity.
 takeWithCapa :: forall k α. (Keyed k) => Int -> Mut α (Set k) %1 -> BO α (Set k, Mut α (Set k))

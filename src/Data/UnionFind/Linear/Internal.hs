@@ -97,7 +97,6 @@ data UnionFind where
   UnionFind :: !Word -> !(Vector Key) %1 -> !(Vector Word) %1 -> UnionFind
 
 instance Consumable UnionFind where
-  -- TODO: stop leaking
   consume (UnionFind _ p r) = consume p `lseq` consume r
 
 instance Dupable UnionFind where
