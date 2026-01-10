@@ -59,7 +59,7 @@ import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (coerce)
 import Data.Coerce.Directed (upcast)
 import Data.EGraph.Types.EClassId
-import Data.EGraph.Types.EClasses (parents, setParents)
+import Data.EGraph.Types.EClasses (setParents)
 import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.EGraph.Internal
 import Data.EGraph.Types.ENode
