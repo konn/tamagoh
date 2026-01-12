@@ -3,6 +3,7 @@ tests: True
 benchmarks: True
 write-ghc-environment-files: always
 optimization: 2
+multi-repl: True
 
 source-repository-package
   type: git
