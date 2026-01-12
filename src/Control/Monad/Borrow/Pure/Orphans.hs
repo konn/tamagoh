@@ -20,9 +20,12 @@
 module Control.Monad.Borrow.Pure.Orphans () where
 
 import Control.Functor.Linear qualified as Control
+import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Data.Functor.Linear qualified as Data
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Semigroup qualified as Sem
+import Data.Strict.Maybe qualified as Strict
+import Data.Vector.Mutable.Linear qualified as LV
 import Prelude.Linear
 import Prelude.Linear.Generically
 
@@ -41,3 +44,18 @@ deriving newtype instance (Movable a) => Movable (Sem.Min a)
 deriving via Generically (Sem.Arg a b) instance (Dupable a, Dupable b) => Dupable (Sem.Arg a b)
 
 deriving via Generically (Sem.Arg a b) instance (Movable a, Movable b) => Movable (Sem.Arg a b)
+
+instance (Consumable a) => Consumable (Strict.Maybe a) where
+  consume Strict.Nothing = ()
+  consume (Strict.Just x) = consume x
+  {-# INLINE consume #-}
+
+instance (Dupable a) => Dupable (Strict.Maybe a) where
+  dup2 Strict.Nothing = (Strict.Nothing, Strict.Nothing)
+  dup2 (Strict.Just x) =
+    let %1 !(x1, x2) = dup2 x
+     in (Strict.Just x1, Strict.Just x2)
+  {-# INLINE dup2 #-}
+
+instance LinearOnly (LV.Vector a) where
+  linearOnly = UnsafeLinearOnly

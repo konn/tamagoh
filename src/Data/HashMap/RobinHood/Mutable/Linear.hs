@@ -26,11 +26,15 @@ module Data.HashMap.RobinHood.Mutable.Linear (
   foldMapWithKey,
   toList,
   lookup,
+  member,
   union,
   delete,
   alter,
   alterF,
   size,
+
+  -- * Internal types
+  deepClone,
 ) where
 
 import Control.Functor.Linear (asks, execState, modify, runReader, runState, state)
@@ -38,7 +42,8 @@ import Control.Functor.Linear qualified as Control
 import Control.Lens ((+~), (-~))
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
-import Control.Monad.Borrow.Pure.Utils (swapTuple)
+import Control.Monad.Borrow.Pure.Orphans ()
+import Control.Monad.Borrow.Pure.Utils (swapTuple, unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.DList qualified as DL
 import Data.FMList qualified as FML
@@ -59,6 +64,7 @@ import GHC.Generics (Generic)
 import GHC.TypeError (ErrorMessage (..), Unsatisfiable, unsatisfiable)
 import Math.NumberTheory.Logarithms (intLog2')
 import Prelude.Linear hiding (insert, lookup)
+import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
 
 -- Difference from Initial Bucket
@@ -71,8 +77,19 @@ newtype instance U.Vector DIB = V_DIB (U.Vector Word)
 
 newtype instance U.MVector s DIB = MV_DIB (U.MVector s Word)
 
-data Entry k v = Entry {key :: !k, value :: !v}
+data Entry k v where
+  Entry :: k -> v %1 -> Entry k v
   deriving (Show, P.Functor)
+
+instance (Consumable v) => Consumable (Entry k v) where
+  consume (Entry _ v) = consume v
+  {-# INLINE consume #-}
+
+instance (Dupable v) => Dupable (Entry k v) where
+  dup2 (Entry k v) =
+    let %1 !(v1, v2) = dup2 v
+     in (Entry k v1, Entry k v2)
+  {-# INLINE dup2 #-}
 
 data IndexInfo = IndexInfo
   { residual :: {-# UNPACK #-} !Int
@@ -113,6 +130,25 @@ instance Dupable (HashMap k v) where
      in (HashMap size capa maxDIB idcs1 kvs1, HashMap size capa maxDIB idcs2 kvs2)
   {-# INLINE dup2 #-}
 
+deepClone :: forall k v. (Dupable v) => HashMap k v %1 -> (HashMap k v, HashMap k v)
+deepClone = Unsafe.toLinear \dic@(HashMap size capa maxDIB idcs kvs) ->
+  withLinearly kvs & Unsafe.toLinear \(lin, kvs) ->
+    let go :: Int -> KVs k v %1 -> KVs k v
+        go !i !acc
+          | i >= capa = acc
+          | otherwise = case LV.unsafeGet i kvs of
+              (Ur (Strict.Just (Entry k v)), _) ->
+                dupLeak v & \v' ->
+                  go (i + 1) (LV.unsafeSet i (Strict.Just (Entry k v')) acc)
+              (Ur Strict.Nothing, _) -> go (i + 1) acc
+        kvs2 = go 0 (LV.constantL capa Strict.Nothing (fromPB lin))
+     in (dic, HashMap size capa maxDIB (dupLeak idcs) kvs2)
+
+dupLeak :: (Dupable a) => a %1 -> a
+dupLeak x =
+  let %1 !(x1, x2) = dup x
+   in unsafeLeak x1 `lseq` x2
+
 instance
   (Unsatisfiable ('Text "HashMap is only usable in linear context")) =>
   Movable (HashMap k v)
@@ -150,7 +186,7 @@ foldMapWithKey f (HashMap size capa _ idcs kvs) = idcs `lseq` go 0 0 kvs mempty
             (Ur Strict.Nothing, kvs) -> go (i + 1) count kvs acc
             (Ur (Strict.Just (Entry k v)), kvs) -> go (i + 1) (count + 1) kvs (acc <> f k v)
 
-insert :: (Hashable k, Show k, Show v) => k -> v -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
+insert :: (Hashable k) => k -> v -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 insert k v =
   swapTuple
     . flip runState (Ur (Just v))
@@ -158,7 +194,7 @@ insert k v =
 
 alter ::
   forall k v.
-  (Hashable k, Show k, Show v) =>
+  (Hashable k) =>
   (Maybe v -> Maybe v) ->
   k ->
   HashMap k v %1 ->
@@ -184,7 +220,7 @@ size :: HashMap k v %1 -> (Ur Int, HashMap k v)
 {-# INLINE size #-}
 size (HashMap sz capa maxDIB idcs kvs) = (Ur sz, HashMap sz capa maxDIB idcs kvs)
 
-union :: (Hashable k, Show k, Show v) => HashMap k v %1 -> HashMap k v %1 -> HashMap k v
+union :: (Hashable k) => HashMap k v %1 -> HashMap k v %1 -> HashMap k v
 {-# INLINE union #-}
 union hm1 hm2 = case (size hm1, size hm2) of
   ((Ur sz1, hm1), (Ur sz2, hm2)) -> DataFlow.do
@@ -194,7 +230,7 @@ union hm1 hm2 = case (size hm1, size hm2) of
       parent
 
 alterF ::
-  (Show k, Hashable k, Control.Functor f, Show v) =>
+  (Hashable k, Control.Functor f) =>
   (Maybe v -> f (Ur (Maybe v))) %1 ->
   k ->
   HashMap k v %1 ->
@@ -253,7 +289,7 @@ unsafeSwapUnboxed i j vec =
       LUV.unsafeSet j xi vec
 
 probeForInsert ::
-  (Hashable k, Show k, Show v) =>
+  (Hashable k) =>
   k -> v -> ProbeSuspended -> HashMap k v %1 -> HashMap k v
 probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs) =
   case endType of
@@ -262,7 +298,7 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs) =
       kvs <- LV.unsafeSet offset (Strict.Just (Entry k v)) kvs
       HashMap (size + 1) capa maxDIB idcs kvs
     Paused -> growToFit (size + 1) DataFlow.do
-      go maxDIB IndexInfo {residual = initialBucket, dib = dibAtMiss} Entry {key = k, value = v} offset idcs kvs
+      go maxDIB IndexInfo {residual = initialBucket, dib = dibAtMiss} (Entry k v) offset idcs kvs
   where
     go ::
       DIB ->
@@ -314,14 +350,20 @@ lookup k hm =
     (Ur (NotFound _), hm) -> (Ur Nothing, hm)
     (Ur (Found loc), hm) -> (Ur (Just loc.val), hm)
 
-delete :: (Hashable k, Show k, Show v) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
+member :: (Hashable k) => k -> HashMap k v %1 -> (Ur Bool, HashMap k v)
+member k hm =
+  probeKeyForAlter k hm & \case
+    (Ur NotFound {}, hm) -> (Ur False, hm)
+    (Ur Found {}, hm) -> (Ur True, hm)
+
+delete :: (Hashable k) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 {-# INLINE delete #-}
 delete k =
   swapTuple
     . flip runState (Ur Nothing)
     . alterF (\old -> state \new -> (new, Ur old)) k
 
-growToFit :: (Hashable k, Show k, Show v) => Int -> HashMap k v %1 -> HashMap k v
+growToFit :: (Hashable k) => Int -> HashMap k v %1 -> HashMap k v
 growToFit targetSize (HashMap size capa maxDIB idcs kvs) =
   let finalSize = 2 ^ ceiling @_ @Int (logBase 2 (fromIntegral targetSize / maxLoadFactor))
    in if fromIntegral targetSize / fromIntegral capa >= maxLoadFactor
@@ -399,7 +441,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                           )
                       | otherwise -> go ((idx + 1) `rem` capa) (dib + 1) idcs kvs
 
-resize :: (Hashable k, Show k, Show v) => Int -> HashMap k v %1 -> HashMap k v
+resize :: (Hashable k) => Int -> HashMap k v %1 -> HashMap k v
 resize capa hm = DataFlow.do
   (lin, hm) <- withLinearly hm
   hm' <- new capa lin
@@ -411,7 +453,7 @@ toList :: HashMap k v %1 -> Ur [(k, v)]
 {-# INLINE toList #-}
 toList = Ur.lift DL.toList . foldMapWithKey (curry $ Ur P.. DL.singleton)
 
-fromList :: (Hashable k, Show k, Show v) => [(k, v)] -> Linearly %1 -> HashMap k v
+fromList :: (Hashable k) => [(k, v)] -> Linearly %1 -> HashMap k v
 fromList kvs =
   appEndo
     ( P.foldMap'
