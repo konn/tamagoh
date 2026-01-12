@@ -26,6 +26,7 @@ module Data.HashMap.RobinHood.Mutable.LinearSpec.Cases (
 import Control.Monad.Borrow.Pure (linearly)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.HashMap.RobinHood.Mutable.Linear as HM
+import Data.Map.Strict qualified as Map
 import Data.Unrestricted.Linear qualified as Ur
 import Prelude.Linear hiding (lookup)
 import Prelude qualified as P
@@ -77,8 +78,8 @@ data Case3Result = Case3Result
   , poppedSixteenExpected :: Maybe Int
   , finalSixteen :: Maybe Int
   , finalSixteenExpected :: Maybe Int
-  , finalResult :: [(String, Int)]
-  , expectedResult :: [(String, Int)]
+  , finalResult :: Map.Map String Int
+  , expectedResult :: Map.Map String Int
   }
   deriving (Show, P.Eq, P.Ord)
 
@@ -105,6 +106,6 @@ case3 hm = DataFlow.do
   let poppedSixteenExpected = Nothing
   (Ur finalSixteen, hm) <- HM.lookup "16" hm
   let finalSixteenExpected = Just 9181
-  Ur finalResult <- sortOn fst `Ur.lift` HM.toList hm
-  let expectedResult = sortOn fst $ [(show i, i) | i <- [2 .. 15] <> [129 .. 256]] <> [("1", 1), ("16", 9181)]
+  Ur finalResult <- Map.fromList `Ur.lift` HM.toList hm
+  let expectedResult = Map.fromList $ [(show i, i) | i <- [2 .. 15] <> [129 .. 256]] <> [("1", 1), ("16", 9181)]
   Ur Case3Result {..}

@@ -8,9 +8,7 @@ module Data.HashMap.RobinHood.Mutable.LinearSpec (
   module Data.HashMap.RobinHood.Mutable.LinearSpec,
 ) where
 
-import Control.Functor.Linear (StateT)
 import Control.Functor.Linear qualified as Lin
-import Control.Lens (iforM_)
 import Control.Monad (forM)
 import Control.Monad.Borrow.Pure (linearly)
 import Data.Bifunctor.Linear qualified as BiL
@@ -21,11 +19,12 @@ import Data.HashMap.Strict qualified as HMS
 import Data.HashSet qualified as HashSet
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust, isNothing)
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import GHC.Generics (Generic)
-import Prelude.Linear (Endo, Ur (..), sortOn, unur, (&))
+import Prelude.Linear (Ur (..), unur, (&))
 import Prelude.Linear qualified as PL
 import Test.Falsify.Generator qualified as F
 import Test.Falsify.Predicate ((.$))
@@ -48,7 +47,10 @@ test_case1 = testCase "HashMap case 1" do
 test_case2 :: TestTree
 test_case2 = testCase "HashMap case 2" do
   let Ur finalResult = withNewEmptyHashMap case2
-  sortOn snd finalResult @?= sortOn snd [(show i, i) | i <- [1 .. 15] <> [129 .. 256]]
+  let resl = Map.fromList finalResult
+      expected = Map.fromList [(show i, i) | i <- [1 .. 15] <> [129 .. 256]]
+  Map.size resl @?= Map.size expected
+  resl @?= expected
 
 test_case3 :: TestTree
 test_case3 = testCase "HashMap case 3" do
@@ -60,6 +62,7 @@ test_case3 = testCase "HashMap case 3" do
   sixteenAfterBulkDelete @?= sixteenAfterBulkDeleteExpected
   poppedSixteen @?= poppedSixteenExpected
   finalSixteen @?= finalSixteenExpected
+  Map.size finalResult @?= Map.size expectedResult
   finalResult @?= expectedResult
 
 data Instruction
@@ -76,7 +79,7 @@ instructionG =
           <$> readableStringG
           <*> valG
       , Inserts . NE.fromList
-          <$> F.list (F.between (1, 64)) ((,) <$> readableStringG <*> valG)
+          <$> F.list (F.between (1, 128)) ((,) <$> readableStringG <*> valG)
       ]
 
 readableStringG :: F.Gen String
@@ -141,6 +144,7 @@ testInstructions instrs = do
                 hm
                 & \(Ur lookups, hm) ->
                   let checks = do
+                        F.label "bulk insertion size" [showSize $ NE.length kvs]
                         F.collect "colliding insertion" overlaps
                         forM_ lookups \(k, newVals) -> do
                           F.assert $
@@ -161,3 +165,10 @@ testInstructions instrs = do
                         P.expect Nothing
                           .$ ("value after deletion " <> show k, newVal)
                  in go sem' hm (act *> checks) rest
+
+showSize :: Int -> String
+showSize 0 = "0"
+showSize i =
+  let lb = floor @_ @Int (fromIntegral @_ @Double i / 10) * 10
+      ub = lb + 10
+   in "[" <> show lb <> ", " <> show ub <> ")"

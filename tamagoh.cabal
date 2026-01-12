@@ -163,6 +163,7 @@ test-suite tamagoh-test
     Data.UnionFind.Linear.BorrowedSpec
 
   build-depends:
+    containers,
     data-fix,
     deriving-compat,
     falsify,
