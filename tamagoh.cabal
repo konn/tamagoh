@@ -157,6 +157,7 @@ test-suite tamagoh-test
     Data.HashMap.Linear.BorrowedCases
     Data.HashMap.Linear.BorrowedSpec
     Data.HashMap.RobinHood.Mutable.LinearSpec
+    Data.HashMap.RobinHood.Mutable.LinearSpec.Cases
     Data.Set.Linear.BorrowedCases
     Data.Set.Linear.BorrowedSpec
     Data.UnionFind.Linear.BorrowedSpec
@@ -173,6 +174,8 @@ test-suite tamagoh-test
     tasty,
     tasty-expected-failure,
     tasty-hunit,
+    transformers,
+    unordered-containers,
 
   build-tool-depends: tasty-discover:tasty-discover
   ghc-options:

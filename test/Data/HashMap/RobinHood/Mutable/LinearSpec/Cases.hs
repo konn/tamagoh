@@ -3,15 +3,18 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE NoFieldSelectors #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-partial-type-signatures #-}
@@ -21,12 +24,14 @@ module Data.HashMap.RobinHood.Mutable.LinearSpec.Cases (
 ) where
 
 import Control.Monad.Borrow.Pure (linearly)
+import Control.Syntax.DataFlow qualified as DataFlow
 import Data.HashMap.RobinHood.Mutable.Linear as HM
+import Data.Unrestricted.Linear qualified as Ur
 import Prelude.Linear hiding (lookup)
 import Prelude qualified as P
 
 withNewEmptyHashMap :: (HashMap k v %1 -> Ur r) %1 -> Ur r
-withNewEmptyHashMap f = linearly $ f . new 1
+withNewEmptyHashMap f = linearly $ f . new 16
 
 data Case1Result = Case1Result
   { initOneResident :: Maybe Int
@@ -45,3 +50,61 @@ case1 hm =
         HM.delete "One" hm & \(Ur deltedOneResident, hm) ->
           HM.toList hm & \(Ur finalResult) ->
             Ur Case1Result {..}
+
+case2 :: HashMap String Int %1 -> Ur [(String, Int)]
+case2 hm = DataFlow.do
+  hm <- HM.insertMany [(show i, i) | i <- [1 .. 128]] hm
+  hm <-
+    foldl'
+      (\hm i -> move i & \(Ur i) -> uncurry lseq (HM.delete (show i) hm))
+      hm
+      [16 .. 256 :: Int]
+  hm <- HM.insertMany [(show i, i) | i <- [129 .. 256]] hm
+  HM.toList hm
+
+data Case3Result = Case3Result
+  { iniOneReside :: Maybe Int
+  , iniOneResideExpected :: Maybe Int
+  , oneBeforeBulkInsert :: Maybe Int
+  , oneBeforeBulkInsertExpected :: Maybe Int
+  , oneAfterBulkInsert :: Maybe Int
+  , oneAfterBulkInsertExpected :: Maybe Int
+  , sixteenAfterBulkInsert :: Maybe Int
+  , sixteenAfterBulkInsertExpected :: Maybe Int
+  , sixteenAfterBulkDelete :: Maybe Int
+  , sixteenAfterBulkDeleteExpected :: Maybe Int
+  , poppedSixteen :: Maybe Int
+  , poppedSixteenExpected :: Maybe Int
+  , finalSixteen :: Maybe Int
+  , finalSixteenExpected :: Maybe Int
+  , finalResult :: [(String, Int)]
+  , expectedResult :: [(String, Int)]
+  }
+  deriving (Show, P.Eq, P.Ord)
+
+case3 :: HashMap String Int %1 -> Ur Case3Result
+case3 hm = DataFlow.do
+  (Ur iniOneReside, hm) <- HM.insert "1" 919 hm
+  let iniOneResideExpected = Nothing
+  (Ur oneBeforeBulkInsert, hm) <- HM.lookup "1" hm
+  let oneBeforeBulkInsertExpected = Just 919
+  hm <- HM.insertMany [(show i, i) | i <- [1 .. 128]] hm
+  (Ur oneAfterBulkInsert, hm) <- HM.lookup "1" hm
+  let oneAfterBulkInsertExpected = Just 1
+  (Ur sixteenAfterBulkInsert, hm) <- HM.lookup "16" hm
+  let sixteenAfterBulkInsertExpected = Just 16
+  hm <-
+    foldl'
+      (\hm i -> move i & \(Ur i) -> uncurry lseq (HM.delete (show i) hm))
+      hm
+      [16 .. 256 :: Int]
+  (Ur sixteenAfterBulkDelete, hm) <- HM.lookup "16" hm
+  let sixteenAfterBulkDeleteExpected = Nothing
+  hm <- HM.insertMany [(show i, i) | i <- [129 .. 256]] hm
+  (Ur poppedSixteen, hm) <- HM.insert "16" 9181 hm
+  let poppedSixteenExpected = Nothing
+  (Ur finalSixteen, hm) <- HM.lookup "16" hm
+  let finalSixteenExpected = Just 9181
+  Ur finalResult <- sortOn fst `Ur.lift` HM.toList hm
+  let expectedResult = sortOn fst $ [(show i, i) | i <- [2 .. 15] <> [129 .. 256]] <> [("1", 1), ("16", 9181)]
+  Ur Case3Result {..}

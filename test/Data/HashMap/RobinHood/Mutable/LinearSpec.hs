@@ -1,21 +1,163 @@
+{-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Data.HashMap.RobinHood.Mutable.LinearSpec (
   module Data.HashMap.RobinHood.Mutable.LinearSpec,
 ) where
 
+import Control.Functor.Linear (StateT)
+import Control.Functor.Linear qualified as Lin
+import Control.Lens (iforM_)
+import Control.Monad (forM)
+import Control.Monad.Borrow.Pure (linearly)
+import Data.Bifunctor.Linear qualified as BiL
+import Data.Foldable (forM_)
+import Data.HashMap.RobinHood.Mutable.Linear qualified as LHM
 import Data.HashMap.RobinHood.Mutable.LinearSpec.Cases
-import Prelude.Linear (Ur (..))
+import Data.HashMap.Strict qualified as HMS
+import Data.HashSet qualified as HashSet
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.List.NonEmpty qualified as NE
+import Data.Maybe (isJust, isNothing)
+import Data.Unrestricted.Linear (UrT (..), runUrT)
+import Data.Unrestricted.Linear qualified as Ur
+import GHC.Generics (Generic)
+import Prelude.Linear (Endo, Ur (..), sortOn, unur, (&))
+import Prelude.Linear qualified as PL
+import Test.Falsify.Generator qualified as F
+import Test.Falsify.Predicate ((.$))
+import Test.Falsify.Predicate qualified as P
+import Test.Falsify.Range qualified as F
 import Test.Tasty
+import Test.Tasty.Falsify (Property, testProperty)
+import Test.Tasty.Falsify qualified as F
 import Test.Tasty.HUnit
 
 test_case1 :: TestTree
 test_case1 = testCase "HashMap case 1" do
   let Ur Case1Result {..} = withNewEmptyHashMap case1
-  print Case1Result {..}
   initOneResident @?= Nothing
   newOneResident @?= Just 1
   initTwoResident @?= Nothing
   deltedOneResident @?= Just 1
   finalResult @?= [("Two", 2)]
+
+test_case2 :: TestTree
+test_case2 = testCase "HashMap case 2" do
+  let Ur finalResult = withNewEmptyHashMap case2
+  sortOn snd finalResult @?= sortOn snd [(show i, i) | i <- [1 .. 15] <> [129 .. 256]]
+
+test_case3 :: TestTree
+test_case3 = testCase "HashMap case 3" do
+  let Ur Case3Result {..} = withNewEmptyHashMap case3
+  iniOneReside @?= iniOneResideExpected
+  oneBeforeBulkInsert @?= oneBeforeBulkInsertExpected
+  oneAfterBulkInsert @?= oneAfterBulkInsertExpected
+  sixteenAfterBulkInsert @?= sixteenAfterBulkInsertExpected
+  sixteenAfterBulkDelete @?= sixteenAfterBulkDeleteExpected
+  poppedSixteen @?= poppedSixteenExpected
+  finalSixteen @?= finalSixteenExpected
+  finalResult @?= expectedResult
+
+data Instruction
+  = Inserts (NonEmpty (String, Int))
+  | Insert String Int
+  | Delete String
+  deriving (Show, Eq, Ord, Generic)
+
+instructionG :: F.Gen Instruction
+instructionG =
+  F.oneof $
+    NE.fromList
+      [ Insert
+          <$> readableStringG
+          <*> valG
+      , Inserts . NE.fromList
+          <$> F.list (F.between (1, 64)) ((,) <$> readableStringG <*> valG)
+      ]
+
+readableStringG :: F.Gen String
+readableStringG = F.list (F.between (1, 5)) (F.elem $ 'a' :| "bc")
+
+valG :: F.Gen Int
+valG = F.int (F.between (-10, 10))
+
+type Semantics = HMS.HashMap String Int
+
+data TestEnv where
+  TestEnv ::
+    {-# UNPACK #-} !(HMS.HashMap String Int) ->
+    {-# UNPACK #-} !(LHM.HashMap String Int) %1 ->
+    TestEnv
+
+test_randomInstructions :: TestTree
+test_randomInstructions = testProperty "random instructions" do
+  program <- F.gen $ F.list (F.between (1, 256)) instructionG
+  testInstructions program
+
+testInstructions :: [Instruction] -> Property ()
+testInstructions instrs = do
+  unur PL.$ linearly \lin ->
+    go HMS.empty (LHM.new 16 lin) (pure ()) instrs
+  where
+    go ::
+      Semantics ->
+      LHM.HashMap String Int %1 ->
+      Property () ->
+      [Instruction] ->
+      Ur (Property ())
+    go sem !hm !act [] = case LHM.toList hm of
+      Ur lst ->
+        Ur $
+          act
+            *> F.assert (P.expect sem .$ ("Final dictionary", HMS.fromList lst))
+    go sem !hm !act (instr : rest) = case instr of
+      Insert k v ->
+        let expectOld = HMS.lookup k sem
+            sem' = HMS.insert k v sem
+         in LHM.insert k v hm & \(Ur oldVal, hm) ->
+              LHM.lookup k hm & \(Ur newVal, hm) ->
+                let checks = do
+                      F.collect "colliding insertion" [isJust expectOld]
+                      F.assert $
+                        P.expect expectOld
+                          .$ ("before insert " <> show (k, v), oldVal)
+                      F.assert $
+                        P.expect (Just v)
+                          .$ ("after insert " <> show (k, v), newVal)
+                 in go sem' hm (act *> checks) rest
+      Inserts kvs ->
+        let sem' = foldl' (flip $ uncurry HMS.insert) sem kvs
+            overlaps = map (\(k, _) -> HMS.member k sem) $ NE.toList kvs
+            targKeys = HashSet.toList $ HashSet.fromList $ map fst $ NE.toList kvs
+         in LHM.insertMany (NE.toList kvs) hm & \hm ->
+              Lin.runState
+                ( runUrT PL.$ forM targKeys \k -> UrT $ Lin.state \hm ->
+                    BiL.first (Ur.lift (k,)) (LHM.lookup k hm)
+                )
+                hm
+                & \(Ur lookups, hm) ->
+                  let checks = do
+                        F.collect "colliding insertion" overlaps
+                        forM_ lookups \(k, newVals) -> do
+                          F.assert $
+                            P.expect (HMS.lookup k sem')
+                              .$ ("after bulk insert for " <> show k, newVals)
+                   in go sem' hm (act *> checks) rest
+      Delete k ->
+        let expectOld = HMS.lookup k sem
+            sem' = HMS.delete k sem
+         in LHM.delete k hm & \(Ur oldVal, hm) ->
+              LHM.lookup k hm & \(Ur newVal, hm) ->
+                let checks = do
+                      F.collect "vacuous deletion" [isNothing expectOld]
+                      F.assert $
+                        P.expect expectOld
+                          .$ ("value before deletion " <> show k, oldVal)
+                      F.assert $
+                        P.expect Nothing
+                          .$ ("value after deletion " <> show k, newVal)
+                 in go sem' hm (act *> checks) rest
