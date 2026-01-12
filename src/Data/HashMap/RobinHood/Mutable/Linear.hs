@@ -165,7 +165,7 @@ maxLoadFactor :: P.Double
 maxLoadFactor = 0.75
 
 maxDibLimit :: DIB
-maxDibLimit = 127
+maxDibLimit = 128
 
 new :: Int -> Linearly %1 -> HashMap k v
 new capa = runReader Control.do
@@ -379,13 +379,7 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
                       idcs
                       kvs
                   else
-                    go
-                      curMaxDIB
-                      (increment newIdxInfo)
-                      newEntry
-                      (idx + 1)
-                      idcs
-                      kvs
+                    go curMaxDIB (increment newIdxInfo) newEntry (idx + 1) idcs kvs
 
 increment :: IndexInfo -> IndexInfo
 {-# INLINE increment #-}
@@ -440,7 +434,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
     !physCapa = capa + fromIntegral maxDibLimit
     go :: Int -> DIB -> LUV.Vector IndexInfo %1 -> KVs _ _ %1 -> (Ur (LookupResult _), HashMap _ _)
     go !idx !dib !idcs !kvs
-      | dib P.> maxDIB || idx == physCapa =
+      | idx == physCapa || dib P.> maxDibLimit =
           ( Ur $
               NotFound
                 ProbeSuspended
@@ -451,6 +445,21 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                   }
           , HashMap size capa maxDIB idcs kvs
           )
+      | dib P.> maxDIB =
+          LV.get idx kvs & \(Ur v, kvs) ->
+            let endType = case v of
+                  Strict.Nothing -> Vacant
+                  Strict.Just _ -> Paused
+             in ( Ur $
+                    NotFound
+                      ProbeSuspended
+                        { initialBucket = start
+                        , offset = idx
+                        , endType
+                        , dibAtMiss = dib
+                        }
+                , HashMap size capa maxDIB idcs kvs
+                )
       | otherwise =
           LV.get idx kvs & \case
             (Ur Strict.Nothing, kvs) ->

@@ -17,6 +17,7 @@ import Data.HashMap.RobinHood.Mutable.Linear qualified as LHM
 import Data.HashMap.RobinHood.Mutable.LinearSpec.Cases
 import Data.HashMap.Strict qualified as HMS
 import Data.HashSet qualified as HashSet
+import Data.List (sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
@@ -64,6 +65,28 @@ test_case3 = testCase "HashMap case 3" do
   finalSixteen @?= finalSixteenExpected
   Map.size finalResult @?= Map.size expectedResult
   finalResult @?= expectedResult
+
+test_case4 :: TestTree
+test_case4 = testCase "HashMap case 4" do
+  let Ur (ccVal, lst) = withNewEmptyHashMap \hm ->
+        LHM.insert "aa" (-10 :: Int) hm & \(Ur _, hm) ->
+          LHM.insert "cc" (-10) hm & \(Ur _, hm) ->
+            LHM.lookup "cc" hm & \(Ur valCc, hm) ->
+              LHM.toList hm & \(Ur lst) ->
+                Ur (valCc, lst)
+  sortOn fst lst @?= sortOn fst [("aa", -10), ("cc", -10)]
+  ccVal @?= Just (-10)
+
+test_case5 :: TestTree
+test_case5 = testCase "HashMap case 4" do
+  let input = [("abcba", 1 :: Int), ("bacba", 2), ("aaba", 3), ("baa", 4)]
+  let Ur (abcbaVal, lst) = withNewEmptyHashMap \hm ->
+        LHM.insertMany input hm & \hm ->
+          LHM.lookup "abcba" hm & \(Ur valCc, hm) ->
+            LHM.toList hm & \(Ur lst) ->
+              Ur (valCc, lst)
+  sortOn fst lst @?= sortOn fst input
+  abcbaVal @?= lookup "abcba" input
 
 data Instruction
   = Inserts (NonEmpty (String, Int))
