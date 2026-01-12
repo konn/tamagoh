@@ -19,7 +19,10 @@
 
 module Data.HashMap.RobinHood.Mutable.Linear (
   HashMap,
+  Hashable,
   new,
+  fromList,
+  insert,
   foldMapWithKey,
   toList,
   lookup,
@@ -54,7 +57,7 @@ import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import GHC.Generics (Generic)
 import GHC.TypeError (ErrorMessage (..), Unsatisfiable, unsatisfiable)
-import Math.NumberTheory.Logarithms (intLog2)
+import Math.NumberTheory.Logarithms (intLog2')
 import Prelude.Linear hiding (insert, lookup)
 import Prelude qualified as P
 
@@ -69,6 +72,7 @@ newtype instance U.Vector DIB = V_DIB (U.Vector Word)
 newtype instance U.MVector s DIB = MV_DIB (U.MVector s Word)
 
 data Entry k v = Entry {key :: !k, value :: !v}
+  deriving (Show, P.Functor)
 
 data IndexInfo = IndexInfo
   { residual :: {-# UNPACK #-} !Int
@@ -123,12 +127,9 @@ type KVs k v = LV.Vector (Strict.Maybe (Entry k v))
 maxLoadFactor :: P.Double
 maxLoadFactor = 0.75
 
-growthFactor :: Int
-growthFactor = 2
-
 new :: Int -> Linearly %1 -> HashMap k v
 new capa = runReader Control.do
-  let capa' = 2 ^ (intLog2 (min 1 capa) + 1)
+  let capa' = 2 ^ intLog2' (2 * (max 1 capa) - 1)
   indices <- asks $ LUV.constantL capa' (IndexInfo 0 0) . fromPB
   kvs <- asks $ LV.constantL capa' Strict.Nothing . fromPB
   Control.pure $ HashMap 0 capa' (DIB 0) indices kvs
@@ -149,7 +150,7 @@ foldMapWithKey f (HashMap size capa _ idcs kvs) = idcs `lseq` go 0 0 kvs mempty
             (Ur Strict.Nothing, kvs) -> go (i + 1) count kvs acc
             (Ur (Strict.Just (Entry k v)), kvs) -> go (i + 1) (count + 1) kvs (acc <> f k v)
 
-insert :: (Hashable k) => k -> v -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
+insert :: (Hashable k, Show k, Show v) => k -> v -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 insert k v =
   swapTuple
     . flip runState (Ur (Just v))
@@ -157,7 +158,7 @@ insert k v =
 
 alter ::
   forall k v.
-  (Hashable k) =>
+  (Hashable k, Show k, Show v) =>
   (Maybe v -> Maybe v) ->
   k ->
   HashMap k v %1 ->
@@ -183,7 +184,7 @@ size :: HashMap k v %1 -> (Ur Int, HashMap k v)
 {-# INLINE size #-}
 size (HashMap sz capa maxDIB idcs kvs) = (Ur sz, HashMap sz capa maxDIB idcs kvs)
 
-union :: (Hashable k) => HashMap k v %1 -> HashMap k v %1 -> HashMap k v
+union :: (Hashable k, Show k, Show v) => HashMap k v %1 -> HashMap k v %1 -> HashMap k v
 {-# INLINE union #-}
 union hm1 hm2 = case (size hm1, size hm2) of
   ((Ur sz1, hm1), (Ur sz2, hm2)) -> DataFlow.do
@@ -193,7 +194,7 @@ union hm1 hm2 = case (size hm1, size hm2) of
       parent
 
 alterF ::
-  (Hashable k, Control.Functor f) =>
+  (Show k, Hashable k, Control.Functor f, Show v) =>
   (Maybe v -> f (Ur (Maybe v))) %1 ->
   k ->
   HashMap k v %1 ->
@@ -252,14 +253,14 @@ unsafeSwapUnboxed i j vec =
       LUV.unsafeSet j xi vec
 
 probeForInsert ::
-  (Hashable k) =>
+  (Hashable k, Show k, Show v) =>
   k -> v -> ProbeSuspended -> HashMap k v %1 -> HashMap k v
 probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs) =
   case endType of
-    Vacant -> growToFit size DataFlow.do
+    Vacant -> growToFit (size + 1) DataFlow.do
       idcs <- LUV.unsafeSet offset IndexInfo {residual = initialBucket, dib = dibAtMiss} idcs
       kvs <- LV.unsafeSet offset (Strict.Just (Entry k v)) kvs
-      HashMap size capa maxDIB idcs kvs
+      HashMap (size + 1) capa maxDIB idcs kvs
     Paused -> growToFit (size + 1) DataFlow.do
       go maxDIB IndexInfo {residual = initialBucket, dib = dibAtMiss} Entry {key = k, value = v} offset idcs kvs
   where
@@ -313,24 +314,26 @@ lookup k hm =
     (Ur (NotFound _), hm) -> (Ur Nothing, hm)
     (Ur (Found loc), hm) -> (Ur (Just loc.val), hm)
 
-delete :: (Hashable k) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
+delete :: (Hashable k, Show k, Show v) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 {-# INLINE delete #-}
 delete k =
   swapTuple
     . flip runState (Ur Nothing)
-    . alterF (\old -> state \new -> (Ur old, new)) k
+    . alterF (\old -> state \new -> (new, Ur old)) k
 
-growToFit :: (Hashable k) => Int -> HashMap k v %1 -> HashMap k v
+growToFit :: (Hashable k, Show k, Show v) => Int -> HashMap k v %1 -> HashMap k v
 growToFit targetSize (HashMap size capa maxDIB idcs kvs) =
-  if fromIntegral targetSize / fromIntegral capa >= maxLoadFactor
-    then resize (max targetSize $ capa * growthFactor) (HashMap size capa maxDIB idcs kvs)
-    else HashMap size capa maxDIB idcs kvs
+  let finalSize = 2 ^ ceiling @_ @Int (logBase 2 (fromIntegral targetSize / maxLoadFactor))
+   in if fromIntegral targetSize / fromIntegral capa >= maxLoadFactor
+        then resize finalSize (HashMap size capa maxDIB idcs kvs)
+        else HashMap size capa maxDIB idcs kvs
 
 data Location v = Location
   { foundAt :: !Int
   , indexInfo :: {-# UNPACK #-} !IndexInfo
   , val :: !v
   }
+  deriving (Show)
 
 data LookupResult v
   = Found (Location v)
@@ -342,6 +345,7 @@ data ProbeSuspended = ProbeSuspended
   , endType :: !EndType
   , dibAtMiss :: {-# UNPACK #-} !DIB
   }
+  deriving (Show)
 
 data EndType = Paused | Vacant
   deriving (Show, P.Eq, P.Ord, Generic)
@@ -395,7 +399,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                           )
                       | otherwise -> go ((idx + 1) `rem` capa) (dib + 1) idcs kvs
 
-resize :: (Hashable k) => Int -> HashMap k v %1 -> HashMap k v
+resize :: (Hashable k, Show k, Show v) => Int -> HashMap k v %1 -> HashMap k v
 resize capa hm = DataFlow.do
   (lin, hm) <- withLinearly hm
   hm' <- new capa lin
@@ -403,6 +407,15 @@ resize capa hm = DataFlow.do
     flip execState hm' $ Control.fmap unur $ runUrT $ P.forM_ ents \(!k, !v) ->
       UrT $! Control.fmap move $! modify $! uncurry lseq . insert k v
 
-toList :: HashMap k v -> Ur [(k, v)]
+toList :: HashMap k v %1 -> Ur [(k, v)]
 {-# INLINE toList #-}
 toList = Ur.lift DL.toList . foldMapWithKey (curry $ Ur P.. DL.singleton)
+
+fromList :: (Hashable k, Show k, Show v) => [(k, v)] -> Linearly %1 -> HashMap k v
+fromList kvs =
+  appEndo
+    ( P.foldMap'
+        (\(!k, !v) -> Endo $ uncurry lseq . insert k v)
+        kvs
+    )
+    . new (floor $ fromIntegral (P.length kvs) * maxLoadFactor)
