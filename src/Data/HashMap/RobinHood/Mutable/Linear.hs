@@ -23,6 +23,7 @@ module Data.HashMap.RobinHood.Mutable.Linear (
   new,
   fromList,
   insert,
+  insertMany,
   foldMapWithKey,
   toList,
   lookup,
@@ -60,6 +61,8 @@ import Data.Vector.Mutable.Linear qualified as LV
 import Data.Vector.Mutable.Linear.Extra qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
+import Data.Word (Word8)
+import Debug.Trace qualified as DT
 import GHC.Generics (Generic)
 import GHC.TypeError (ErrorMessage (..), Unsatisfiable, unsatisfiable)
 import Math.NumberTheory.Logarithms (intLog2')
@@ -68,14 +71,14 @@ import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
 
 -- Difference from Initial Bucket
-newtype DIB = DIB Word
+newtype DIB = DIB Word8
   deriving newtype (P.Eq, P.Ord, P.Num, Additive, Show, Hashable, Consumable, Dupable, Movable)
   deriving newtype (G.Vector U.Vector, MG.MVector U.MVector)
   deriving anyclass (U.Unbox)
 
-newtype instance U.Vector DIB = V_DIB (U.Vector Word)
+newtype instance U.Vector DIB = V_DIB (U.Vector Word8)
 
-newtype instance U.MVector s DIB = MV_DIB (U.MVector s Word)
+newtype instance U.MVector s DIB = MV_DIB (U.MVector s Word8)
 
 data Entry k v where
   Entry :: k -> v %1 -> Entry k v
@@ -163,6 +166,9 @@ type KVs k v = LV.Vector (Strict.Maybe (Entry k v))
 maxLoadFactor :: P.Double
 maxLoadFactor = 0.75
 
+maxDibLimit :: DIB
+maxDibLimit = 127
+
 new :: Int -> Linearly %1 -> HashMap k v
 new capa = runReader Control.do
   let capa' = 2 ^ intLog2' (2 * (max 1 capa) - 1)
@@ -192,6 +198,20 @@ insert k v =
     . flip runState (Ur (Just v))
     . alterF (\mval -> state \newVal -> (newVal, Ur mval)) k
 
+insertMany ::
+  (Hashable k) =>
+  [(k, v)] ->
+  HashMap k v %1 ->
+  HashMap k v
+{-# INLINE insertMany #-}
+insertMany kvs hm =
+  appEndo
+    ( P.foldMap
+        (\(!k, !v) -> Endo $ uncurry lseq . insert k v)
+        kvs
+    )
+    hm
+
 alter ::
   forall k v.
   (Hashable k) =>
@@ -219,6 +239,10 @@ alter f k hm =
 size :: HashMap k v %1 -> (Ur Int, HashMap k v)
 {-# INLINE size #-}
 size (HashMap sz capa maxDIB idcs kvs) = (Ur sz, HashMap sz capa maxDIB idcs kvs)
+
+capacity :: HashMap k v %1 -> (Ur Int, HashMap k v)
+{-# INLINE capacity #-}
+capacity (HashMap sz capa maxDIB idcs kvs) = (Ur capa, HashMap sz capa maxDIB idcs kvs)
 
 union :: (Hashable k) => HashMap k v %1 -> HashMap k v %1 -> HashMap k v
 {-# INLINE union #-}
@@ -291,14 +315,23 @@ unsafeSwapUnboxed i j vec =
 probeForInsert ::
   (Hashable k) =>
   k -> v -> ProbeSuspended -> HashMap k v %1 -> HashMap k v
-probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs) =
-  case endType of
-    Vacant -> growToFit (size + 1) DataFlow.do
-      idcs <- LUV.unsafeSet offset IndexInfo {residual = initialBucket, dib = dibAtMiss} idcs
-      kvs <- LV.unsafeSet offset (Strict.Just (Entry k v)) kvs
-      HashMap (size + 1) capa maxDIB idcs kvs
-    Paused -> growToFit (size + 1) DataFlow.do
-      go maxDIB IndexInfo {residual = initialBucket, dib = dibAtMiss} (Entry k v) offset idcs kvs
+probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
+  | dibAtMiss P.> maxDibLimit
+  , DT.trace ("max DIB reached: " <> show dibAtMiss) True =
+      withLinearly kvs & \(lin, kvs) ->
+        case toList (HashMap size capa maxDIB idcs kvs) of
+          Ur lst ->
+            let !newCapa = max (capa * 2) (ceiling $ fromIntegral (size + 1) / maxLoadFactor)
+                !() = DT.trace ("Rehashing to new capacity: " <> show newCapa <> " according to (size, capa, maxLoadFactor): " <> show (size, capa, maxLoadFactor)) ()
+             in insertMany lst (new newCapa lin)
+  | otherwise =
+      case endType of
+        Vacant -> growToFit (size + 1) DataFlow.do
+          idcs <- LUV.unsafeSet offset IndexInfo {residual = initialBucket, dib = dibAtMiss} idcs
+          kvs <- LV.unsafeSet offset (Strict.Just (Entry k v)) kvs
+          HashMap (size + 1) capa maxDIB idcs kvs
+        Paused -> growToFit (size + 1) DataFlow.do
+          go maxDIB IndexInfo {residual = initialBucket, dib = dibAtMiss} (Entry k v) offset idcs kvs
   where
     go ::
       DIB ->
@@ -442,12 +475,16 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                       | otherwise -> go ((idx + 1) `rem` capa) (dib + 1) idcs kvs
 
 resize :: (Hashable k) => Int -> HashMap k v %1 -> HashMap k v
-resize capa hm = DataFlow.do
-  (lin, hm) <- withLinearly hm
-  hm' <- new capa lin
-  foldMapWithKey (curry $ Ur P.. FML.singleton) hm & \(Ur ents) ->
-    flip execState hm' $ Control.fmap unur $ runUrT $ P.forM_ ents \(!k, !v) ->
-      UrT $! Control.fmap move $! modify $! uncurry lseq . insert k v
+resize capa hm =
+  case capacity hm of
+    (Ur c, hm)
+      | capa <= c -> hm
+      | otherwise -> DataFlow.do
+          (lin, hm) <- withLinearly hm
+          hm' <- new capa lin
+          foldMapWithKey (curry $ Ur P.. FML.singleton) hm & \(Ur ents) ->
+            flip execState hm' $ Control.fmap unur $ runUrT $ P.forM_ ents \(!k, !v) ->
+              UrT $! Control.fmap move $! modify $! uncurry lseq . insert k v
 
 toList :: HashMap k v %1 -> Ur [(k, v)]
 {-# INLINE toList #-}
