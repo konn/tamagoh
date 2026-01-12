@@ -59,7 +59,9 @@ library
     hashable,
     heaps,
     hegg,
+    hybrid-vectors,
     indexed-traversable,
+    integer-logarithms,
     lens,
     linear-generics,
     linear-witness,
@@ -102,6 +104,7 @@ library
     Data.HashMap.Mutable.Linear.Borrowed
     Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue
     Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen
+    Data.HashMap.RobinHood.Mutable.Linear
     Data.Linear.Witness.Compat
     Data.Record.Linear
     Data.Set.Mutable.Linear.Borrowed
@@ -153,6 +156,7 @@ test-suite tamagoh-test
     Data.EGraph.Types.EGraphSpec.Cases
     Data.HashMap.Linear.BorrowedCases
     Data.HashMap.Linear.BorrowedSpec
+    Data.HashMap.RobinHood.Mutable.LinearSpec
     Data.Set.Linear.BorrowedCases
     Data.Set.Linear.BorrowedSpec
     Data.UnionFind.Linear.BorrowedSpec
