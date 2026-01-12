@@ -33,12 +33,13 @@ module Data.HashMap.RobinHood.Mutable.Linear (
   alter,
   alterF,
   size,
+  capacity,
 
   -- * Internal types
   deepClone,
 ) where
 
-import Control.Functor.Linear (asks, execState, modify, runReader, runState, state)
+import Control.Functor.Linear (asks, runReader, runState, state)
 import Control.Functor.Linear qualified as Control
 import Control.Lens ((+~), (-~))
 import Control.Monad.Borrow.Pure
@@ -47,13 +48,11 @@ import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Borrow.Pure.Utils (swapTuple, unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.DList qualified as DL
-import Data.FMList qualified as FML
 import Data.Foldable qualified as P
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable (..))
 import Data.Linear.Witness.Compat
 import Data.Strict.Maybe qualified as Strict
-import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Vector.Generic qualified as G
 import Data.Vector.Generic.Mutable qualified as MG
@@ -333,7 +332,7 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
         Vacant -> DataFlow.do
           idcs <- LUV.set offset IndexInfo {residual = initialBucket, dib = dibAtMiss} idcs
           kvs <- LV.set offset (Strict.Just (Entry k v)) kvs
-          HashMap (size + 1) capa maxDIB idcs kvs
+          HashMap (size + 1) capa (P.max maxDIB dibAtMiss) idcs kvs
         Paused -> DataFlow.do
           go maxDIB IndexInfo {residual = initialBucket, dib = dibAtMiss} (Entry k v) offset idcs kvs
   where
@@ -411,13 +410,6 @@ delete k =
     . flip runState (Ur Nothing)
     . alterF (\old -> state \new -> (new, Ur old)) k
 
-growToFit :: (Hashable k) => Int -> HashMap k v %1 -> HashMap k v
-growToFit targetSize (HashMap size capa maxDIB idcs kvs) =
-  let finalSize = 2 ^ ceiling @_ @Int (logBase 2 (fromIntegral targetSize / maxLoadFactor))
-   in if fromIntegral targetSize / fromIntegral capa >= maxLoadFactor
-        then resize finalSize (HashMap size capa maxDIB idcs kvs)
-        else HashMap size capa maxDIB idcs kvs
-
 data Location v = Location
   { foundAt :: !Int
   , indexInfo :: {-# UNPACK #-} !IndexInfo
@@ -489,18 +481,6 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                           , HashMap size capa maxDIB idcs kvs
                           )
                       | otherwise -> go (idx + 1) (dib + 1) idcs kvs
-
-resize :: (Hashable k) => Int -> HashMap k v %1 -> HashMap k v
-resize capa hm =
-  case capacity hm of
-    (Ur c, hm)
-      | capa <= c -> hm
-      | otherwise -> DataFlow.do
-          (lin, hm) <- withLinearly hm
-          hm' <- new capa lin
-          foldMapWithKey (curry $ Ur P.. FML.singleton) hm & \(Ur ents) ->
-            flip execState hm' $ Control.fmap unur $ runUrT $ P.forM_ ents \(!k, !v) ->
-              UrT $! Control.fmap move $! modify $! uncurry lseq . insert k v
 
 toList :: HashMap k v %1 -> Ur [(k, v)]
 {-# INLINE toList #-}
