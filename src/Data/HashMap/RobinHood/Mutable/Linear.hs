@@ -327,18 +327,18 @@ probeForInsert ::
   (Hashable k) =>
   k -> v -> ProbeSuspended -> HashMap k v %1 -> HashMap k v
 probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
-  | dibAtMiss P.> maxDibLimit || fromIntegral (size + 1) / fromIntegral capa >= maxLoadFactor = grow idcs kvs
+  | dibAtMiss P.> maxDibLimit || fromIntegral (size + 1) / fromIntegral capa >= maxLoadFactor = grow (Entry k v) idcs kvs
   | otherwise =
       case endType of
-        Vacant -> growToFit (size + 1) DataFlow.do
+        Vacant -> DataFlow.do
           idcs <- LUV.set offset IndexInfo {residual = initialBucket, dib = dibAtMiss} idcs
           kvs <- LV.set offset (Strict.Just (Entry k v)) kvs
           HashMap (size + 1) capa maxDIB idcs kvs
-        Paused -> growToFit (size + 1) DataFlow.do
+        Paused -> DataFlow.do
           go maxDIB IndexInfo {residual = initialBucket, dib = dibAtMiss} (Entry k v) offset idcs kvs
   where
-    grow :: LUV.Vector IndexInfo %1 -> KVs k v %1 -> HashMap k v
-    grow idcs kvs =
+    grow :: Entry k v -> LUV.Vector IndexInfo %1 -> KVs k v %1 -> HashMap k v
+    grow (Entry !k !v) idcs kvs =
       withLinearly kvs & \(lin, kvs) ->
         case toList (HashMap size capa maxDIB idcs kvs) of
           Ur lst ->
@@ -355,7 +355,7 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
       KVs k v %1 ->
       HashMap k v
     go !curMaxDIB !newIdxInfo !newEntry !idx !idcs !kvs
-      | idx >= physCapa || curMaxDIB P.> maxDibLimit || newIdxInfo.dib P.> maxDibLimit = grow idcs kvs
+      | idx >= physCapa || curMaxDIB P.> maxDibLimit || newIdxInfo.dib P.> maxDibLimit = grow newEntry idcs kvs
       | otherwise =
           LV.get idx kvs & \case
             (Ur Strict.Nothing, kvs) ->
@@ -448,7 +448,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
     !physCapa = capa + fromIntegral maxDibLimit
     go :: Int -> DIB -> LUV.Vector IndexInfo %1 -> KVs _ _ %1 -> (Ur (LookupResult _), HashMap _ _)
     go !idx !dib !idcs !kvs
-      | dib P.> maxDIB || idx >= physCapa =
+      | dib P.> maxDIB || idx == physCapa =
           ( Ur $
               NotFound
                 ProbeSuspended
