@@ -362,7 +362,7 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
               DataFlow.do
                 !idcs <- LUV.set idx newIdxInfo idcs
                 !kvs <- LV.set idx (Strict.Just newEntry) kvs
-                HashMap (size + 1) capa curMaxDIB idcs kvs
+                HashMap (size + 1) capa (curMaxDIB `P.max` newIdxInfo.dib) idcs kvs
             (Ur (Strict.Just existingEntry), kvs) ->
               -- Occupied, need to compare DIBs
               LUV.get idx idcs & \(Ur existingIdxInfo, idcs) ->
