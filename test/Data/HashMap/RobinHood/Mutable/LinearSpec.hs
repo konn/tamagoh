@@ -78,7 +78,7 @@ test_case4 = testCase "HashMap case 4" do
   ccVal @?= Just (-10)
 
 test_case5 :: TestTree
-test_case5 = testCase "HashMap case 4" do
+test_case5 = testCase "HashMap case 5" do
   let input = [("abcba", 1 :: Int), ("bacba", 2), ("aaba", 3), ("baa", 4)]
   let Ur (abcbaVal, lst) = withNewEmptyHashMap \hm ->
         LHM.insertMany input hm & \hm ->
