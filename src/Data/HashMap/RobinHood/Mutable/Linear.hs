@@ -137,10 +137,10 @@ deepClone = Unsafe.toLinear \dic@(HashMap size capa maxDIB idcs kvs) ->
     let go :: Int -> KVs k v %1 -> KVs k v
         go !i !acc
           | i >= capa = acc
-          | otherwise = case LV.get i kvs of
+          | otherwise = case LV.unsafeGet i kvs of
               (Ur (Strict.Just (Entry k v)), _) ->
                 dupLeak v & \v' ->
-                  go (i + 1) (LV.set i (Strict.Just (Entry k v')) acc)
+                  go (i + 1) (LV.unsafeSet i (Strict.Just (Entry k v')) acc)
               (Ur Strict.Nothing, _) -> go (i + 1) acc
         kvs2 = go 0 (LV.constantL capa Strict.Nothing (fromPB lin))
      in (dic, HashMap size capa maxDIB (dupLeak idcs) kvs2)
@@ -188,7 +188,7 @@ foldMapWithKey f (HashMap size capa _ idcs kvs) = idcs `lseq` go 0 0 kvs mempty
     go !i !count !kvs !acc
       | count == size || i >= physCapa = kvs `lseq` acc
       | otherwise =
-          LV.get i kvs & \case
+          LV.unsafeGet i kvs & \case
             (Ur Strict.Nothing, kvs) -> go (i + 1) count kvs acc
             (Ur (Strict.Just (Entry k v)), kvs) -> go (i + 1) (count + 1) kvs (acc <> f k v)
 
@@ -235,7 +235,7 @@ alter f k hm =
         (Just !v) ->
           -- Update in place
           hm & \(HashMap size capa maxDIB idcs kvs) -> DataFlow.do
-            kvs <- LV.set loc.foundAt (Strict.Just (Entry k v)) kvs
+            kvs <- LV.unsafeSet loc.foundAt (Strict.Just (Entry k v)) kvs
             HashMap size capa maxDIB idcs kvs
 
 size :: HashMap k v %1 -> (Ur Int, HashMap k v)
@@ -276,7 +276,7 @@ alterF f k hm =
         Ur (Just !v) ->
           -- Update in place
           hm & \(HashMap size capa maxDIB idcs kvs) -> DataFlow.do
-            kvs <- LV.set loc.foundAt (Strict.Just (Entry k v)) kvs
+            kvs <- LV.unsafeSet loc.foundAt (Strict.Just (Entry k v)) kvs
             HashMap size capa maxDIB idcs kvs
 
 deleteFrom :: Location v -> HashMap k v %1 -> HashMap k v
@@ -286,18 +286,18 @@ deleteFrom Location {..} (HashMap size capa maxDIB idcs kvs) = go foundAt idcs k
     go :: Int -> LUV.Vector IndexInfo %1 -> KVs k v %1 -> HashMap k v
     go !i !idcs !kvs
       | i == physMax = DataFlow.do
-          kvs <- LV.set i Strict.Nothing kvs
-          idcs <- LUV.set i IndexInfo {residual = 0, dib = 0} idcs
+          kvs <- LV.unsafeSet i Strict.Nothing kvs
+          idcs <- LUV.unsafeSet i IndexInfo {residual = 0, dib = 0} idcs
           HashMap (size - 1) capa maxDIB idcs kvs
       | otherwise =
-          case LUV.get (i + 1) idcs of
+          case LUV.unsafeGet (i + 1) idcs of
             (Ur ixi, idcs)
               | ixi.dib P.== 0 -> DataFlow.do
                   -- Reaches the stop bucket: empty or DIB = 0.
                   -- By invariants, all emtpy buckets MUST have DIB = 0,
                   -- so we can just check dib of the next bucket.
-                  kvs <- LV.set i Strict.Nothing kvs
-                  idcs <- LUV.set i IndexInfo {residual = 0, dib = 0} idcs
+                  kvs <- LV.unsafeSet i Strict.Nothing kvs
+                  idcs <- LUV.unsafeSet i IndexInfo {residual = 0, dib = 0} idcs
                   HashMap (size - 1) capa maxDIB idcs kvs
               | otherwise -> DataFlow.do
                   -- Need to shift back
@@ -309,17 +309,17 @@ deleteFrom Location {..} (HashMap size capa maxDIB idcs kvs) = go foundAt idcs k
 
 unsafeSwapBoxed :: Int -> Int -> LV.Vector a %1 -> LV.Vector a
 unsafeSwapBoxed i j vec =
-  LV.get i vec & \(Ur xi, vec) ->
-    LV.get j vec & \(Ur xj, vec) -> DataFlow.do
-      vec <- LV.set i xj vec
-      LV.set j xi vec
+  LV.unsafeGet i vec & \(Ur xi, vec) ->
+    LV.unsafeGet j vec & \(Ur xj, vec) -> DataFlow.do
+      vec <- LV.unsafeSet i xj vec
+      LV.unsafeSet j xi vec
 
 unsafeSwapUnboxed :: (U.Unbox a) => Int -> Int -> LUV.Vector a %1 -> LUV.Vector a
 unsafeSwapUnboxed i j vec =
-  LUV.get i vec & \(Ur xi, vec) ->
-    LUV.get j vec & \(Ur xj, vec) -> DataFlow.do
-      vec <- LUV.set i xj vec
-      LUV.set j xi vec
+  LUV.unsafeGet i vec & \(Ur xi, vec) ->
+    LUV.unsafeGet j vec & \(Ur xj, vec) -> DataFlow.do
+      vec <- LUV.unsafeSet i xj vec
+      LUV.unsafeSet j xi vec
 
 probeForInsert ::
   forall k v.
@@ -330,8 +330,8 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
   | otherwise =
       case endType of
         Vacant -> DataFlow.do
-          idcs <- LUV.set offset IndexInfo {residual = initialBucket, dib = dibAtMiss} idcs
-          kvs <- LV.set offset (Strict.Just (Entry k v)) kvs
+          idcs <- LUV.unsafeSet offset IndexInfo {residual = initialBucket, dib = dibAtMiss} idcs
+          kvs <- LV.unsafeSet offset (Strict.Just (Entry k v)) kvs
           HashMap (size + 1) capa (P.max maxDIB dibAtMiss) idcs kvs
         Paused -> DataFlow.do
           go maxDIB IndexInfo {residual = initialBucket, dib = dibAtMiss} (Entry k v) offset idcs kvs
@@ -356,21 +356,21 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
     go !curMaxDIB !newIdxInfo !newEntry !idx !idcs !kvs
       | idx >= physCapa || curMaxDIB P.> maxDibLimit || newIdxInfo.dib P.> maxDibLimit = grow newEntry idcs kvs
       | otherwise =
-          LV.get idx kvs & \case
+          LV.unsafeGet idx kvs & \case
             (Ur Strict.Nothing, kvs) ->
               -- Found a vacant spot
               DataFlow.do
-                !idcs <- LUV.set idx newIdxInfo idcs
-                !kvs <- LV.set idx (Strict.Just newEntry) kvs
+                !idcs <- LUV.unsafeSet idx newIdxInfo idcs
+                !kvs <- LV.unsafeSet idx (Strict.Just newEntry) kvs
                 HashMap (size + 1) capa (curMaxDIB `P.max` newIdxInfo.dib) idcs kvs
             (Ur (Strict.Just existingEntry), kvs) ->
               -- Occupied, need to compare DIBs
-              LUV.get idx idcs & \(Ur existingIdxInfo, idcs) ->
+              LUV.unsafeGet idx idcs & \(Ur existingIdxInfo, idcs) ->
                 if existingIdxInfo.dib P.< newIdxInfo.dib
                   then DataFlow.do
                     -- Takes from the rich and gives to the poor
-                    !idcs <- LUV.set idx newIdxInfo idcs
-                    !kvs <- LV.set idx (Strict.Just newEntry) kvs
+                    !idcs <- LUV.unsafeSet idx newIdxInfo idcs
+                    !kvs <- LV.unsafeSet idx (Strict.Just newEntry) kvs
                     go
                       (P.max newIdxInfo.dib curMaxDIB)
                       (increment existingIdxInfo)
@@ -446,7 +446,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
           , HashMap size capa maxDIB idcs kvs
           )
       | dib P.> maxDIB =
-          LV.get idx kvs & \(Ur v, kvs) ->
+          LV.unsafeGet idx kvs & \(Ur v, kvs) ->
             let endType = case v of
                   Strict.Nothing -> Vacant
                   Strict.Just _ -> Paused
@@ -461,7 +461,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                 , HashMap size capa maxDIB idcs kvs
                 )
       | otherwise =
-          LV.get idx kvs & \case
+          LV.unsafeGet idx kvs & \case
             (Ur Strict.Nothing, kvs) ->
               ( Ur $
                   NotFound
@@ -474,9 +474,9 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
               , HashMap size capa maxDIB idcs kvs
               )
             (Ur (Strict.Just (Entry k' val)), kvs)
-              | k P.== k' -> LUV.get idx idcs & \(Ur indexInfo, idcs) -> (Ur $ Found Location {foundAt = idx, ..}, HashMap size capa maxDIB idcs kvs)
+              | k P.== k' -> LUV.unsafeGet idx idcs & \(Ur indexInfo, idcs) -> (Ur $ Found Location {foundAt = idx, ..}, HashMap size capa maxDIB idcs kvs)
               | otherwise ->
-                  case LUV.get idx idcs of
+                  case LUV.unsafeGet idx idcs of
                     (Ur existing, idcs)
                       | existing.dib P.< dib ->
                           ( Ur $
