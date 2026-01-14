@@ -390,8 +390,9 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
       KVs k v %1 ->
       HashMap k v
     -- Invariant: curMaxDIB <= maxDIBLimit
+    -- Invariant: newDIB <= maxDibLimit
     go !curMaxDIB !newDib !newEntry !i !idcs !kvs
-      | i == physCapa || newDib P.== maxDibLimit + 1 = grow newEntry idcs kvs
+      | i == physCapa = grow newEntry idcs kvs
       | otherwise =
           LUV.unsafeGet i idcs & \case
             (Ur Absent, idcs) ->
@@ -409,10 +410,14 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
                       -- Takes from the rich and gives to the poor
                       !idcs <- LUV.unsafeSet i (Present newDib) idcs
                       !kvs <- LV.unsafeSet i (Strict.Just newEntry) kvs
-                      let !nextDib = existingDib + 1
-                      go (Max newDib P.<> curMaxDIB) nextDib nextEntry (i + 1) idcs kvs
+                      -- existingDib < newDib
+                      -- <==> existingDib +1 <= newDib <= maxDibLimit
+                      -- hence the invariant met.
+                      go (Max newDib P.<> curMaxDIB) (existingDib + 1) nextEntry (i + 1) idcs kvs
                 else
-                  go curMaxDIB (newDib + 1) newEntry (i + 1) idcs kvs
+                  if newDib P.== maxDibLimit P.- 1
+                    then grow newEntry idcs kvs
+                    else go curMaxDIB (newDib + 1) newEntry (i + 1) idcs kvs
 
 lookup :: (Hashable k) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 lookup k hm =
