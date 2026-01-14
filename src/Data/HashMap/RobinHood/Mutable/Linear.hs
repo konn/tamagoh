@@ -339,6 +339,7 @@ deleteFrom Location {..} (HashMap size capa maxDIB idcs kvs) = go foundAt idcs k
                   -- By invariants, all emtpy buckets MUST have DIB = 0,
                   -- so we can just check dib of the next bucket.
                   idcs <- LUV.unsafeSet i Absent idcs
+                  kvs <- LV.unsafeSet i Strict.Nothing kvs
                   HashMap (size - 1) capa maxDIB idcs kvs
               | otherwise -> DataFlow.do
                   -- Need to shift back
