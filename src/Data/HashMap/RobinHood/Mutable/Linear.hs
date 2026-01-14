@@ -60,6 +60,7 @@ import Data.Foldable qualified as P
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable (..))
 import Data.Linear.Witness.Compat
+import Data.Strict.Maybe qualified as Strict
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Vector.Generic qualified as G
 import Data.Vector.Generic.Mutable qualified as MG
@@ -174,10 +175,10 @@ deepClone = Unsafe.toLinear \dic@(HashMap size capa maxDIB idcs kvs) ->
           | otherwise = case LUV.unsafeGet i idcs of
               (Ur Absent, _) -> go (i + 1) acc
               (Ur _, _) ->
-                LV.unsafeGet i kvs & \(Ur (Entry k v), _) ->
+                LV.unsafeGet i kvs & \(Ur (Strict.fromJust -> (Entry k v)), _) ->
                   dupLeak v & \v' ->
-                    go (i + 1) (LV.unsafeSet i (Entry k v') acc)
-        kvs2 = go 0 (LV.constantL capa undefined (fromPB lin))
+                    go (i + 1) (LV.unsafeSet i (Strict.Just (Entry k v')) acc)
+        kvs2 = go 0 (LV.constantL capa Strict.Nothing (fromPB lin))
      in (dic, HashMap size capa maxDIB (dupLeak idcs) kvs2)
 
 dupLeak :: (Dupable a) => a %1 -> a
@@ -194,7 +195,11 @@ instance
 instance LinearOnly (HashMap k v) where
   linearOnly = UnsafeLinearOnly
 
-type KVs k v = LV.Vector (Entry k v)
+-- NOTE: although we can use the first bit of 'IndexInfo' to indicate absence,
+-- but we are still using a 'Maybe' wrapper around 'Entry' to store KVs for
+-- the better performance in 'foldMapWithKey' - otherwise it would perform
+-- drastically worse because it has to read 'IndexInfo' and 'KVs' vectors in mixture.
+type KVs k v = LV.Vector (Strict.Maybe (Entry k v))
 
 maxLoadFactor :: P.Double
 maxLoadFactor = 0.75
@@ -207,7 +212,7 @@ new capa = runReader Control.do
   let !capa' = 2 ^ intLog2' (2 * (max 1 capa) - 1)
       !physCapa = capa' + fromIntegral maxDibLimit
   indices <- asks $ LUV.constantL physCapa Absent . fromPB
-  kvs <- asks $ LV.constantL physCapa undefined . fromPB
+  kvs <- asks $ LV.constantL physCapa Strict.Nothing . fromPB
   Control.pure $ HashMap 0 capa' (DIB 0) indices kvs
 
 foldMapWithKey ::
@@ -216,18 +221,18 @@ foldMapWithKey ::
   (k -> v -> w) ->
   HashMap k v %1 ->
   w
-foldMapWithKey f (HashMap size capa _ idcs kvs) = go 0 0 idcs kvs mempty
+foldMapWithKey f (HashMap size capa _ idcs kvs) = idcs `lseq` go 0 0 kvs mempty
   where
     physCapa = capa + fromIntegral maxDibLimit
-    go :: Int -> Int -> LUV.Vector IndexInfo %1 -> KVs k v %1 -> w -> w
-    go !i !count !idcs !kvs !acc
-      | count == size || i >= physCapa = idcs `lseq` kvs `lseq` acc
+    go :: Int -> Int -> KVs k v %1 -> w -> w
+    go !i !count !kvs !acc
+      | count == size || i >= physCapa = kvs `lseq` acc
       | otherwise =
-          LUV.unsafeGet i idcs & \case
-            (Ur Absent, idcs) -> go (i + 1) count idcs kvs acc
-            (Ur _, idcs) ->
-              LV.unsafeGet i kvs & \(Ur (Entry k v), kvs) ->
-                go (i + 1) (count + 1) idcs kvs (acc <> f k v)
+          LV.unsafeGet i kvs & \case
+            (Ur (Strict.Just (Entry k v)), kvs) ->
+              go (i + 1) (count + 1) kvs (acc <> f k v)
+            (Ur Strict.Nothing, kvs) ->
+              go (i + 1) count kvs acc
 
 insert :: (Hashable k) => k -> v -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 insert k v =
@@ -272,7 +277,7 @@ alter f k hm =
         (Just !v) ->
           -- Update in place
           hm & \(HashMap size capa maxDIB idcs kvs) -> DataFlow.do
-            kvs <- LV.unsafeSet loc.foundAt (Entry k v) kvs
+            kvs <- LV.unsafeSet loc.foundAt (Strict.Just (Entry k v)) kvs
             HashMap size capa maxDIB idcs kvs
 
 size :: HashMap k v %1 -> (Ur Int, HashMap k v)
@@ -313,7 +318,7 @@ alterF f k hm =
         Ur (Just !v) ->
           -- Update in place
           hm & \(HashMap size capa maxDIB idcs kvs) -> DataFlow.do
-            kvs <- LV.unsafeSet loc.foundAt (Entry k v) kvs
+            kvs <- LV.unsafeSet loc.foundAt (Strict.Just (Entry k v)) kvs
             HashMap size capa maxDIB idcs kvs
 
 deleteFrom :: Location v -> HashMap k v %1 -> HashMap k v
@@ -366,7 +371,7 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
       case endType of
         Vacant -> DataFlow.do
           idcs <- LUV.unsafeSet offset (Present dibAtMiss) idcs
-          kvs <- LV.unsafeSet offset (Entry k v) kvs
+          kvs <- LV.unsafeSet offset (Strict.Just (Entry k v)) kvs
           HashMap (size + 1) capa (P.max maxDIB dibAtMiss) idcs kvs
         Paused -> DataFlow.do
           go maxDIB (Present dibAtMiss) (Entry k v) offset idcs kvs
@@ -396,16 +401,16 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
               -- Found a vacant spot
               DataFlow.do
                 !idcs <- LUV.unsafeSet idx newIdxInfo idcs
-                !kvs <- LV.unsafeSet idx newEntry kvs
+                !kvs <- LV.unsafeSet idx (Strict.Just newEntry) kvs
                 HashMap (size + 1) capa (curMaxDIB `P.max` unsafeGetDib newIdxInfo) idcs kvs
             (Ur existing@(Present existingDib), idcs) ->
               -- Occupied, need to compare DIBs
               if existingDib P.< unsafeGetDib newIdxInfo
                 then
-                  LV.unsafeGet idx kvs & \(Ur existingEntry, kvs) -> DataFlow.do
+                  LV.unsafeGet idx kvs & \(Ur (Strict.fromJust -> existingEntry), kvs) -> DataFlow.do
                     -- Takes from the rich and gives to the poor
                     !idcs <- LUV.unsafeSet idx newIdxInfo idcs
-                    !kvs <- LV.unsafeSet idx newEntry kvs
+                    !kvs <- LV.unsafeSet idx (Strict.Just newEntry) kvs
                     go
                       (P.max (unsafeGetDib newIdxInfo) curMaxDIB)
                       (increment existing)
@@ -513,7 +518,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                 , HashMap size capa maxDIB idcs kvs
               #)
             (Ur indexInfo@(Present existingDib), idcs) ->
-              LV.unsafeGet idx kvs & \(Ur (Entry k' val), kvs) ->
+              LV.unsafeGet idx kvs & \(Ur (Strict.fromJust -> (Entry k' val)), kvs) ->
                 if
                   | k P.== k' ->
                       (#
