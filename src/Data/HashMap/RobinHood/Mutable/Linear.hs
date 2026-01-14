@@ -226,7 +226,7 @@ foldMapWithKey f (HashMap size capa _ idcs kvs) = idcs `lseq` go 0 0 kvs mempty
     physCapa = capa + fromIntegral maxDibLimit
     go :: Int -> Int -> KVs k v %1 -> w -> w
     go !i !count !kvs !acc
-      | count == size || i >= physCapa = kvs `lseq` acc
+      | count == size || i == physCapa = kvs `lseq` acc
       | otherwise =
           LV.unsafeGet i kvs & \case
             (Ur (Strict.Just (Entry k v)), kvs) ->
@@ -329,6 +329,7 @@ deleteFrom Location {..} (HashMap size capa maxDIB idcs kvs) = go foundAt idcs k
     go !i !idcs !kvs
       | i == physMax = DataFlow.do
           idcs <- LUV.unsafeSet i Absent idcs
+          kvs <- LV.unsafeSet i Strict.Nothing kvs
           HashMap (size - 1) capa maxDIB idcs kvs
       | otherwise =
           case LUV.unsafeGet (i + 1) idcs of
