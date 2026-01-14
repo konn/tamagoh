@@ -89,7 +89,7 @@ newtype instance U.Vector DIB = V_DIB (U.Vector Word8)
 newtype instance U.MVector s DIB = MV_DIB (U.MVector s Word8)
 
 data Entry k v where
-  Entry :: k -> v %1 -> Entry k v
+  Entry :: !k -> !v %1 -> Entry k v
   deriving (Show, P.Functor)
 
 instance (Consumable v) => Consumable (Entry k v) where
