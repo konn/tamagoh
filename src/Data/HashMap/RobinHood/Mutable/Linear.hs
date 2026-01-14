@@ -8,9 +8,14 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UnboxedTuples #-}
+{-# LANGUAGE UnliftedDatatypes #-}
+{-# LANGUAGE UnliftedNewtypes #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE NoFieldSelectors #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
@@ -41,7 +46,7 @@ module Data.HashMap.RobinHood.Mutable.Linear (
 
 import Control.Functor.Linear (asks, runReader, runState, state)
 import Control.Functor.Linear qualified as Control
-import Control.Lens ((+~), (-~))
+import Control.Lens ()
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Control.Monad.Borrow.Pure.Orphans ()
@@ -61,6 +66,7 @@ import Data.Vector.Mutable.Linear.Extra qualified as LV
 import Data.Vector.Mutable.Linear.Unboxed qualified as LUV
 import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
+import GHC.Base (Type, UnliftedType)
 import GHC.Generics (Generic)
 import GHC.TypeError (ErrorMessage (..), Unsatisfiable, unsatisfiable)
 import Math.NumberTheory.Logarithms (intLog2')
@@ -92,19 +98,15 @@ instance (Dupable v) => Dupable (Entry k v) where
      in (Entry k v1, Entry k v2)
   {-# INLINE dup2 #-}
 
-data IndexInfo = IndexInfo
-  { residual :: {-# UNPACK #-} !Int
-  , dib :: {-# UNPACK #-} !DIB
-  }
+newtype IndexInfo = IndexInfo
+  {dib :: DIB}
   deriving (Show, Generic)
-  deriving (G.Vector U.Vector, MG.MVector U.MVector) via IndexInfo `U.As` (Int, DIB)
+  deriving newtype (G.Vector U.Vector, MG.MVector U.MVector)
   deriving anyclass (U.Unbox)
 
-instance U.IsoUnbox IndexInfo (Int, DIB)
+newtype instance U.Vector IndexInfo = V_IndexInfo (U.Vector DIB)
 
-newtype instance U.Vector IndexInfo = V_IndexInfo (U.Vector (Int, DIB))
-
-newtype instance U.MVector s IndexInfo = MV_IndexInfo (U.MVector s (Int, DIB))
+newtype instance U.MVector s IndexInfo = MV_IndexInfo (U.MVector s DIB)
 
 data HashMap k v where
   HashMap ::
@@ -165,13 +167,13 @@ maxLoadFactor :: P.Double
 maxLoadFactor = 0.75
 
 maxDibLimit :: DIB
-maxDibLimit = 128
+maxDibLimit = 127
 
 new :: Int -> Linearly %1 -> HashMap k v
 new capa = runReader Control.do
   let !capa' = 2 ^ intLog2' (2 * (max 1 capa) - 1)
       !physCapa = capa' + fromIntegral maxDibLimit
-  indices <- asks $ LUV.constantL physCapa (IndexInfo 0 0) . fromPB
+  indices <- asks $ LUV.constantL physCapa (IndexInfo 0) . fromPB
   kvs <- asks $ LV.constantL physCapa Strict.Nothing . fromPB
   Control.pure $ HashMap 0 capa' (DIB 0) indices kvs
 
@@ -222,14 +224,14 @@ alter ::
   HashMap k v %1 ->
   HashMap k v
 alter f k hm =
-  probeKeyForAlter k hm & \case
-    (Ur (NotFound st), hm) ->
+  case probeKeyForAlter k hm of
+    (# NotFound st, hm #) ->
       -- not found!
       case f Nothing of
         Nothing -> hm -- No modification needed
         Just !v -> probeForInsert k v st hm
     -- Already inserted with older value.
-    (Ur (Found loc), hm) ->
+    (# Found loc, hm #) ->
       case f (Just loc.val) of
         Nothing -> deleteFrom loc hm
         (Just !v) ->
@@ -263,14 +265,14 @@ alterF ::
   HashMap k v %1 ->
   f (HashMap k v)
 alterF f k hm =
-  probeKeyForAlter k hm & \case
-    (Ur (NotFound st), hm) ->
+  case probeKeyForAlter k hm of
+    (# NotFound st, hm #) ->
       -- not found!
       f Nothing Control.<&> \case
         Ur Nothing -> hm -- No modification needed
         Ur (Just !v) -> probeForInsert k v st hm
     -- Already inserted with older value.
-    (Ur (Found loc), hm) ->
+    (# Found loc, hm #) ->
       f (Just loc.val) Control.<&> \case
         Ur Nothing -> deleteFrom loc hm
         Ur (Just !v) ->
@@ -287,7 +289,7 @@ deleteFrom Location {..} (HashMap size capa maxDIB idcs kvs) = go foundAt idcs k
     go !i !idcs !kvs
       | i == physMax = DataFlow.do
           kvs <- LV.unsafeSet i Strict.Nothing kvs
-          idcs <- LUV.unsafeSet i IndexInfo {residual = 0, dib = 0} idcs
+          idcs <- LUV.unsafeSet i IndexInfo {dib = 0} idcs
           HashMap (size - 1) capa maxDIB idcs kvs
       | otherwise =
           case LUV.unsafeGet (i + 1) idcs of
@@ -297,14 +299,14 @@ deleteFrom Location {..} (HashMap size capa maxDIB idcs kvs) = go foundAt idcs k
                   -- By invariants, all emtpy buckets MUST have DIB = 0,
                   -- so we can just check dib of the next bucket.
                   kvs <- LV.unsafeSet i Strict.Nothing kvs
-                  idcs <- LUV.unsafeSet i IndexInfo {residual = 0, dib = 0} idcs
+                  idcs <- LUV.unsafeSet i IndexInfo {dib = 0} idcs
                   HashMap (size - 1) capa maxDIB idcs kvs
               | otherwise -> DataFlow.do
                   -- Need to shift back
                   kvs <- unsafeSwapBoxed i (i + 1) kvs
                   idcs <- unsafeSwapUnboxed i (i + 1) idcs
                   -- Decrement DIB
-                  idcs <- LUV.modify_ (#dib -~ 1) i idcs
+                  idcs <- LUV.modify_ (\iinfo -> iinfo {dib = iinfo.dib P.- 1}) i idcs
                   go (i + 1) idcs kvs
 
 unsafeSwapBoxed :: Int -> Int -> LV.Vector a %1 -> LV.Vector a
@@ -330,18 +332,18 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
   | otherwise =
       case endType of
         Vacant -> DataFlow.do
-          idcs <- LUV.unsafeSet offset IndexInfo {residual = initialBucket, dib = dibAtMiss} idcs
+          idcs <- LUV.unsafeSet offset IndexInfo {dib = dibAtMiss} idcs
           kvs <- LV.unsafeSet offset (Strict.Just (Entry k v)) kvs
           HashMap (size + 1) capa (P.max maxDIB dibAtMiss) idcs kvs
         Paused -> DataFlow.do
-          go maxDIB IndexInfo {residual = initialBucket, dib = dibAtMiss} (Entry k v) offset idcs kvs
+          go maxDIB IndexInfo {dib = dibAtMiss} (Entry k v) offset idcs kvs
   where
     grow :: Entry k v -> LUV.Vector IndexInfo %1 -> KVs k v %1 -> HashMap k v
     grow (Entry !k !v) idcs kvs =
       withLinearly kvs & \(lin, kvs) ->
         case toList (HashMap size capa maxDIB idcs kvs) of
           Ur lst ->
-            let !newCapa = max (capa * 2) (ceiling $ fromIntegral (size + 1) / maxLoadFactor)
+            let !newCapa = capa * 2
              in insertMany ((k, v) : lst) (new newCapa lin)
     physCapa = capa + fromIntegral maxDibLimit
 
@@ -383,19 +385,19 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
 
 increment :: IndexInfo -> IndexInfo
 {-# INLINE increment #-}
-increment = #dib +~ 1
+increment = \iinfo -> iinfo {dib = iinfo.dib + 1}
 
 lookup :: (Hashable k) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 lookup k hm =
-  probeKeyForAlter k hm & \case
-    (Ur (NotFound _), hm) -> (Ur Nothing, hm)
-    (Ur (Found loc), hm) -> (Ur (Just loc.val), hm)
+  case probeKeyForAlter k hm of
+    (# NotFound _, hm #) -> (Ur Nothing, hm)
+    (# Found !loc, hm #) -> (Ur (Just loc.val), hm)
 
 member :: (Hashable k) => k -> HashMap k v %1 -> (Ur Bool, HashMap k v)
 member k hm =
-  probeKeyForAlter k hm & \case
-    (Ur NotFound {}, hm) -> (Ur False, hm)
-    (Ur Found {}, hm) -> (Ur True, hm)
+  case probeKeyForAlter k hm of
+    (# NotFound {}, hm #) -> (Ur False, hm)
+    (# Found {}, hm #) -> (Ur True, hm)
 
 delete :: (Hashable k) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 {-# INLINE delete #-}
@@ -404,91 +406,99 @@ delete k =
     . flip runState (Ur Nothing)
     . alterF (\old -> state \new -> (new, Ur old)) k
 
+type Location :: Type -> UnliftedType
 data Location v = Location
   { foundAt :: !Int
   , indexInfo :: {-# UNPACK #-} !IndexInfo
   , val :: !v
   }
-  deriving (Show)
 
-data LookupResult v
-  = Found (Location v)
-  | NotFound ProbeSuspended
+type LookupResult :: Type -> UnliftedType
+data LookupResult v where
+  Found :: !(Location v) -> LookupResult v
+  NotFound :: {-# UNPACK #-} !ProbeSuspended -> LookupResult v
 
+type ProbeSuspended :: UnliftedType
 data ProbeSuspended = ProbeSuspended
   { initialBucket :: {-# UNPACK #-} !Int
   , offset :: {-# UNPACK #-} !Int
   , endType :: !EndType
   , dibAtMiss :: {-# UNPACK #-} !DIB
   }
-  deriving (Show)
 
-data EndType = Paused | Vacant
-  deriving (Show, P.Eq, P.Ord, Generic)
+newtype EndType = EndType (# (# #) | (# #) #)
 
-probeKeyForAlter :: (Hashable k) => k -> HashMap k v %1 -> (Ur (LookupResult v), HashMap k v)
+pattern Vacant :: EndType
+pattern Vacant = EndType (# (# #) | #)
+
+pattern Paused :: EndType
+pattern Paused = EndType (# | (# #) #)
+
+{-# COMPLETE Paused, Vacant #-}
+
+probeKeyForAlter :: (Hashable k) => k -> HashMap k v %1 -> (# LookupResult v, HashMap k v #)
 probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
   go start 0 idcs kvs
   where
     !start = hash k `mod` capa
     !physCapa = capa + fromIntegral maxDibLimit
-    go :: Int -> DIB -> LUV.Vector IndexInfo %1 -> KVs _ _ %1 -> (Ur (LookupResult _), HashMap _ _)
+    go :: Int -> DIB -> LUV.Vector IndexInfo %1 -> KVs _ _ %1 -> (# LookupResult _, HashMap _ _ #)
     go !idx !dib !idcs !kvs
-      | idx == physCapa || dib P.> maxDibLimit =
-          ( Ur $
-              NotFound
-                ProbeSuspended
-                  { initialBucket = start
-                  , offset = idx
-                  , endType = Paused
-                  , dibAtMiss = dib
-                  }
-          , HashMap size capa maxDIB idcs kvs
-          )
-      | dib P.> maxDIB =
+      | idx == physCapa || dib P.== maxDibLimit + 1 =
+          (#
+            NotFound
+              ProbeSuspended
+                { initialBucket = start
+                , offset = idx
+                , endType = Paused
+                , dibAtMiss = dib
+                }
+            , HashMap size capa maxDIB idcs kvs
+          #)
+      | dib P.== maxDIB + 1 =
           LV.unsafeGet idx kvs & \(Ur v, kvs) ->
             let endType = case v of
                   Strict.Nothing -> Vacant
                   Strict.Just _ -> Paused
-             in ( Ur $
-                    NotFound
-                      ProbeSuspended
-                        { initialBucket = start
-                        , offset = idx
-                        , endType
-                        , dibAtMiss = dib
-                        }
-                , HashMap size capa maxDIB idcs kvs
-                )
-      | otherwise =
-          LV.unsafeGet idx kvs & \case
-            (Ur Strict.Nothing, kvs) ->
-              ( Ur $
+             in (#
                   NotFound
                     ProbeSuspended
                       { initialBucket = start
                       , offset = idx
-                      , endType = Vacant
+                      , endType
                       , dibAtMiss = dib
                       }
-              , HashMap size capa maxDIB idcs kvs
-              )
+                  , HashMap size capa maxDIB idcs kvs
+                #)
+      | otherwise =
+          LV.unsafeGet idx kvs & \case
+            (Ur Strict.Nothing, kvs) ->
+              (#
+                NotFound
+                  ProbeSuspended
+                    { initialBucket = start
+                    , offset = idx
+                    , endType = Vacant
+                    , dibAtMiss = dib
+                    }
+                , HashMap size capa maxDIB idcs kvs
+              #)
             (Ur (Strict.Just (Entry k' val)), kvs)
-              | k P.== k' -> LUV.unsafeGet idx idcs & \(Ur indexInfo, idcs) -> (Ur $ Found Location {foundAt = idx, ..}, HashMap size capa maxDIB idcs kvs)
+              | k P.== k' -> LUV.unsafeGet idx idcs & \(Ur indexInfo, idcs) -> (# Found Location {foundAt = idx, ..}, HashMap size capa maxDIB idcs kvs #)
               | otherwise ->
                   case LUV.unsafeGet idx idcs of
                     (Ur existing, idcs)
                       | existing.dib P.< dib ->
-                          ( Ur $
-                              NotFound
-                                ProbeSuspended
-                                  { initialBucket = start
-                                  , offset = idx
-                                  , endType = Paused
-                                  , dibAtMiss = dib
-                                  }
-                          , HashMap size capa maxDIB idcs kvs
-                          )
+                          (#
+                            NotFound
+                              ProbeSuspended
+                                { initialBucket = start
+                                , offset = idx
+                                , endType = Paused
+                                , dibAtMiss = dib
+                                }
+                            , HashMap size capa maxDIB idcs kvs
+                          #)
                       | otherwise -> go (idx + 1) (dib + 1) idcs kvs
 
 toList :: HashMap k v %1 -> Ur [(k, v)]
