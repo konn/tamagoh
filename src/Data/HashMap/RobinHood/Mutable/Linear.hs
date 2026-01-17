@@ -408,6 +408,50 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB slots)
                       then grow size capa newK newV slots
                       else go size capa curMaxDIB (newDib + 1) newK newV (i + 1) slots
 
+-- | Fast insertion when we know key doesn't exist (used during rehash).
+-- Skips key equality checks since all keys are guaranteed unique.
+{-# INLINE insertFresh #-}
+insertFresh :: (Hashable k) => k -> v -> HashMap k v %1 -> HashMap k v
+insertFresh !k !v (HashMap size capa maxDIB slots) =
+  let !start = hash k .&. (capa - 1)
+      !physCapa = capa + fromIntegral maxDibLimit
+   in goFresh size capa physCapa maxDIB 0 k v start slots
+
+-- | Internal loop for insertFresh - probes for empty slot or Robin Hood displacement
+goFresh ::
+  (Hashable k) =>
+  Int -> -- size
+  Int -> -- capa
+  Int -> -- physCapa
+  Max DIB -> -- current max DIB
+  DIB -> -- current DIB for entry being inserted
+  k ->
+  v ->
+  Int -> -- current index
+  Slots k v %1 ->
+  HashMap k v
+goFresh !size !capa !physCapa !curMaxDIB !dib !k !v !i !slots
+  | i == physCapa || dib P.> maxDibLimit =
+      -- Need to grow - this shouldn't happen during normal rehash
+      -- but handle it for safety
+      withLinearly slots & \(lin, slots) ->
+        slots `lseq` insertFresh k v (new (capa * 2) lin)
+  | otherwise =
+      LV.unsafeGet i slots & \case
+        (Ur Empty, slots') -> DataFlow.do
+          -- Found empty slot, insert here
+          slots' <- LV.unsafeSet i (Occupied dib k v) slots'
+          HashMap (size + 1) capa (curMaxDIB P.<> Max dib) slots'
+        (Ur (Occupied existingDib k' v'), slots') ->
+          if existingDib P.< dib
+            then DataFlow.do
+              -- Robin Hood: displace the existing entry
+              slots' <- LV.unsafeSet i (Occupied dib k v) slots'
+              goFresh size capa physCapa (curMaxDIB P.<> Max dib) (existingDib + 1) k' v' (i + 1) slots'
+            else
+              -- Keep probing
+              goFresh size capa physCapa curMaxDIB (dib + 1) k v (i + 1) slots'
+
 -- | Direct rehash: iterate over old slots and insert into new map
 rehashInto ::
   (Hashable k) =>
@@ -423,12 +467,12 @@ rehashInto ::
 rehashInto !oldSize !oldPhysCapa !k !v !i !count !oldSlots !newMap
   | count == oldSize || i >= oldPhysCapa =
       -- Done iterating old map, insert the new entry and consume old slots
-      oldSlots `lseq` uncurry lseq (insert k v newMap)
+      oldSlots `lseq` insertFresh k v newMap
   | otherwise =
       LV.unsafeGet i oldSlots & \case
         (Ur (Occupied _ k' v'), oldSlots') ->
-          -- Found an entry, insert it into new map
-          rehashInto oldSize oldPhysCapa k v (i + 1) (count + 1) oldSlots' (uncurry lseq (insert k' v' newMap))
+          -- Found an entry, insert it into new map using fast path
+          rehashInto oldSize oldPhysCapa k v (i + 1) (count + 1) oldSlots' (insertFresh k' v' newMap)
         (Ur Empty, oldSlots') ->
           -- Empty slot, skip
           rehashInto oldSize oldPhysCapa k v (i + 1) count oldSlots' newMap
@@ -560,11 +604,4 @@ toList :: HashMap k v %1 -> Ur [(k, v)]
 toList = Ur.lift DL.toList . foldMapWithKey (curry $ Ur P.. DL.singleton)
 
 fromList :: (Hashable k) => [(k, v)] -> Linearly %1 -> HashMap k v
-fromList kvs =
-  appEndo
-    ( getDual $
-        P.foldMap'
-          (\(!k, !v) -> Dual $ Endo $ uncurry lseq . insert k v)
-          kvs
-    )
-    . new (floor $ fromIntegral (P.length kvs) * maxLoadFactor)
+fromList kvs = insertMany kvs . new (P.length kvs)
