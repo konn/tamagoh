@@ -339,7 +339,6 @@ deleteFrom Location {..} (HashMap size capa maxDIB slots) = go foundAt slots
               else DataFlow.do
                 -- Need to shift back and decrement DIB
                 slots <- LV.unsafeSet i (decrementSlot nextSlot) slots
-                slots <- LV.unsafeSet (i + 1) Empty slots
                 go (i + 1) slots
 
 {-# INLINE probeForInsert #-}
