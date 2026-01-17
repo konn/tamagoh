@@ -45,17 +45,18 @@ module Data.HashMap.RobinHood.Mutable.Linear (
   deepClone,
 ) where
 
-import Control.Functor.Linear (asks, runReader, runState, state)
+import Control.Functor.Linear (asks, runReader)
 import Control.Functor.Linear qualified as Control
 import Control.Lens ()
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Control.Monad.Borrow.Pure.Orphans ()
-import Control.Monad.Borrow.Pure.Utils (swapTuple, unsafeLeak)
+import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Bits ((.&.))
 import Data.DList qualified as DL
 import Data.Foldable qualified as P
+import Data.Functor.Linear qualified as Data
 import Data.Generics.Labels ()
 import Data.Hashable (Hashable (..))
 import Data.Linear.Witness.Compat
@@ -204,9 +205,8 @@ foldMapWithKey f (HashMap size capa _ slots) = go 0 0 slots mempty
 
 insert :: (Hashable k) => k -> v -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 insert k v =
-  swapTuple
-    . flip runState (Ur (Just v))
-    . alterF (\mval -> state \newVal -> (newVal, Ur mval)) k
+  unswapper
+    . alterF (\mval -> Swapper (Ur (Just v)) mval) k
 
 insertMany ::
   (Hashable k) =>
@@ -288,6 +288,23 @@ alterF f k hm =
           hm & \(HashMap size capa maxDIB slots) -> DataFlow.do
             slots <- LV.unsafeSet loc.foundAt (Occupied loc.slotDIB k v) slots
             HashMap size capa maxDIB slots
+
+data Swapper v a where
+  Swapper :: a %1 -> Maybe v -> Swapper v a
+
+{-# INLINE unswapper #-}
+unswapper :: Swapper v a %1 -> (Ur (Maybe v), a)
+unswapper (Swapper l b) = (Ur b, l)
+
+instance Data.Functor (Swapper v) where
+  {-# SPECIALIZE instance Data.Functor (Swapper v) #-}
+  fmap f = \(Swapper l b) -> Swapper (f l) (b :: Maybe v)
+  {-# INLINE fmap #-}
+
+instance Control.Functor (Swapper v) where
+  {-# SPECIALIZE instance Control.Functor (Swapper v) #-}
+  fmap f = \(Swapper l b) -> Swapper (f l) (b :: Maybe v)
+  {-# INLINE fmap #-}
 
 deleteFrom :: Location v -> HashMap k v %1 -> HashMap k v
 deleteFrom Location {..} (HashMap size capa maxDIB slots) = go foundAt slots
@@ -431,9 +448,8 @@ member k hm =
 delete :: (Hashable k) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 {-# INLINE delete #-}
 delete k =
-  swapTuple
-    . flip runState (Ur Nothing)
-    . alterF (\old -> state \new -> (new, Ur old)) k
+  unswapper
+    . alterF (\old -> Swapper (Ur Nothing) old) k
 
 type Location :: Type -> UnliftedType
 data Location v = Location
