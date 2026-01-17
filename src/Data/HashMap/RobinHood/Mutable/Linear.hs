@@ -142,7 +142,7 @@ instance Dupable (HashMap k v) where
 
 deepClone :: forall k v. (Dupable v) => HashMap k v %1 -> (HashMap k v, HashMap k v)
 deepClone = Unsafe.toLinear \dic@(HashMap size capa maxDIB slots) ->
-  withLinearly slots & Unsafe.toLinear \(lin, slots) ->
+  withLinearly slots & \(lin, slots) ->
     let go :: Int -> Slots k v %1 -> Slots k v
         go !i !acc
           | i >= capa = acc
