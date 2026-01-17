@@ -27,7 +27,6 @@ import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Data.EGraph.Types
 import Data.EGraph.Types.Language (deriveLanguage)
-import Data.Fix (Fix (..))
 import Data.Maybe (fromJust)
 import Data.Unrestricted.Linear (AsMovable (..))
 import GHC.Generics qualified as GHC

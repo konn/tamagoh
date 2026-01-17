@@ -122,7 +122,7 @@ modify f egraph = linearly \lin ->
   let %1 !eg = modifyLinearOnlyBO_ (thaw egraph lin) f
    in freeze eg
 
-empty :: (Hashable1 l) => EGraph d l
+empty :: EGraph d l
 {-# INLINE empty #-}
 empty = unur (linearly \l -> Unsafe.toLinear (Ur . EG) (Raw.new l))
 

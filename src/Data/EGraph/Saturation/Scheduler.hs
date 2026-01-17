@@ -113,7 +113,7 @@ updateStats BackoffScheduler {..} currentIter matchCounts state =
   foldr updateRule state matchCounts
   where
     updateRule (ruleIdx, matchCount) s =
-      let currentStat@RuleStat {timesBanned = prevTimesBanned} =
+      let RuleStat {timesBanned = prevTimesBanned} =
             IM.findWithDefault (RuleStat 0 0) ruleIdx s
           threshold = matchLimit * (2 ^ prevTimesBanned)
        in if matchCount > threshold

@@ -55,7 +55,7 @@ test_Math =
                 ]
               !lhs = foldr1 (+) $ map lit [1 .. 7] :: Term Math
               !rhs = foldr1 (+) $ map lit [7, 6 .. 1] :: Term Math
-          graph <- either throwIO pure $ saturate simple {maxIterations = Just 8} rules $ fromList [lhs]
+          graph <- either throwIO pure $ saturate simple {maxIterations = Just 8, scheduler = Nothing} rules $ fromList [lhs]
           equivalent graph lhs rhs @?= Just True
           numEClasses graph @?= 127
       , testCase "sub_canon_simple" do
@@ -222,7 +222,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , expectFailBecause "TIMEOUT" $ testCase "diff_power_harder" do
+      , testCase "diff_power_harder" do
           let x = var "x"
               lhs = diff x ((x ** 3) - (7 * (x ** 2)))
               rhs = x * ((3 * x) - 14)

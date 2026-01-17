@@ -112,7 +112,7 @@ addTerm term egraph = Control.do
   (Ur eid, egraph) <- addCanonicalNode node egraph
   Control.pure (Ur node, Ur eid, egraph)
 
-new :: forall d l. (Hashable1 l) => Linearly %1 -> EGraph d l
+new :: forall d l. Linearly %1 -> EGraph d l
 new = runReader Control.do
   unionFind <- asks UFB.empty
   classes <- asks $ EC.new
