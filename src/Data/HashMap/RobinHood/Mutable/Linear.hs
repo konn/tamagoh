@@ -408,8 +408,9 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB slots)
                       then grow size capa newK newV slots
                       else go size capa curMaxDIB (newDib + 1) newK newV (i + 1) slots
 
--- | Fast insertion when we know key doesn't exist (used during rehash).
--- Skips key equality checks since all keys are guaranteed unique.
+{- | Fast insertion when we know key doesn't exist (used during rehash).
+Skips key equality checks since all keys are guaranteed unique.
+-}
 {-# INLINE insertFresh #-}
 insertFresh :: (Hashable k) => k -> v -> HashMap k v %1 -> HashMap k v
 insertFresh !k !v (HashMap size capa maxDIB slots) =
