@@ -21,7 +21,6 @@ import Data.Maybe (isNothing)
 import Tamagoh.Bench.Math hiding (Rule, named, (==>), (@?))
 import Tamagoh.Bench.Math qualified as Bench (BenchCost)
 import Test.Tasty
-import Test.Tasty.ExpectedFailure (expectFailBecause)
 import Test.Tasty.HUnit
 import Test.Tasty.HUnit qualified as Tasty
 import Prelude hiding (lookup)
@@ -99,7 +98,7 @@ test_Math =
           _eid <- maybe (assertFailure "x + y not found") pure $ lookupTerm (var "x" + var "y") graph
           let xDIVy = lookupTerm (var "x" / var "y") graph
           isNothing xDIVy Tasty.@? "x / y should not be found, but got: " <> show xDIVy
-      , expectFailBecause "Timeout" $ testCase "math_simplify_root" do
+      , testCase "math_simplify_root" do
           let x = var "x"
           let lhs = 1 / (((1 + sqrt x) / 2) - ((1 - sqrt x) / 2))
           !graph <-
