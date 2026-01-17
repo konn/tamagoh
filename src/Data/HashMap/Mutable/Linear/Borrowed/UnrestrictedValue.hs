@@ -50,31 +50,28 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (
   extend,
 ) where
 
-import Control.Functor.Linear (StateT (..), runStateT)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear (Keyed)
-import Data.HashMap.Mutable.Linear qualified as Raw
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal
-import Data.HashMap.Mutable.Linear.Witness qualified as Raw
-import Data.Linear.Witness.Compat (fromPB)
+import Data.HashMap.RobinHood.Mutable.Linear qualified as Raw
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
 
 -- * Construction
 
-empty :: forall k v. (Keyed k) => Int -> Linearly %1 -> HashMapUr k v
+empty :: forall k v. Int -> Linearly %1 -> HashMapUr k v
 empty size l =
-  dup l & \(l, l'') -> HM $ Ref.new (Raw.emptyL size $ fromPB l) l''
+  dup l & \(l, l'') -> HM $ Ref.new (Raw.new size l) l''
 
 fromList :: (Keyed k) => [(k, v)] -> Linearly %1 -> HashMapUr k v
 fromList dic l =
   dup l & \(l, l') ->
-    HM $! Ref.new (Raw.fromListL dic $ fromPB l) l'
+    HM $! Ref.new (Raw.fromList dic l) l'
 
 -- * Mutation
 
@@ -87,11 +84,7 @@ insert ::
 insert key !v !dic = Control.do
   (Ur mval, dic) <-
     updateRef
-      ( \dic ->
-          Control.fmap swapTuple $
-            flip runStateT (Ur (Just v)) $
-              Raw.alterF (\ !may -> StateT \ !s -> Control.pure (s, Ur may)) key dic
-      )
+      (\dic -> Control.pure $ Raw.insert key v dic)
       (coerceBor dic)
   Control.pure (Ur $ forceMay mval, recoerceBor dic)
 
@@ -100,16 +93,9 @@ delete ::
 delete key dic = Control.do
   (Ur mval, dic) <-
     updateRef
-      ( \dic ->
-          Control.fmap swapTuple $
-            flip runStateT (Ur Nothing) $
-              Raw.alterF (\ !may -> StateT \ !s -> Control.pure (s, Ur may)) key dic
-      )
+      (\dic -> Control.pure $ Raw.delete key dic)
       (coerceBor dic)
   Control.pure (Ur $ forceMay mval, recoerceBor dic)
-
-swapTuple :: (a, b) %1 -> (b, a)
-swapTuple (a, b) = (b, a)
 
 forceMay :: Maybe a %1 -> Maybe a
 forceMay = \case
@@ -169,16 +155,16 @@ swap keys dic = asksLinearlyM \lin -> Control.do
     Control.<$> updateRef (\ !old -> Control.pure (HM $ Ref.new old lin, freeRef $ inner keys)) (coerceBor dic)
 
 -- | Takes all elements from the map, leaving it empty.
-take :: forall k v α. (Keyed k) => Mut α (HashMapUr k v) %1 -> BO α (HashMapUr k v, Mut α (HashMapUr k v))
+take :: forall k v α. Mut α (HashMapUr k v) %1 -> BO α (HashMapUr k v, Mut α (HashMapUr k v))
 take dic = Control.do
   Bi.second recoerceBor Control.<$> updateRef go (coerceBor dic)
   where
     go :: Raw.HashMap k v %1 -> BO α (HashMapUr k v, Raw.HashMap k v)
     go s = asksLinearlyM \lin ->
       dup lin & \(lin, lin') -> Control.do
-        Control.pure (HM $! Ref.new s lin, Raw.emptyL 16 $! fromPB lin')
+        Control.pure (HM $! Ref.new s lin, Raw.new 16 lin')
 
-take_ :: forall k v α. (Keyed k) => Mut α (HashMapUr k v) %1 -> BO α (HashMapUr k v)
+take_ :: forall k v α. Mut α (HashMapUr k v) %1 -> BO α (HashMapUr k v)
 {-# INLINE take_ #-}
 take_ dic = Control.fmap (uncurry $ flip lseq) $ take dic
 

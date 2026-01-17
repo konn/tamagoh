@@ -29,18 +29,14 @@ import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Internal
 import Control.Monad.Borrow.Pure.Utils
 import Control.Syntax.DataFlow qualified as DataFlow
-import Data.Array.Mutable.Linear qualified as Array
-import Data.DList (DList)
-import Data.DList qualified as DL
 import Data.Function qualified as P
-import Data.HashMap.Mutable.Linear.Internal qualified as Raw
+import Data.HashMap.RobinHood.Mutable.Linear qualified as Raw
 import Data.List qualified as P
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
 import Text.Show.Borrowed (Display (..))
 import Unsafe.Linear qualified as Unsafe
-import Prelude qualified as P
 
 {- | A mutable HashMap with unrestricted keys and values.
 The constructor is not exported to maintain invariants.
@@ -135,13 +131,4 @@ toList = askRaw_ rawToList'
 -- thunks to avoid mutation after read.
 rawToList' :: Raw.HashMap k v %1 -> Ur [(k, v)]
 {-# INLINE rawToList' #-}
-rawToList' = \(Raw.HashMap _ n !robinArr) ->
-  let go :: Int -> Array.Array _ %1 -> DList (k, v) -> Ur [(k, v)]
-      go !i !arr !acc
-        | i < n =
-            Array.unsafeGet i arr & \case
-              (Ur (Just (Raw.RobinVal !_ !k !v)), !arr) ->
-                go (i + 1) arr (DL.snoc acc (k, v))
-              (Ur Nothing, !arr) -> go (i + 1) arr acc
-        | otherwise = unsafeLeak arr `lseq` Ur (DL.toList acc)
-   in go 0 robinArr P.mempty
+rawToList' = Raw.toList
