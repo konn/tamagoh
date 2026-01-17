@@ -345,7 +345,6 @@ deleteFrom Location {..} (HashMap size capa maxDIB slots) = go foundAt slots
 {-# INLINE probeForInsert #-}
 probeForInsert ::
   forall k v.
-  (Hashable k) =>
   k -> v -> ProbeSuspended -> HashMap k v %1 -> HashMap k v
 probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB slots)
   | dibAtMiss P.> maxDibLimit || fromIntegral (size + 1) / fromIntegral capa >= maxLoadFactor =
@@ -422,13 +421,6 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB slots)
                     if newDib P.== maxDibLimit P.- 1
                       then grow size capa newFp newK newV slots
                       else go size capa curMaxDIB newFp (newDib + 1) newK newV (i + 1) slots
-
-{- | Fast insertion when we know key doesn't exist (used during rehash).
-Skips key equality checks since all keys are guaranteed unique.
--}
-{-# INLINE insertFresh #-}
-insertFresh :: (Hashable k) => k -> v -> HashMap k v %1 -> HashMap k v
-insertFresh !k = insertFreshWithFingerprint (fingerprint k) k
 
 -- | Fast insertion with pre-computed fingerprint (avoids rehashing during rehashInto)
 {-# INLINE insertFreshWithFingerprint #-}
