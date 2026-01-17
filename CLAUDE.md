@@ -35,3 +35,9 @@ Before you do the performance tuning, you must first take the corresponding benc
 - DO NOT inspect under `dist-newstyle` unless you are looking for `.ddump-*` file emitted by GHC. The directory is a build cache, and it is quite difficult to gain the sensible information from there.
 - GitHub repository for non-hackage packages can be read from @cabal.project
 
+### Testing & Benchmarking
+
+- Test suite and benchmarking suite is defined in `*.cabal` files.
+- To run test suite, use `cabal test ...`; for benchmarks `cabal bench ...`.
+  + You can use as many `--test-options=".."` (multiple options separated by white spaces) and `--test-option=".."` (as a single option containing whites paces) to pass the test option(s).
+  + The same applies to `--benchmark-options` and `--benchmark-option`.
