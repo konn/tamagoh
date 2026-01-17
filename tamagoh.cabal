@@ -224,3 +224,22 @@ benchmark tamagoh-bench-math
     -threaded
     -rtsopts
     -with-rtsopts=-N
+
+benchmark tamagoh-bench-hashmap
+  import: defaults
+  type: exitcode-stdio-1.0
+  hs-source-dirs: bench
+  main-is: hashmap.hs
+  build-depends:
+    deepseq,
+    hashable,
+    linear-base,
+    linear-witness,
+    pure-borrow,
+    tamagoh,
+    tasty-bench,
+
+  ghc-options:
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N

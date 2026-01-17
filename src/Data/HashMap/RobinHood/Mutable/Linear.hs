@@ -111,11 +111,13 @@ newtype instance U.Vector IndexInfo = V_IndexInfo (U.Vector Word8)
 
 newtype instance U.MVector s IndexInfo = MV_IndexInfo (U.MVector s Word8)
 
+{-# INLINE viewIndexInfo #-}
 viewIndexInfo :: IndexInfo %1 -> Maybe DIB
-viewIndexInfo = Unsafe.toLinear \(IndexInfo dib) ->
-  if dib .&. 0b1000_0000 P.== 0
-    then Just (DIB dib)
-    else Nothing
+viewIndexInfo =
+  Unsafe.toLinear \(IndexInfo dib) ->
+    if dib .&. 0b1000_0000 P.== 0
+      then Just (DIB dib)
+      else Nothing
 
 pattern Present :: DIB -> IndexInfo
 pattern Present dib <- (viewIndexInfo -> Just dib)
@@ -127,6 +129,7 @@ decrement :: IndexInfo -> IndexInfo
 decrement Absent = Absent
 decrement p = coerce (P.- (1 :: Word8)) p
 
+{-# INLINE isStopIndex #-}
 isStopIndex :: IndexInfo -> P.Bool
 isStopIndex (IndexInfo dib) = dib .&. 0b0111_1111 P.== 0
 
@@ -357,6 +360,7 @@ unsafeSwapUnboxed i j vec =
       vec <- LUV.unsafeSet i xj vec
       LUV.unsafeSet j xi vec
 
+{-# INLINE probeForInsert #-}
 probeForInsert ::
   forall k v.
   (Hashable k) =>
@@ -369,16 +373,37 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
           idcs <- LUV.unsafeSet offset (Present dibAtMiss) idcs
           kvs <- LV.unsafeSet offset (Strict.Just (Entry k v)) kvs
           HashMap (size + 1) capa (maxDIB P.<> Max dibAtMiss) idcs kvs
-        Paused -> DataFlow.do
-          go maxDIB dibAtMiss (Entry k v) offset idcs kvs
+        Paused
+          -- Use cachedIndexInfo to avoid re-reading at offset
+          | offset == physCapa -> grow (Entry k v) idcs kvs
+          | otherwise ->
+              case cachedIndexInfo of
+                Absent ->
+                  -- Found a vacant spot (shouldn't happen in Paused, but handle it)
+                  DataFlow.do
+                    !idcs <- LUV.unsafeSet offset (Present dibAtMiss) idcs
+                    !kvs <- LV.unsafeSet offset (Strict.Just (Entry k v)) kvs
+                    HashMap (size + 1) capa (maxDIB P.<> Max dibAtMiss) idcs kvs
+                Present existingDib ->
+                  if existingDib P.< dibAtMiss
+                    then
+                      LV.unsafeGet offset kvs & \(Ur (Strict.fromJust -> nextEntry), kvs) ->
+                        DataFlow.do
+                          -- Takes from the rich and gives to the poor
+                          !idcs <- LUV.unsafeSet offset (Present dibAtMiss) idcs
+                          !kvs <- LV.unsafeSet offset (Strict.Just (Entry k v)) kvs
+                          go (Max dibAtMiss P.<> maxDIB) (existingDib + 1) nextEntry (offset + 1) idcs kvs
+                    else
+                      if dibAtMiss P.== maxDibLimit P.- 1
+                        then grow (Entry k v) idcs kvs
+                        else go maxDIB (dibAtMiss + 1) (Entry k v) (offset + 1) idcs kvs
   where
     grow :: Entry k v -> LUV.Vector IndexInfo %1 -> KVs k v %1 -> HashMap k v
-    grow (Entry !k !v) idcs kvs =
+    grow newEntry idcs kvs =
+      {-# SCC "grow" #-}
       withLinearly kvs & \(lin, kvs) ->
-        case toList (HashMap size capa maxDIB idcs kvs) of
-          Ur lst ->
-            let !newCapa = capa * 2
-             in insertMany ((k, v) : lst) (new newCapa lin)
+        rehashInto size physCapa newEntry 0 0 idcs kvs (new (capa * 2) lin)
+
     physCapa = capa + fromIntegral maxDibLimit
 
     go ::
@@ -394,30 +419,56 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB idcs kvs)
     go !curMaxDIB !newDib !newEntry !i !idcs !kvs
       | i == physCapa = grow newEntry idcs kvs
       | otherwise =
-          LUV.unsafeGet i idcs & \case
-            (Ur Absent, idcs) ->
-              -- Found a vacant spot
-              DataFlow.do
-                !idcs <- LUV.unsafeSet i (Present newDib) idcs
-                !kvs <- LV.unsafeSet i (Strict.Just newEntry) kvs
-                HashMap (size + 1) capa (curMaxDIB P.<> Max newDib) idcs kvs
-            (Ur (Present existingDib), idcs) ->
-              -- Occupied, need to compare DIBs
-              if existingDib P.< newDib
-                then
-                  LV.unsafeGet i kvs & \(Ur (Strict.fromJust -> nextEntry), kvs) ->
-                    DataFlow.do
-                      -- Takes from the rich and gives to the poor
-                      !idcs <- LUV.unsafeSet i (Present newDib) idcs
-                      !kvs <- LV.unsafeSet i (Strict.Just newEntry) kvs
-                      -- existingDib < newDib
-                      -- <==> existingDib +1 <= newDib <= maxDibLimit
-                      -- hence the invariant met.
-                      go (Max newDib P.<> curMaxDIB) (existingDib + 1) nextEntry (i + 1) idcs kvs
-                else
-                  if newDib P.== maxDibLimit P.- 1
-                    then grow newEntry idcs kvs
-                    else go curMaxDIB (newDib + 1) newEntry (i + 1) idcs kvs
+          LUV.unsafeGet i idcs
+            & \case
+              (Ur Absent, idcs) ->
+                -- Found a vacant spot
+                DataFlow.do
+                  !idcs <- LUV.unsafeSet i (Present newDib) idcs
+                  !kvs <- LV.unsafeSet i (Strict.Just newEntry) kvs
+                  HashMap (size + 1) capa (curMaxDIB P.<> Max newDib) idcs kvs
+              (Ur (Present existingDib), idcs) ->
+                -- Occupied, need to compare DIBs
+                if existingDib P.< newDib
+                  then
+                    LV.unsafeGet i kvs & \(Ur (Strict.fromJust -> nextEntry), kvs) ->
+                      DataFlow.do
+                        -- Takes from the rich and gives to the poor
+                        !idcs <- LUV.unsafeSet i (Present newDib) idcs
+                        !kvs <- LV.unsafeSet i (Strict.Just newEntry) kvs
+                        -- existingDib < newDib
+                        -- <==> existingDib +1 <= newDib <= maxDibLimit
+                        -- hence the invariant met.
+                        go (Max newDib P.<> curMaxDIB) (existingDib + 1) nextEntry (i + 1) idcs kvs
+                  else
+                    if newDib P.== maxDibLimit P.- 1
+                      then grow newEntry idcs kvs
+                      else go curMaxDIB (newDib + 1) newEntry (i + 1) idcs kvs
+
+-- | Direct rehash: iterate over old arrays and insert into new map
+rehashInto ::
+  (Hashable k) =>
+  Int ->  -- size of old map
+  Int ->  -- physCapa of old map
+  Entry k v ->
+  Int ->  -- current index
+  Int ->  -- count of elements processed
+  LUV.Vector IndexInfo %1 ->
+  KVs k v %1 ->
+  HashMap k v %1 ->
+  HashMap k v
+rehashInto !oldSize !oldPhysCapa (Entry !k !v) !i !count !idcs !kvs !newMap
+  | count == oldSize || i >= oldPhysCapa =
+      -- Done iterating old map, insert the new entry and consume old arrays
+      idcs `lseq` kvs `lseq` uncurry lseq (insert k v newMap)
+  | otherwise =
+      LV.unsafeGet i kvs & \case
+        (Ur (Strict.Just (Entry k' v')), kvs') ->
+          -- Found an entry, insert it into new map
+          rehashInto oldSize oldPhysCapa (Entry k v) (i + 1) (count + 1) idcs kvs' (uncurry lseq (insert k' v' newMap))
+        (Ur Strict.Nothing, kvs') ->
+          -- Empty slot, skip
+          rehashInto oldSize oldPhysCapa (Entry k v) (i + 1) count idcs kvs' newMap
 
 lookup :: (Hashable k) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 lookup k hm =
@@ -456,6 +507,7 @@ data ProbeSuspended = ProbeSuspended
   , offset :: {-# UNPACK #-} !Int
   , endType :: !EndType
   , dibAtMiss :: {-# UNPACK #-} !DIB
+  , cachedIndexInfo :: {-# UNPACK #-} !IndexInfo  -- ^ Avoid re-read in probeForInsert
   }
 
 newtype EndType = EndType (# (# #) | (# #) #)
@@ -468,11 +520,12 @@ pattern Paused = EndType (# | (# #) #)
 
 {-# COMPLETE Paused, Vacant #-}
 
+{-# INLINE probeKeyForAlter #-}
 probeKeyForAlter :: (Hashable k) => k -> HashMap k v %1 -> (# LookupResult v, HashMap k v #)
 probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
   go start 0 idcs kvs
   where
-    !start = hash k `mod` capa
+    !start = hash k .&. (capa - 1)
     !physCapa = capa + fromIntegral maxDibLimit
     go :: Int -> DIB -> LUV.Vector IndexInfo %1 -> KVs _ _ %1 -> (# LookupResult _, HashMap _ _ #)
     go !idx !dib !idcs !kvs
@@ -484,6 +537,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                 , offset = idx
                 , endType = Paused
                 , dibAtMiss = dib
+                , cachedIndexInfo = Absent  -- dummy: always triggers grow
                 }
             , HashMap size capa maxDIB idcs kvs
           #)
@@ -499,6 +553,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                       , offset = idx
                       , endType
                       , dibAtMiss = dib
+                      , cachedIndexInfo = p
                       }
                   , HashMap size capa maxDIB idcs kvs
                 #)
@@ -512,6 +567,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                     , offset = idx
                     , endType = Vacant
                     , dibAtMiss = dib
+                    , cachedIndexInfo = Absent
                     }
                 , HashMap size capa maxDIB idcs kvs
               #)
@@ -531,6 +587,7 @@ probeKeyForAlter k (HashMap size capa maxDIB idcs kvs) =
                             , offset = idx
                             , endType = Paused
                             , dibAtMiss = dib
+                            , cachedIndexInfo = indexInfo
                             }
                         , HashMap size capa maxDIB idcs kvs
                       #)
