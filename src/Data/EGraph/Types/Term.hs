@@ -1,9 +1,11 @@
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Data.EGraph.Types.Term (
-  Term,
+  Term (..),
   wrapTerm,
   unwrapTerm,
   Matchable (..),
@@ -11,23 +13,49 @@ module Data.EGraph.Types.Term (
   genericTryMatch,
 ) where
 
+import Control.DeepSeq (NFData, NFData1)
 import Control.Monad (guard)
 import Data.Coerce (coerce)
 import Data.FMList (FMList)
 import Data.FMList qualified as FML
-import Data.Fix
+import Data.Functor.Classes (Eq1, Ord1, Show1 (liftShowsPrec))
+import Data.Functor.Foldable
+import Data.Hashable (Hashable)
+import Data.Hashable.Lifted (Hashable1)
 import Data.Kind
 import GHC.Generics
 import GHC.Generics qualified as GHC
 import Generics.Linear
 
-type Term l = Fix l
+newtype Term l = Term {unTerm :: l (Term l)}
+  deriving (GHC.Generic)
 
 wrapTerm :: l (Term l) -> Term l
-wrapTerm = Fix
+wrapTerm = coerce
 
 unwrapTerm :: Term l -> l (Term l)
-unwrapTerm (Fix l) = l
+unwrapTerm = coerce
+
+deriving newtype instance (Eq1 l) => Eq (Term l)
+
+deriving newtype instance (Ord1 l) => Ord (Term l)
+
+deriving newtype instance (NFData1 l) => NFData (Term l)
+
+deriving newtype instance (Hashable1 l) => Hashable (Term l)
+
+instance (Show1 l) => Show (Term l) where
+  showsPrec p (Term l) = liftShowsPrec showsPrec showList p l
+
+type instance Base (Term l) = l
+
+instance (Functor l) => Recursive (Term l) where
+  project = coerce
+  {-# INLINE project #-}
+
+instance (Functor l) => Corecursive (Term l) where
+  embed = coerce
+  {-# INLINE embed #-}
 
 type GenericMatchable f = (GHC.Generic1 f, Matchable (GHC.Rep1 f))
 

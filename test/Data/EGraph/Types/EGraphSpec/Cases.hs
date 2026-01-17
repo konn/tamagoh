@@ -52,16 +52,16 @@ data Expr l = Add l l | Mul l l | Lit Int | Var String
 deriveLanguage ''Expr
 
 add :: Term Expr %1 -> Term Expr %1 -> Term Expr
-add x y = Fix $ Add x y
+add x y = Term $ Add x y
 
 mul :: Term Expr %1 -> Term Expr %1 -> Term Expr
-mul x y = Fix $ Mul x y
+mul x y = Term $ Mul x y
 
 lit :: Int %1 -> Term Expr
-lit = Fix . Lit
+lit = Term . Lit
 
 var :: String %1 -> Term Expr
-var = Fix . Var
+var = Term . Var
 
 instance Additive (Term Expr) where
   (+) = add

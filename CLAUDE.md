@@ -41,3 +41,13 @@ Before you do the performance tuning, you must first take the corresponding benc
 - To run test suite, use `cabal test ...`; for benchmarks `cabal bench ...`.
   + You can use as many `--test-options=".."` (multiple options separated by white spaces) and `--test-option=".."` (as a single option containing whites paces) to pass the test option(s).
   + The same applies to `--benchmark-options` and `--benchmark-option`.
+
+### Debugging
+
+- When you do printf-debugging with `Debug.Trace.trace`, output is printed when the thunk is evaluated, and this needs careful calling of `Debug.Trace.trace`. Here are rule of
+  thumbs:
+  1. When you are in do-expression, insert `!() <- trace "<error message>" (pure ())
+  + when you are under `Control.do`, use `Control.pure ()` instead of unprefixed `pure`
+  + when you are under `DataFlow.do`, use plain `()` without `pure`.
+  1. When the logging should occur right before/after or in-between let-binds, use `let !() = trace <message> ()`
+  2. If you really need to wrap non-unit value with `trace` and it is a linearly bound, use variants from `Debug.Trace.Linear`.

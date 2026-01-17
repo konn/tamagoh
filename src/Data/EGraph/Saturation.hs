@@ -35,6 +35,10 @@ module Data.EGraph.Saturation (
   CostModel (..),
   SideCondition (..),
   MatchInfo (..),
+
+  -- * Scheduler (re-exports)
+  BackoffScheduler (..),
+  defaultScheduler,
 ) where
 
 import Algebra.Semilattice
@@ -47,19 +51,17 @@ import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Borrow.Pure.Utils (forRebor2_)
 import Control.Monad.Trans.Maybe (MaybeT (..))
-import Control.Monad.Trans.Writer.CPS (execWriter, tell)
 import Data.Coerce.Directed (upcast)
 import Data.Deriving (deriveShow1)
 import Data.EGraph.EMatch.Relational (ematchDb)
 import Data.EGraph.EMatch.Relational.Database (Database, buildDatabase)
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types (Substitution (..), substPattern)
+import Data.EGraph.Saturation.Scheduler
 import Data.EGraph.Types
 import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.Language
-import Data.FMList qualified as FML
 import Data.Foldable qualified as F
-import Data.Foldable qualified as P
 import Data.Function ((&))
 import Data.Functor.Classes
 import Data.Generics.Labels ()
@@ -67,6 +69,7 @@ import Data.HashMap.Strict qualified as PHM
 import Data.HashSet qualified as HashSet
 import Data.Hashable
 import Data.Hashable.Lifted (Hashable1)
+import Data.IntMap.Strict qualified as IM
 import Data.Maybe (mapMaybe)
 import Data.Record.Linear
 import Data.Ref.Linear (freeRef)
@@ -79,7 +82,7 @@ import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
 import GHC.Generics (Generic, Generic1)
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
-import Prelude.Linear (Consumable (consume), Dupable, Movable, Ur (..), consume, lseq)
+import Prelude.Linear (Consumable (consume), Dupable, Movable, Ur (..), consume, lseq, move)
 import Prelude.Linear qualified as PL
 import Text.Show.Borrowed (AsCopyableShow (..), Display)
 import Validation (Validation (..))
@@ -160,11 +163,21 @@ compileRule Rule {..} = do
 data SaturationConfig = SaturationConfig
   { maxIterations :: {-# UNPACK #-} !(Maybe Word)
   , nodeLimit :: {-# UNPACK #-} !(Maybe Int)
+  , scheduler :: !(Maybe BackoffScheduler)
+  {- ^ Optional backoff scheduler to prevent rule explosion.
+  When 'Nothing', no scheduling is applied (all rules run every iteration).
+  When 'Just', rules that produce too many matches get temporarily banned.
+  -}
   }
   deriving (Show, Eq, Ord, Generic)
 
 defaultConfig :: SaturationConfig
-defaultConfig = SaturationConfig {maxIterations = Just 30, nodeLimit = Just 10_000}
+defaultConfig =
+  SaturationConfig
+    { maxIterations = Just 30
+    , nodeLimit = Just 10_000
+    , scheduler = Just defaultScheduler
+    }
 
 saturate ::
   forall d l v α.
@@ -173,38 +186,87 @@ saturate ::
   [CompiledRule l d v] ->
   Mut α (EGraph d l) %1 ->
   BO α (Mut α (EGraph d l))
-saturate config rules = go (St.toStrict config.maxIterations)
+saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
   where
-    go :: St.Maybe Word -> Mut α (EGraph d l) %1 -> BO α (Mut α (EGraph d l))
-    go (St.Just 0) !egraph = Control.pure egraph
-    go remaining egraph = Control.do
-      (Ur size, egraph) <- size <$~ egraph
-      if maybe False (size >) config.nodeLimit
+    indexedRules :: [(Int, CompiledRule l d v)]
+    indexedRules = zip [0 ..] rules
+
+    go ::
+      Int ->
+      SchedulerState ->
+      St.Maybe Word ->
+      Mut α (EGraph d l) %1 ->
+      BO α (Mut α (EGraph d l))
+    go !_ !_ (St.Just 0) !egraph = Control.pure egraph
+    go !iterNum !schedState remaining egraph = Control.do
+      (Ur currentSize, egraph) <- size <$~ egraph
+      (Ur numClasses, egraph) <- numEClasses <$~ egraph
+      if maybe False (currentSize >) config.nodeLimit
         then Control.pure egraph
         else Control.do
-          (Ur results, egraph) <- sharing egraph \egraph -> Control.do
+          (Ur (results, matchCounts), egraph) <- sharing egraph \egraph -> Control.do
             Ur db <- buildDatabase egraph
             Ur anals <- EC.analyses (egraph .# #classes)
-            Control.pure (Ur $ collect anals db)
+            -- Canonicalize the keys in analyses map to match database's canonical ids
+            Ur canonAnals <- canonicalizeAnalyses anals egraph
+            Control.pure (Ur $ collect iterNum schedState canonAnals db)
           if null results
-            then Control.pure egraph
+            then
+              -- Check if we're stuck due to banning - reset scheduler and try once more
+              if IM.null schedState
+                then Control.pure egraph
+                else go iterNum initialState remaining egraph
             else Control.do
-              (progress, egraph) <- substitute egraph results
-              if progress
+              (Ur _, egraph) <- substitute egraph results
+              -- Update scheduler state based on match counts
+              let !schedState' = case config.scheduler of
+                    Nothing -> schedState
+                    Just sched -> updateStats sched iterNum matchCounts schedState
+              -- Check if e-graph changed (size or class count) - like hegg
+              -- This is more robust than tracking only merges, because new nodes
+              -- may be added without immediately being merged (e.g., with stale hashcons)
+              (Ur sizeAfter, egraph) <- size <$~ egraph
+              (Ur classesAfter, egraph) <- numEClasses <$~ egraph
+              let !madeProgress = sizeAfter /= currentSize || classesAfter /= numClasses
+              if madeProgress
                 then Control.do
                   egraph <- rebuild egraph
-                  go (subtract 1 <$> remaining) egraph
+                  go (iterNum + 1) schedState' (subtract 1 <$> remaining) egraph
                 else Control.pure egraph
 
+    -- Collect matches, respecting scheduler bans.
+    -- Rules are limited to their threshold to prevent explosion.
+    -- Returns (matches, match counts per rule for scheduler update)
     collect ::
+      Int ->
+      SchedulerState ->
       PHM.HashMap EClassId ([ENode l], d) ->
       Database l ->
-      [Ur (EClassId, Substitution v, CompiledRule l d v)]
-    collect analyses db =
-      FML.toList $! execWriter do
-        P.forM_ rules \rule@CompiledRule {..} -> do
-          let matches = ematchDb lhs db
-          tell . FML.fromList $ mapMaybe (check analyses rule) matches
+      ([Ur (EClassId, Substitution v, CompiledRule l d v)], [(Int, Int)])
+    collect iterNum schedState analyses db =
+      let (matchesList, countsList) = unzip $ flip map indexedRules \(ruleIdx, rule@CompiledRule {..}) ->
+            -- Check if rule is banned
+            let banned = case config.scheduler of
+                  Nothing -> False
+                  Just _ -> isBanned iterNum ruleIdx schedState
+             in if banned
+                  then ([], (ruleIdx, 0))
+                  else
+                    let matches = ematchDb lhs db
+                        allValidMatches = mapMaybe (check analyses rule) matches
+                        -- Get threshold for this rule (increases with bans)
+                        threshold = case config.scheduler of
+                          Nothing -> maxBound -- No limit
+                          Just BackoffScheduler {matchLimit} ->
+                            let timesBanned = case IM.lookup ruleIdx schedState of
+                                  Nothing -> 0
+                                  Just RuleStat {timesBanned = tb} -> tb
+                             in matchLimit * (2 ^ timesBanned)
+                        -- Limit matches to threshold to prevent explosion
+                        limitedMatches = take threshold allValidMatches
+                        actualCount = length allValidMatches
+                     in (limitedMatches, (ruleIdx, actualCount))
+       in (concat matchesList, countsList)
 
     check analyses rule (eid, subs) =
       case rule.condition of
@@ -224,7 +286,7 @@ saturate config rules = go (St.toStrict config.maxIterations)
     substitute ::
       Mut α (EGraph d l) %1 ->
       [Ur (EClassId, Substitution v, CompiledRule l d v)] %1 ->
-      BO α (Bool, Mut α (EGraph d l))
+      BO α (Ur Bool, Mut α (EGraph d l))
     substitute egraph results = reborrowing' egraph \egraph -> Control.do
       !(var, lend) <- asksLinearly PL.$ borrowLinearOnly PL.. Ref.new False
       (var, egraph) <- forRebor2_ var egraph results \var egraph (Ur (eid, subs, CompiledRule {..})) ->
@@ -237,7 +299,7 @@ saturate config rules = go (St.toStrict config.maxIterations)
               Merged {} -> Control.void PL.$ modifyRef (`lseq` True) var
               AlreadyMerged {} -> Control.pure PL.$ consume var
             Control.pure (consume egraph)
-      Control.pure \end -> var `lseq` egraph `lseq` freeRef (reclaim lend (upcast end))
+      Control.pure \end -> var `lseq` egraph `lseq` move (freeRef (reclaim lend (upcast end)))
 
 addNestedENode ::
   forall d l α.
@@ -256,6 +318,29 @@ addNestedENode pat egraph =
     go (PNode p) = do
       eids <- ENode <$> P.traverse go p
       UrT PL.$ StateT \egraph -> addCanonicalNode eids egraph
+
+{- | Canonicalize the keys in the analyses map.
+This is necessary because e-matching returns canonical e-class ids,
+but the analyses map from EC.analyses uses original ids.
+After merges, we need to ensure lookups by canonical id succeed.
+-}
+canonicalizeAnalyses ::
+  forall d l bk α m.
+  (Semilattice d) =>
+  PHM.HashMap EClassId ([ENode l], d) ->
+  Borrow bk α (EGraph d l) %m ->
+  BO α (Ur (PHM.HashMap EClassId ([ENode l], d)))
+canonicalizeAnalyses anals egraph =
+  share egraph PL.& \(Ur egraph) -> runUrT do
+    let entries = PHM.toList anals
+    canonEntries <- Traverse.forM entries \(eid, val) -> do
+      canonEid <- UrT $ unsafeFind egraph eid
+      P.pure (canonEid, val)
+    -- Merge entries with the same canonical id (combine nodes and join analysis)
+    P.pure $ PHM.fromListWith mergeEntries canonEntries
+  where
+    mergeEntries :: ([ENode l], d) -> ([ENode l], d) -> ([ENode l], d)
+    mergeEntries (nodes1, d1) (nodes2, d2) = (nodes1 <> nodes2, d1 /\ d2)
 
 newtype ExtractBest l cost = ExtractBest
   { optimal :: ArgMin cost (ENode l)

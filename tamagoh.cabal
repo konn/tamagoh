@@ -93,6 +93,7 @@ library
     Data.EGraph.EMatch.Types
     Data.EGraph.Immutable
     Data.EGraph.Saturation
+    Data.EGraph.Saturation.Scheduler
     Data.EGraph.Types
     Data.EGraph.Types.EClassId
     Data.EGraph.Types.EClasses

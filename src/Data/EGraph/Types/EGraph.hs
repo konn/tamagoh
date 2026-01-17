@@ -64,8 +64,8 @@ import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.EGraph.Internal
 import Data.EGraph.Types.ENode
 import Data.EGraph.Types.Term
-import Data.Fix (foldFixM)
 import Data.Foldable1 (Foldable1, foldlM1)
+import Data.Functor.Foldable (cataA)
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen qualified as FHMUr
@@ -101,12 +101,12 @@ addTerm term egraph = Control.do
   (Ur node, egraph) <-
     flip runStateT egraph $
       runUrT $
-        foldFixM
+        cataA
           ( \nodes ->
-              ENode
-                P.<$> P.traverse
+              P.fmap ENode
+                P.. P.traverse
                   (\node -> UrT $ StateT $ addCanonicalNode node)
-                  nodes
+                P.=<< P.sequenceA nodes
           )
           term
   (Ur eid, egraph) <- addCanonicalNode node egraph
@@ -140,8 +140,11 @@ lookupTerm ::
 lookupTerm term egraph =
   share egraph & \(Ur egraph) -> Control.do
     let go term =
-          foldFixM
-            (\t -> MaybeT $ UrT (lookup (ENode t) egraph))
+          cataA
+            ( \t -> do
+                t <- P.sequenceA t
+                MaybeT $ UrT (lookup (ENode t) egraph)
+            )
             term
     runUrT $ runMaybeT (go term)
 

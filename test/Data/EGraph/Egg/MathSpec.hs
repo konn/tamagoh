@@ -18,7 +18,8 @@ module Data.EGraph.Egg.MathSpec (module Data.EGraph.Egg.MathSpec) where
 import Control.Exception (throwIO)
 import Data.EGraph.Immutable
 import Data.Maybe (isNothing)
-import Tamagoh.Bench.Math hiding (Rule, named, (==>))
+import Tamagoh.Bench.Math hiding (Rule, named, (==>), (@?))
+import Tamagoh.Bench.Math qualified as Bench (BenchCost)
 import Test.Tasty
 import Test.Tasty.ExpectedFailure (expectFailBecause)
 import Test.Tasty.HUnit
@@ -30,6 +31,13 @@ simple = defaultConfig
 
 theRules :: [Rule Math ConstantFold String]
 theRules = mathRulesTamagoh
+
+-- | Analysis type that enables extraction
+type ExtractAnalysis = (ExtractBest Math Bench.BenchCost, ConstantFold)
+
+-- | Rules for extraction tests
+extractRules :: [Rule Math ExtractAnalysis String]
+extractRules = mathRulesTamagoh
 
 test_Math :: TestTree
 test_Math =
@@ -50,6 +58,38 @@ test_Math =
           graph <- either throwIO pure $ saturate simple {maxIterations = Just 8} rules $ fromList [lhs]
           equivalent graph lhs rhs @?= Just True
           numEClasses graph @?= 127
+      , testCase "sub_canon_simple" do
+          -- Test that sub-canon rule works: a - b ==> a + (-1 * b)
+          let x = var "x"
+              lhs = 0 - x
+              expected = 0 + ((-1) * x) :: Term Math
+              zeroMinusOne = sub (lit 0) (lit 1) :: Term Math
+              subCanonRule :: [Rule Math ConstantFold String]
+              subCanonRule = [named "sub-canon" $ Metavar "a" - Metavar "b" ==> Metavar "a" + ((-1) * Metavar "b")]
+          !graph <-
+            either throwIO pure $
+              saturate simple {maxIterations = Just 5} subCanonRule $
+                fromList [lhs, zeroMinusOne]
+          lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+          case lookupTerm expected graph of
+            Just eid -> do
+              equivalent graph lid eid @?= Just True
+            Nothing -> assertFailure "expected term not found"
+      , testCase "d_variable_rule" do
+          -- Test that diff(x, x) ==> 1 works (WITHOUT side condition)
+          let x = var "x"
+              lhs = diff x x
+              rhs = 1 :: Term Math
+              -- Rule without side condition first to test pattern matching
+              dVarRule :: [Rule Math ConstantFold String]
+              dVarRule = [named "d-variable" $ diff (Metavar "x") (Metavar "x") ==> 1]
+          !graph <-
+            either throwIO pure $
+              saturate simple {maxIterations = Just 10} dVarRule $
+                fromList [lhs]
+          lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+          rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+          equivalent graph lid rid @?= Just True
       , testCaseSteps "math_fail" \step -> do
           !graph <-
             either throwIO pure $
@@ -125,7 +165,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , expectFailBecause "TIMEOUT" $ testCase "math_diff_different" do
+      , testCase "math_diff_different" do
           let x = var "x"
               y = var "y"
               lhs = diff x y
@@ -160,7 +200,7 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
-      , expectFailBecause "TIMEOUT" $ testCase "math_diff_ln" do
+      , testCase "math_diff_ln" do
           let x = var "x"
               lhs = diff x (lnE x)
               rhs = 1 / x
@@ -240,14 +280,18 @@ test_Math =
       , testCase "integ_part2" do
           let x = var "x"
               lhs = integral (cos x * x) x
-              rhs = (x * sin x) + cos x
+              expectedRhs = (x * sin x) + cos x
+              -- No scheduler - need all rules to find simplification
+              cfg = simple {nodeLimit = Just 50_000, maxIterations = Just 100, scheduler = Nothing}
           !graph <-
             either throwIO pure $
-              saturate simple theRules $
-                fromList [lhs]
+              saturate cfg extractRules $
+                fromList @ExtractAnalysis [lhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
-          rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
-          equivalent graph lid rid @?= Just True
+          -- Extract the best term and compare to expected
+          (extracted, _cost) <- maybe (assertFailure "extraction failed") pure $ extractBest lid graph
+          -- The extracted term should equal the expected RHS
+          extracted @?= expectedRhs
       , testCase "integ_part3" do
           let x = var "x"
               lhs = integral (lnE x) x

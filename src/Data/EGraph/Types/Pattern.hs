@@ -21,7 +21,6 @@ import Data.EGraph.Types.EGraph
 import Data.EGraph.Types.ENode
 import Data.EGraph.Types.Term
 import Data.FMList qualified as FML
-import Data.Fix (Fix (unFix))
 import Data.Foldable qualified as F
 import Data.Functor.Classes (Eq1, Ord1, Show1)
 import Data.Functor.Foldable (Base, Corecursive (..))
@@ -59,7 +58,7 @@ embedTerm = PNode . fmap embedTerm . unwrapTerm
 
 matchOneStep :: (Matchable l) => Pattern l v -> Term l -> Maybe [(Pattern l v, Term l)]
 matchOneStep p@Metavar {} = Just . pure . (p,)
-matchOneStep (PNode p) = fmap (F.toList) . tryMatch p . unFix
+matchOneStep (PNode p) = fmap (F.toList) . tryMatch p . unwrapTerm
 
 matchNode ::
   (Matchable l) =>
