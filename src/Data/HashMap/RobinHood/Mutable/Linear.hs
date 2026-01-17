@@ -85,38 +85,52 @@ newtype instance U.Vector DIB = V_DIB (U.Vector Word8)
 
 newtype instance U.MVector s DIB = MV_DIB (U.MVector s Word8)
 
--- | A slot in the hash table, combining DIB with key-value pair
+-- | Cached hash value for fast comparison and rehashing
+newtype Fingerprint = Fingerprint Int
+  deriving newtype (P.Eq, P.Ord, Show, Consumable, Dupable, Movable)
+
+-- | Compute fingerprint from hashable key
+{-# INLINE fingerprint #-}
+fingerprint :: (Hashable k) => k -> Fingerprint
+fingerprint = Fingerprint P.. hash
+
+-- | Get bucket index from fingerprint and capacity (must be power of 2)
+{-# INLINE fingerprintBucket #-}
+fingerprintBucket :: Fingerprint -> Int -> Int
+fingerprintBucket (Fingerprint h) capa = h .&. (capa - 1)
+
+-- | A slot in the hash table, combining fingerprint, DIB with key-value pair
 data Slot k v where
   Empty :: Slot k v
-  Occupied :: {-# UNPACK #-} !DIB -> !k -> !v %1 -> Slot k v
+  Occupied :: {-# UNPACK #-} !Fingerprint -> {-# UNPACK #-} !DIB -> !k -> !v %1 -> Slot k v
   deriving (Show)
 
 instance (Consumable v) => Consumable (Slot k v) where
   consume Empty = ()
-  consume (Occupied _ _ v) = consume v
+  consume (Occupied _ _ _ v) = consume v
   {-# INLINE consume #-}
 
 instance (Dupable v) => Dupable (Slot k v) where
   dup2 Empty = (Empty, Empty)
-  dup2 (Occupied dib k v) =
+  dup2 (Occupied fp dib k v) =
     let !(v1, v2) = dup2 v
-     in (Occupied dib k v1, Occupied dib k v2)
+     in (Occupied fp dib k v1, Occupied fp dib k v2)
   {-# INLINE dup2 #-}
 
 {-# INLINE isStopSlot #-}
 isStopSlot :: Slot k v -> P.Bool
 isStopSlot Empty = P.True
-isStopSlot (Occupied dib _ _) = dib P.== 0
+isStopSlot (Occupied _ dib _ _) = dib P.== 0
 
 {-# INLINE decrementSlot #-}
 decrementSlot :: Slot k v %1 -> Slot k v
 decrementSlot Empty = Empty
-decrementSlot (Occupied dib k v) = Occupied (dib P.- 1) k v
+decrementSlot (Occupied fp dib k v) = Occupied fp (dib P.- 1) k v
 
 {-# INLINE slotDIB #-}
 slotDIB :: Slot k v -> Maybe DIB
 slotDIB Empty = Nothing
-slotDIB (Occupied dib _ _) = Just dib
+slotDIB (Occupied _ dib _ _) = Just dib
 
 data HashMap k v where
   HashMap ::
@@ -148,9 +162,9 @@ deepClone = Unsafe.toLinear \dic@(HashMap size capa maxDIB slots) ->
           | i >= capa = acc
           | otherwise = case LV.unsafeGet i slots of
               (Ur Empty, _) -> go (i + 1) acc
-              (Ur (Occupied dib k v), _) ->
+              (Ur (Occupied fp dib k v), _) ->
                 dupLeak v & \v' ->
-                  go (i + 1) (LV.unsafeSet i (Occupied dib k v') acc)
+                  go (i + 1) (LV.unsafeSet i (Occupied fp dib k v') acc)
         slots2 = go 0 (LV.constantL (capa + fromIntegral maxDibLimit) Empty (fromPB lin))
      in (dic, HashMap size capa maxDIB slots2)
 
@@ -198,7 +212,7 @@ foldMapWithKey f (HashMap size capa _ slots) = go 0 0 slots mempty
       | count == size || i == physCapa = slots `lseq` acc
       | otherwise =
           LV.unsafeGet i slots & \case
-            (Ur (Occupied _ k v), slots') ->
+            (Ur (Occupied _ _ k v), slots') ->
               go (i + 1) (count + 1) slots' (acc <> f k v)
             (Ur Empty, slots') ->
               go (i + 1) count slots' acc
@@ -245,7 +259,7 @@ alter f k hm =
         (Just !v) ->
           -- Update in place
           hm & \(HashMap size capa maxDIB slots) -> DataFlow.do
-            slots <- LV.unsafeSet loc.foundAt (Occupied loc.slotDIB k v) slots
+            slots <- LV.unsafeSet loc.foundAt (Occupied loc.slotFp loc.slotDIB k v) slots
             HashMap size capa maxDIB slots
 
 size :: HashMap k v %1 -> (Ur Int, HashMap k v)
@@ -286,7 +300,7 @@ alterF f k hm =
         Ur (Just !v) ->
           -- Update in place
           hm & \(HashMap size capa maxDIB slots) -> DataFlow.do
-            slots <- LV.unsafeSet loc.foundAt (Occupied loc.slotDIB k v) slots
+            slots <- LV.unsafeSet loc.foundAt (Occupied loc.slotFp loc.slotDIB k v) slots
             HashMap size capa maxDIB slots
 
 data Swapper v a where
@@ -335,45 +349,46 @@ probeForInsert ::
   k -> v -> ProbeSuspended -> HashMap k v %1 -> HashMap k v
 probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB slots)
   | dibAtMiss P.> maxDibLimit || fromIntegral (size + 1) / fromIntegral capa >= maxLoadFactor =
-      grow size capa k v slots
+      grow size capa searchFp k v slots
   | otherwise = case endType of
       Vacant -> DataFlow.do
-        slots <- LV.unsafeSet offset (Occupied dibAtMiss k v) slots
+        slots <- LV.unsafeSet offset (Occupied searchFp dibAtMiss k v) slots
         HashMap (size + 1) capa (maxDIB P.<> Max dibAtMiss) slots
       Paused
-        | offset == physCapa -> grow size capa k v slots
+        | offset == physCapa -> grow size capa searchFp k v slots
         | otherwise -> case cachedDIB of
             Nothing ->
               -- Found a vacant spot (shouldn't happen in Paused, but handle it)
               DataFlow.do
-                slots <- LV.unsafeSet offset (Occupied dibAtMiss k v) slots
+                slots <- LV.unsafeSet offset (Occupied searchFp dibAtMiss k v) slots
                 HashMap (size + 1) capa (maxDIB P.<> Max dibAtMiss) slots
             Just existingDib ->
               if existingDib P.< dibAtMiss
                 then
                   LV.unsafeGet offset slots & \case
-                    (Ur (Occupied _ k' v'), slots) -> DataFlow.do
+                    (Ur (Occupied existingFp _ k' v'), slots) -> DataFlow.do
                       -- Takes from the rich and gives to the poor
-                      slots <- LV.unsafeSet offset (Occupied dibAtMiss k v) slots
-                      go size capa (Max dibAtMiss P.<> maxDIB) (existingDib + 1) k' v' (offset + 1) slots
+                      slots <- LV.unsafeSet offset (Occupied searchFp dibAtMiss k v) slots
+                      go size capa (Max dibAtMiss P.<> maxDIB) existingFp (existingDib + 1) k' v' (offset + 1) slots
                     (Ur Empty, slots) -> error "probeForInsert: impossible Empty slot" slots
                 else
                   if dibAtMiss P.== maxDibLimit P.- 1
-                    then grow size capa k v slots
-                    else go size capa maxDIB (dibAtMiss + 1) k v (offset + 1) slots
+                    then grow size capa searchFp k v slots
+                    else go size capa maxDIB searchFp (dibAtMiss + 1) k v (offset + 1) slots
   where
     physCapa :: Int
     physCapa = capa + fromIntegral maxDibLimit
 
-    grow :: Int -> Int -> k -> v -> Slots k v %1 -> HashMap k v
-    grow !size !capa newK newV slots =
+    grow :: Int -> Int -> Fingerprint -> k -> v -> Slots k v %1 -> HashMap k v
+    grow !size !capa !fp newK newV slots =
       withLinearly slots & \(lin, slots) ->
-        rehashInto size physCapa newK newV 0 0 slots (new (capa * 2) lin)
+        rehashInto size physCapa fp newK newV 0 0 slots (new (capa * 2) lin)
 
     go ::
       Int ->
       Int ->
       Max DIB ->
+      Fingerprint ->
       DIB ->
       k ->
       v ->
@@ -382,82 +397,87 @@ probeForInsert !k !v ProbeSuspended {..} (HashMap size capa maxDIB slots)
       HashMap k v
     -- Invariant: curMaxDIB <= maxDIBLimit
     -- Invariant: newDIB <= maxDibLimit
-    go !size !capa !curMaxDIB !newDib !newK !newV !i !slots =
+    go !size !capa !curMaxDIB !newFp !newDib !newK !newV !i !slots =
       if i == physCapa
-        then grow size capa newK newV slots
+        then grow size capa newFp newK newV slots
         else
           LV.unsafeGet i slots
             & \case
               (Ur Empty, slots) ->
                 -- Found a vacant spot
                 DataFlow.do
-                  slots <- LV.unsafeSet i (Occupied newDib newK newV) slots
+                  slots <- LV.unsafeSet i (Occupied newFp newDib newK newV) slots
                   HashMap (size + 1) capa (curMaxDIB P.<> Max newDib) slots
-              (Ur (Occupied existingDib k' v'), slots) ->
+              (Ur (Occupied existingFp existingDib k' v'), slots) ->
                 -- Occupied, need to compare DIBs
                 if existingDib P.< newDib
                   then DataFlow.do
                     -- Takes from the rich and gives to the poor
-                    slots <- LV.unsafeSet i (Occupied newDib newK newV) slots
+                    slots <- LV.unsafeSet i (Occupied newFp newDib newK newV) slots
                     -- existingDib < newDib
                     -- <==> existingDib +1 <= newDib <= maxDibLimit
                     -- hence the invariant met.
-                    go size capa (Max newDib P.<> curMaxDIB) (existingDib + 1) k' v' (i + 1) slots
+                    go size capa (Max newDib P.<> curMaxDIB) existingFp (existingDib + 1) k' v' (i + 1) slots
                   else
                     if newDib P.== maxDibLimit P.- 1
-                      then grow size capa newK newV slots
-                      else go size capa curMaxDIB (newDib + 1) newK newV (i + 1) slots
+                      then grow size capa newFp newK newV slots
+                      else go size capa curMaxDIB newFp (newDib + 1) newK newV (i + 1) slots
 
 {- | Fast insertion when we know key doesn't exist (used during rehash).
 Skips key equality checks since all keys are guaranteed unique.
 -}
 {-# INLINE insertFresh #-}
 insertFresh :: (Hashable k) => k -> v -> HashMap k v %1 -> HashMap k v
-insertFresh !k !v (HashMap size capa maxDIB slots) =
-  let !start = hash k .&. (capa - 1)
-      !physCapa = capa + fromIntegral maxDibLimit
-   in goFresh size capa physCapa maxDIB 0 k v start slots
+insertFresh !k = insertFreshWithFingerprint (fingerprint k) k
 
--- | Internal loop for insertFresh - probes for empty slot or Robin Hood displacement
-goFresh ::
-  (Hashable k) =>
+-- | Fast insertion with pre-computed fingerprint (avoids rehashing during rehashInto)
+{-# INLINE insertFreshWithFingerprint #-}
+insertFreshWithFingerprint :: Fingerprint -> k -> v -> HashMap k v %1 -> HashMap k v
+insertFreshWithFingerprint !fp !k !v (HashMap size capa maxDIB slots) =
+  let !start = fingerprintBucket fp capa
+      !physCapa = capa + fromIntegral maxDibLimit
+   in goFreshF size capa physCapa maxDIB 0 fp k v start slots
+
+-- | Internal loop for insertFreshWithFingerprint - probes for empty slot or Robin Hood displacement
+goFreshF ::
   Int -> -- size
   Int -> -- capa
   Int -> -- physCapa
   Max DIB -> -- current max DIB
   DIB -> -- current DIB for entry being inserted
+  Fingerprint -> -- fingerprint of entry being inserted
   k ->
   v ->
   Int -> -- current index
   Slots k v %1 ->
   HashMap k v
-goFresh !size !capa !physCapa !curMaxDIB !dib !k !v !i !slots
+goFreshF !size !capa !physCapa !curMaxDIB !dib !fp !k !v !i !slots
   | i == physCapa || dib P.> maxDibLimit =
       -- Need to grow - this shouldn't happen during normal rehash
       -- but handle it for safety
       withLinearly slots & \(lin, slots) ->
-        slots `lseq` insertFresh k v (new (capa * 2) lin)
+        slots `lseq` insertFreshWithFingerprint fp k v (new (capa * 2) lin)
   | otherwise =
       LV.unsafeGet i slots & \case
         (Ur Empty, slots') -> DataFlow.do
           -- Found empty slot, insert here
-          slots' <- LV.unsafeSet i (Occupied dib k v) slots'
+          slots' <- LV.unsafeSet i (Occupied fp dib k v) slots'
           HashMap (size + 1) capa (curMaxDIB P.<> Max dib) slots'
-        (Ur (Occupied existingDib k' v'), slots') ->
+        (Ur (Occupied existingFp existingDib k' v'), slots') ->
           if existingDib P.< dib
             then DataFlow.do
               -- Robin Hood: displace the existing entry
-              slots' <- LV.unsafeSet i (Occupied dib k v) slots'
-              goFresh size capa physCapa (curMaxDIB P.<> Max dib) (existingDib + 1) k' v' (i + 1) slots'
+              slots' <- LV.unsafeSet i (Occupied fp dib k v) slots'
+              goFreshF size capa physCapa (curMaxDIB P.<> Max dib) (existingDib + 1) existingFp k' v' (i + 1) slots'
             else
               -- Keep probing
-              goFresh size capa physCapa curMaxDIB (dib + 1) k v (i + 1) slots'
+              goFreshF size capa physCapa curMaxDIB (dib + 1) fp k v (i + 1) slots'
 
 -- | Direct rehash: iterate over old slots and insert into new map
 rehashInto ::
-  (Hashable k) =>
   Int -> -- size of old map
   Int -> -- physCapa of old map
+  Fingerprint -> -- fingerprint of key to insert
   k -> -- key to insert
   v -> -- value to insert
   Int -> -- current index
@@ -465,18 +485,18 @@ rehashInto ::
   Slots k v %1 ->
   HashMap k v %1 ->
   HashMap k v
-rehashInto !oldSize !oldPhysCapa !k !v !i !count !oldSlots !newMap
+rehashInto !oldSize !oldPhysCapa !fp !k !v !i !count !oldSlots !newMap
   | count == oldSize || i >= oldPhysCapa =
       -- Done iterating old map, insert the new entry and consume old slots
-      oldSlots `lseq` insertFresh k v newMap
+      oldSlots `lseq` insertFreshWithFingerprint fp k v newMap
   | otherwise =
       LV.unsafeGet i oldSlots & \case
-        (Ur (Occupied _ k' v'), oldSlots') ->
-          -- Found an entry, insert it into new map using fast path
-          rehashInto oldSize oldPhysCapa k v (i + 1) (count + 1) oldSlots' (insertFresh k' v' newMap)
+        (Ur (Occupied fp' _ k' v'), oldSlots') ->
+          -- Found an entry, insert it into new map using cached fingerprint
+          rehashInto oldSize oldPhysCapa fp k v (i + 1) (count + 1) oldSlots' (insertFreshWithFingerprint fp' k' v' newMap)
         (Ur Empty, oldSlots') ->
           -- Empty slot, skip
-          rehashInto oldSize oldPhysCapa k v (i + 1) count oldSlots' newMap
+          rehashInto oldSize oldPhysCapa fp k v (i + 1) count oldSlots' newMap
 
 lookup :: (Hashable k) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 lookup k hm =
@@ -499,6 +519,7 @@ delete k =
 type Location :: Type -> UnliftedType
 data Location v = Location
   { foundAt :: !Int
+  , slotFp :: {-# UNPACK #-} !Fingerprint
   , slotDIB :: {-# UNPACK #-} !DIB
   , val :: !v
   }
@@ -510,7 +531,9 @@ data LookupResult v where
 
 type ProbeSuspended :: UnliftedType
 data ProbeSuspended = ProbeSuspended
-  { initialBucket :: {-# UNPACK #-} !Int
+  { searchFp :: {-# UNPACK #-} !Fingerprint
+  -- ^ Fingerprint of the key being searched/inserted
+  , initialBucket :: {-# UNPACK #-} !Int
   , offset :: {-# UNPACK #-} !Int
   , endType :: !EndType
   , dibAtMiss :: {-# UNPACK #-} !DIB
@@ -533,7 +556,8 @@ probeKeyForAlter :: forall k v. (Hashable k) => k -> HashMap k v %1 -> (# Lookup
 probeKeyForAlter k (HashMap size capa maxDIB slots) =
   go start 0 slots
   where
-    !start = hash k .&. (capa - 1)
+    !searchFp = fingerprint k
+    !start = fingerprintBucket searchFp capa
     !physCapa = capa + fromIntegral maxDibLimit
     go :: Int -> DIB -> Slots k v %1 -> (# LookupResult v, HashMap k v #)
     go !idx !dib !slots
@@ -541,7 +565,8 @@ probeKeyForAlter k (HashMap size capa maxDIB slots) =
           (#
             NotFound
               ProbeSuspended
-                { initialBucket = start
+                { searchFp
+                , initialBucket = start
                 , offset = idx
                 , endType = Paused
                 , dibAtMiss = dib
@@ -557,7 +582,8 @@ probeKeyForAlter k (HashMap size capa maxDIB slots) =
              in (#
                   NotFound
                     ProbeSuspended
-                      { initialBucket = start
+                      { searchFp
+                      , initialBucket = start
                       , offset = idx
                       , endType
                       , dibAtMiss = dib
@@ -571,7 +597,8 @@ probeKeyForAlter k (HashMap size capa maxDIB slots) =
               (#
                 NotFound
                   ProbeSuspended
-                    { initialBucket = start
+                    { searchFp
+                    , initialBucket = start
                     , offset = idx
                     , endType = Vacant
                     , dibAtMiss = dib
@@ -579,23 +606,26 @@ probeKeyForAlter k (HashMap size capa maxDIB slots) =
                     }
                 , HashMap size capa maxDIB slots
               #)
-            (Ur (Occupied existingDib k' val), slots) ->
+            (Ur (Occupied slotFp existingDib k' val), slots) ->
               if
-                | k P.== k' ->
-                    (#
-                      Found Location {foundAt = idx, slotDIB = existingDib, val}
-                      , HashMap size capa maxDIB slots
-                    #)
                 | existingDib P.< dib ->
+                    -- Robin Hood early termination: key would have displaced this entry
                     (#
                       NotFound
                         ProbeSuspended
-                          { initialBucket = start
+                          { searchFp
+                          , initialBucket = start
                           , offset = idx
                           , endType = Paused
                           , dibAtMiss = dib
                           , cachedDIB = Just existingDib
                           }
+                      , HashMap size capa maxDIB slots
+                    #)
+                | slotFp P./= searchFp -> go (idx + 1) (dib + 1) slots -- fast reject on hash mismatch
+                | k P.== k' ->
+                    (#
+                      Found Location {foundAt = idx, slotFp, slotDIB = existingDib, val}
                       , HashMap size capa maxDIB slots
                     #)
                 | otherwise -> go (idx + 1) (dib + 1) slots

@@ -1,20 +1,42 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Main (main) where
 
-import Control.DeepSeq (force)
+import Control.DeepSeq (NFData, force)
 import Control.Exception (evaluate)
 import Control.Monad.Borrow.Pure (linearly)
 import Data.HashMap.Mutable.Linear qualified as LB
 import Data.HashMap.Mutable.Linear.Witness qualified as LB
 import Data.HashMap.RobinHood.Mutable.Linear qualified as RH
-import Data.Hashable (Hashable)
+import Data.Hashable (Hashable (..))
 import Data.Linear.Witness.Compat (fromPB)
+import GHC.Generics (Generic)
 import Prelude.Linear (Ur (..), lseq, unur, (&))
 import Prelude.Linear qualified as PL
 import Test.Tasty.Bench
+
+-- | Key with expensive equality but cheap hash.
+-- Hash only uses the prefix (Int), but Eq compares the full payload.
+data ExpensiveKey = ExpensiveKey
+  { ekPrefix :: {-# UNPACK #-} !Int
+  , ekPayload :: ![Int] -- expensive to compare
+  }
+  deriving (Show, Generic, NFData)
+
+instance Eq ExpensiveKey where
+  -- Force full payload comparison even if prefixes differ
+  ExpensiveKey p1 payload1 == ExpensiveKey p2 payload2 =
+    p1 == p2 && payload1 == payload2
+  {-# INLINE (==) #-}
+
+instance Hashable ExpensiveKey where
+  -- Only hash the prefix - cheap!
+  hashWithSalt s (ExpensiveKey p _) = hashWithSalt s p
+  {-# INLINE hashWithSalt #-}
 
 -- | Benchmark inserting N elements into an empty map
 benchInsertRH :: (Hashable k) => [(k, v)] -> [(k, v)]
@@ -67,12 +89,34 @@ benchLookupLB kvs keys = unur PL.$ LB.empty (length kvs) \hm ->
 mkTestData :: Int -> [(Int, Int)]
 mkTestData n = [(i, i) | i <- [1 .. n]]
 
+-- | Generate expensive key test data.
+-- Keys have unique prefixes but large payloads (100 elements each).
+-- This creates many hash collisions when prefixes collide mod capacity.
+mkExpensiveTestData :: Int -> [(ExpensiveKey, Int)]
+mkExpensiveTestData n =
+  [ (ExpensiveKey i [i .. i + 99], i)
+  | i <- [1 .. n]
+  ]
+
+-- | Generate expensive keys with hash collisions.
+-- All keys have the same prefix (same hash) but different payloads.
+-- This maximizes the benefit of fingerprint check since all slots
+-- have the same hash, forcing full equality checks without fingerprint.
+mkCollidingExpensiveTestData :: Int -> [(ExpensiveKey, Int)]
+mkCollidingExpensiveTestData n =
+  [ (ExpensiveKey 42 [i .. i + 99], i) -- all hash to same bucket!
+  | i <- [1 .. n]
+  ]
+
 main :: IO ()
 main = do
   let sizes = [100, 1000, 10000]
+  let smallSizes = [100, 1000] -- colliding is expensive, use smaller sizes
 
   -- Pre-generate test data
   testData <- mapM (\n -> evaluate $ force $ mkTestData n) sizes
+  expensiveData <- mapM (\n -> evaluate $ force $ mkExpensiveTestData n) sizes
+  collidingData <- mapM (\n -> evaluate $ force $ mkCollidingExpensiveTestData n) smallSizes
 
   defaultMain
     [ bgroup "insert" $
@@ -109,4 +153,39 @@ main = do
           )
           sizes
           testData
+    , bgroup "expensive-key-insert" $
+        zipWith
+          ( \n kvs ->
+              bgroup
+                (show n)
+                [ bench "robin-hood" $ nf benchInsertRH kvs
+                , bench "linear-base" $ nf benchInsertLB kvs
+                ]
+          )
+          sizes
+          expensiveData
+    , bgroup "expensive-key-lookup" $
+        zipWith
+          ( \n kvs ->
+              let keys = map fst kvs
+               in bgroup
+                    (show n)
+                    [ bench "robin-hood" $ nf (benchLookupRH kvs) keys
+                    , bench "linear-base" $ nf (benchLookupLB kvs) keys
+                    ]
+          )
+          sizes
+          expensiveData
+    , bgroup "colliding-expensive-key-lookup" $
+        zipWith
+          ( \n kvs ->
+              let keys = map fst kvs
+               in bgroup
+                    (show n)
+                    [ bench "robin-hood" $ nf (benchLookupRH kvs) keys
+                    , bench "linear-base" $ nf (benchLookupLB kvs) keys
+                    ]
+          )
+          smallSizes
+          collidingData
     ]
