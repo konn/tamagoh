@@ -87,7 +87,7 @@ newtype instance U.MVector s DIB = MV_DIB (U.MVector s Word8)
 -- | A slot in the hash table, combining DIB with key-value pair
 data Slot k v where
   Empty :: Slot k v
-  Occupied :: {-# UNPACK #-} !DIB -> !k -> !v -> Slot k v
+  Occupied :: {-# UNPACK #-} !DIB -> !k -> !v %1 -> Slot k v
   deriving (Show)
 
 instance (Consumable v) => Consumable (Slot k v) where
@@ -150,7 +150,7 @@ deepClone = Unsafe.toLinear \dic@(HashMap size capa maxDIB slots) ->
               (Ur (Occupied dib k v), _) ->
                 dupLeak v & \v' ->
                   go (i + 1) (LV.unsafeSet i (Occupied dib k v') acc)
-        slots2 = go 0 (LV.constantL capa Empty (fromPB lin))
+        slots2 = go 0 (LV.constantL (capa + fromIntegral maxDibLimit) Empty (fromPB lin))
      in (dic, HashMap size capa maxDIB slots2)
 
 dupLeak :: (Dupable a) => a %1 -> a
