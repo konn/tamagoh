@@ -21,6 +21,7 @@ module Control.Monad.Borrow.Pure.Orphans () where
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
+import Data.Array.Mutable.Linear qualified as LA
 import Data.Functor.Linear qualified as Data
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Semigroup qualified as Sem
@@ -58,4 +59,7 @@ instance (Dupable a) => Dupable (Strict.Maybe a) where
   {-# INLINE dup2 #-}
 
 instance LinearOnly (LV.Vector a) where
+  linearOnly = UnsafeLinearOnly
+
+instance LinearOnly (LA.Array a) where
   linearOnly = UnsafeLinearOnly

@@ -53,6 +53,8 @@ import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
+import Data.Array.Mutable.Linear qualified as LV
+import Data.Array.Mutable.Linear.Extra qualified as LV
 import Data.Bits ((.&.))
 import Data.DList qualified as DL
 import Data.Foldable qualified as P
@@ -62,11 +64,6 @@ import Data.Hashable (Hashable (..))
 import Data.Linear.Witness.Compat
 import Data.Semigroup (Max (..))
 import Data.Unrestricted.Linear qualified as Ur
-import Data.Vector.Generic qualified as G
-import Data.Vector.Generic.Mutable qualified as MG
-import Data.Vector.Mutable.Linear qualified as LV
-import Data.Vector.Mutable.Linear.Extra qualified as LV
-import Data.Vector.Unboxed qualified as U
 import Data.Word (Word8)
 import GHC.Base (Type, UnliftedType)
 import GHC.TypeError (ErrorMessage (..), Unsatisfiable, unsatisfiable)
@@ -78,12 +75,6 @@ import Prelude qualified as P
 -- Difference from Initial Bucket
 newtype DIB = DIB Word8
   deriving newtype (P.Eq, P.Ord, P.Num, P.Enum, Additive, Show, Hashable, Consumable, Dupable, Movable, P.Real, P.Integral)
-  deriving newtype (G.Vector U.Vector, MG.MVector U.MVector)
-  deriving anyclass (U.Unbox)
-
-newtype instance U.Vector DIB = V_DIB (U.Vector Word8)
-
-newtype instance U.MVector s DIB = MV_DIB (U.MVector s Word8)
 
 -- | Cached hash value for fast comparison and rehashing
 newtype Fingerprint = Fingerprint Int
@@ -165,7 +156,7 @@ deepClone = Unsafe.toLinear \dic@(HashMap size capa maxDIB slots) ->
               (Ur (Occupied fp dib k v), _) ->
                 dupLeak v & \v' ->
                   go (i + 1) (LV.unsafeSet i (Occupied fp dib k v') acc)
-        slots2 = go 0 (LV.constantL (capa + fromIntegral maxDibLimit) Empty (fromPB lin))
+        slots2 = go 0 (LV.allocL (capa + fromIntegral maxDibLimit) Empty (fromPB lin))
      in (dic, HashMap size capa maxDIB slots2)
 
 dupLeak :: (Dupable a) => a %1 -> a
@@ -183,7 +174,7 @@ instance LinearOnly (HashMap k v) where
   linearOnly = UnsafeLinearOnly
 
 -- | Slots vector storing DIB and key-value together
-type Slots k v = LV.Vector (Slot k v)
+type Slots k v = LV.Array (Slot k v)
 
 maxLoadFactor :: P.Double
 maxLoadFactor = 0.75
@@ -195,7 +186,7 @@ new :: Int -> Linearly %1 -> HashMap k v
 new capa = runReader Control.do
   let !capa' = 2 ^ intLog2' (2 * (max 1 capa) - 1)
       !physCapa = capa' + fromIntegral maxDibLimit
-  slots <- asks $ LV.constantL physCapa Empty . fromPB
+  slots <- asks $ LV.allocL physCapa Empty . fromPB
   Control.pure $ HashMap 0 capa' 0 slots
 
 foldMapWithKey ::
