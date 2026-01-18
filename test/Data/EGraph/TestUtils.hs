@@ -21,11 +21,9 @@ module Data.EGraph.TestUtils where
 import Control.Monad.Borrow.Pure
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.EGraph.Types
-import Data.Hashable.Lifted
 import Prelude.Linear
 
 withNewEGraph ::
-  (Hashable1 l) =>
   (forall α. Mut α (EGraph () l) %1 -> BO α (Ur a)) %1 ->
   Ur a
 withNewEGraph f =
