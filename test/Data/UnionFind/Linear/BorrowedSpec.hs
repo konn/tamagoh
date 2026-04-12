@@ -32,8 +32,9 @@ test_union =
                 Ur k1 <- find key1 uf
                 Ur k2 <- find key2 uf
                 Control.pure PL.$ move (isJust k1 && isJust k2, k1 PL./= k2)
-              Control.pure PL.$ \end ->
-                uf `lseq` reclaim lend end `lseq` eql
+              Control.pure PL.$
+                uf `lseq`
+                  (eql Control.<$ reclaim' lend)
         assertBool "BothJust" bothJust
         assertBool "Nonequal" noneq
     , testCase "two unioned" do
@@ -48,8 +49,9 @@ test_union =
                   k1 <- unur Control.<$> find key1 uf
                   k2 <- unur Control.<$> find key2 uf
                   Control.pure (k1, k2)
-                Control.pure PL.$ \end ->
-                  uf `lseq` reclaim lend end `lseq` (key1, key2, newKey, k1, k2)
+                Control.pure PL.$
+                  uf `lseq`
+                    (key1, key2, newKey, k1, k2) Control.<$ reclaim' lend
         assertBool "newKey is no Nohing!" $ isJust newKey
         Just newKey <- pure $ newKey
         assertBool "newKey must be one of original keys" $
@@ -70,8 +72,9 @@ test_union =
                   k2 <- find key2 uf
                   k3 <- find key3 uf
                   Control.pure (k1, k2, k3)
-                Control.pure PL.$ \end ->
-                  uf `lseq` reclaim lend end `lseq` ((key1, key2, key3), newKey, k1, k2, k3)
+                Control.pure PL.$
+                  uf `lseq`
+                    ((key1, key2, key3), newKey, k1, k2, k3) Control.<$ reclaim' lend
         assertBool "newKey is no Nohing!" $ isJust newKey
         Just newKey <- pure $ newKey
         assertBool "newKey must be one of original keys" $

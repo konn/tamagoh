@@ -493,7 +493,7 @@ repair egraph eid = Control.do
           !set <- {-# SCC "update_worklist/insert" #-} BUV.push pClass (egraph .# #worklist)
           Control.pure $ consume set
 
-    Control.pure (\end -> reclaim newPsLend (upcast end))
+    Control.pure $ upcast $ reclaim' newPsLend
 
   void $ setParents eid newParents (egraph .# #classes)
 

@@ -135,7 +135,7 @@ forReborN ::
 forReborN !bors tb k = flip runStateT bors do
   Data.forM tb \b -> StateT $ Unsafe.toLinear \ !bors -> srunBO \(Proxy :: Proxy β) -> Control.do
     !c <- k (upcast bors) b
-    Control.pure \ !_ -> (c, bors)
+    Control.pure $ Control.pure (c, bors)
 
 forReborN_ ::
   (Data.Traversable t, Consumable (t ())) =>
@@ -166,7 +166,7 @@ forReborNOf_ fld !bors tb k = flip execStateT bors $
     runUrT $
       Lens.forOf_ fld tb \b -> UrT $ StateT $ Unsafe.toLinear \ !bors -> srunBO \(Proxy :: Proxy β) -> Control.do
         () <- k (upcast bors) b
-        Control.pure \ !_ -> (Ur (), bors)
+        Control.pure $ Control.pure (Ur (), bors)
 
 iforReborN_ ::
   (FoldableWithIndex k t) =>
@@ -185,7 +185,7 @@ iforReborN_ !bors tb k = flip execStateT bors $
     runUrT $
       ifor_ tb \i b -> UrT $ StateT $ Unsafe.toLinear \ !bors -> srunBO \(Proxy :: Proxy β) -> Control.do
         () <- k (upcast bors) i b
-        Control.pure \ !_ -> (Ur (), bors)
+        Control.pure $ Control.pure (Ur (), bors)
 
 forRebor2Of_ ::
   Lens.Fold s b ->

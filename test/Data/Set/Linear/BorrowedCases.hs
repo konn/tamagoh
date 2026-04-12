@@ -24,7 +24,6 @@ import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Clone
 import Control.Syntax.DataFlow qualified as DataFlow
-import Data.Coerce.Directed (upcast)
 import Data.Hashable (Hashable)
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
@@ -97,9 +96,10 @@ copyCase dic = Control.do
     (Ur twiceInsertedOrig, dic) <- sharing dic $ \dic -> Set.toList dic
     (Ur finalDup, duped) <- sharing duped \duped -> Set.toList duped
 
-    Control.pure $ \end ->
-      reclaim lentDuped (upcast end) `lseq`
-        duped `lseq`
-          dic `lseq`
-            SetDupResult {..}
+    Control.pure $
+      After $
+        reclaim lentDuped `lseq`
+          duped `lseq`
+            dic `lseq`
+              SetDupResult {..}
   Control.pure $ dic `lseq` move result

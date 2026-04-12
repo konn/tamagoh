@@ -19,24 +19,13 @@
 
 module Control.Monad.Borrow.Pure.Orphans () where
 
-import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Data.Array.Mutable.Linear qualified as LA
-import Data.Functor.Linear qualified as Data
-import Data.List.NonEmpty (NonEmpty (..))
 import Data.Semigroup qualified as Sem
 import Data.Strict.Maybe qualified as Strict
 import Data.Vector.Mutable.Linear qualified as LV
 import Prelude.Linear
 import Prelude.Linear.Generically
-
-instance Data.Functor NonEmpty where
-  fmap f (x :| xs) = f x :| Data.fmap f xs
-  {-# INLINE fmap #-}
-
-instance Data.Traversable NonEmpty where
-  traverse f (x :| xs) = (:|) Control.<$> f x Control.<*> Data.traverse f xs
-  {-# INLINE traverse #-}
 
 deriving newtype instance (Dupable a) => Dupable (Sem.Min a)
 

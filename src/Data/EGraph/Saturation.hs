@@ -300,7 +300,11 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
               Merged {} -> Control.void PL.$ modifyRef (`lseq` True) var
               AlreadyMerged {} -> Control.pure PL.$ consume var
             Control.pure (consume egraph)
-      Control.pure \end -> var `lseq` egraph `lseq` move (freeRef (reclaim lend (upcast end)))
+      Control.pure PL.$
+        upcast PL.$
+          var `lseq`
+            egraph `lseq`
+              (move PL.. freeRef Control.<$> reclaim' lend)
 
 addNestedENode ::
   forall d l α.
