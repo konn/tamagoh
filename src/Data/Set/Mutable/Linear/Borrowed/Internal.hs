@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE PartialTypeSignatures #-}
@@ -13,6 +14,7 @@ module Data.Set.Mutable.Linear.Borrowed.Internal (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Clone
 import Control.Monad.Borrow.Pure.Internal
 import Control.Monad.Borrow.Pure.Utils (coerceLin)
 import Control.Syntax.DataFlow qualified as DataFlow
@@ -26,6 +28,7 @@ import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear.Internal qualified as Raw
 import Data.Unrestricted.Linear qualified as Ur
+import GHC.TypeError (ErrorMessage (..), Unsatisfiable)
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, null, take)
 import Text.Show.Borrowed
 import Unsafe.Linear qualified as Unsafe
@@ -57,16 +60,19 @@ instance Dupable (Set k) where
         !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
         (Set ref, Set $! Ref.new (Raw.Set hm') lin)
 
-instance Copyable (Set k) where
+instance
+  (Unsatisfiable ('ShowType (Set k) ':<>: 'Text " cannot be copied")) =>
+  Copyable (Set k)
+
+instance Clone (Set k) where
   -- NOTE: Contrary to HashMap, we do not need deep duplication here,
   -- because Set only contains keys, and keys are nonlinear by convention.
-  copy = Unsafe.toLinear \(UnsafeAlias (Set !ref)) -> DataFlow.do
-    (lin, !ref) <- withLinearly ref
-    !hm <- freeRef ref
+  clone = Unsafe.toLinear \(UnsafeAlias (Set !ref)) -> Control.do
+    !hm <- Control.pure $ freeRef ref
     case hm of
       Raw.Set hm -> DataFlow.do
         !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
-        Set $! Ref.new (Raw.Set hm') lin
+        asksLinearly $! Set . Ref.new (Raw.Set hm')
 
 instance (Display k) => Display (Set k) where
   displayPrec _ bor = Control.do

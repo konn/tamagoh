@@ -164,6 +164,11 @@ instance (Copyable1 l, Copyable1 r) => Copyable1 (l GLC.:*: r) where
      in l' GLC.:*: r'
   {-# INLINE liftCopy #-}
 
+instance (Copyable1 f, Copyable1 g) => Copyable1 (f GLC.:.: g) where
+  liftCopy f = \(UnsafeAlias (GLC.Comp1 x)) ->
+    GLC.Comp1 . liftCopy (liftCopy f) $ UnsafeAlias x
+  {-# INLINE liftCopy #-}
+
 instance (Copyable1 l, Copyable1 r) => Copyable1 (l GLC.:+: r) where
   liftCopy f = \(UnsafeAlias sum) -> case sum of
     GLC.L1 !l -> GLC.L1 $! (liftCopy f (UnsafeAlias l))

@@ -13,6 +13,7 @@ module Data.EGraph.Types.Language (
 ) where
 
 import Control.Monad (filterM)
+import Control.Monad.Borrow.Pure.Clone
 import Data.Deriving (deriveEq1, deriveOrd1)
 import Data.EGraph.EMatch.Relational.Database
 import Data.EGraph.Types.Term
@@ -35,6 +36,7 @@ type Language l =
   , P.Traversable l
   , Matchable l
   , Copyable1 l
+  , Clone1 l
   , HasDatabase l
   )
 
@@ -56,6 +58,7 @@ data DeriveTarget
   | DvHashable1
   | DvMovable1
   | DvCopyable1
+  | DvClone1
   | DvMatchable
   deriving (Show, Eq, Ord, Enum, Bounded)
 
@@ -82,6 +85,7 @@ classHead langDef = \case
   DvHashable1 -> (''Hashable1, [langDef.rank1Type])
   DvMovable1 -> (''Movable1, [langDef.rank1Type])
   DvCopyable1 -> (''Copyable1, [langDef.rank1Type])
+  DvClone1 -> (''Clone1, [langDef.rank1Type])
   DvMatchable -> (''Matchable, [langDef.rank1Type])
 
 {- |
@@ -125,6 +129,7 @@ derive lang DvHashable = [d|deriving anyclass instance (_) => Hashable $(pure la
 derive lang DvHashable1 = [d|deriving anyclass instance (_) => Hashable1 $(pure lang.rank1Type)|]
 derive lang DvMovable1 = [d|deriving via GHC.Generically1 $(pure lang.rank1Type) instance (_) => Movable1 $(pure lang.rank1Type)|]
 derive lang DvCopyable1 = [d|deriving via GHC.Generically1 $(pure lang.rank1Type) instance (_) => Copyable1 $(pure lang.rank1Type)|]
+derive lang DvClone1 = [d|deriving via GHC.Generically1 $(pure lang.rank1Type) instance (_) => Clone1 $(pure lang.rank1Type)|]
 derive lang DvMatchable = [d|deriving via GHC.Generically1 $(pure lang.rank1Type) instance (_) => Matchable $(pure lang.rank1Type)|]
 
 data LanguageDef = LanguageDef

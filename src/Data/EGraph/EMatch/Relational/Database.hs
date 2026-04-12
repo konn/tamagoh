@@ -33,6 +33,7 @@ import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as Control
 import Control.Lens hiding (universe)
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Clone (Clone)
 import Data.EGraph.EMatch.Relational.Query (Relation (..))
 import Data.EGraph.Types
 import Data.Foldable qualified as F
@@ -67,6 +68,8 @@ instance Show Wildcard where
 GL.deriveGeneric ''Wildcard
 
 deriving via Generically Wildcard instance Copyable Wildcard
+
+deriving via Generically Wildcard instance Clone Wildcard
 
 deriving via Generically Wildcard instance Consumable Wildcard
 

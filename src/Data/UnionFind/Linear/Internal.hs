@@ -28,6 +28,7 @@ module Data.UnionFind.Linear.Internal (
 ) where
 
 import Control.Monad.Borrow.Pure (Copyable)
+import Control.Monad.Borrow.Pure.Clone (Clone)
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Data.Hashable (Hashable)
 import Data.Ord.Linear qualified as Linear
@@ -57,6 +58,7 @@ newtype Key = Key {getKey :: Word}
     , Dupable
     , Movable
     , Copyable
+    , Clone
     , U.Unbox
     )
 

@@ -48,6 +48,7 @@ import Control.Functor.Linear (StateT (..))
 import Control.Functor.Linear qualified as Control
 import Control.Lens (Lens', (?~), (^.), _1)
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Clone
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Borrow.Pure.Utils (forRebor2_)
 import Control.Monad.Trans.Maybe (MaybeT (..))
@@ -357,6 +358,14 @@ deriving via
     , Copyable cost
     ) =>
     Copyable (ExtractBest l cost)
+
+deriving via
+  AsCopyable (ExtractBest l cost)
+  instance
+    ( Copyable1 l
+    , Copyable cost
+    ) =>
+    Clone (ExtractBest l cost)
 
 deriving via
   GHC.Generically (ExtractBest l cost)

@@ -20,6 +20,7 @@ import Control.Exception (throwIO)
 import Control.Functor.Linear qualified as Control
 import Control.Lens (view)
 import Control.Monad.Borrow.Pure (Copyable, (<$~))
+import Control.Monad.Borrow.Pure.Clone
 import Data.EGraph.Immutable
 import Data.EGraph.Types.EGraph qualified as MEG
 import Data.EGraph.Types.EGraph qualified as Raw
@@ -159,6 +160,8 @@ newtype ConstantFolding = ConstantFolding {constant :: Maybe Int}
 LG.deriveGeneric ''ConstantFolding
 
 deriving via Generically ConstantFolding instance Copyable ConstantFolding
+
+deriving via AsCopyable ConstantFolding instance Clone ConstantFolding
 
 deriving via Generically ConstantFolding instance Consumable ConstantFolding
 

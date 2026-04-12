@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE LambdaCase #-}
@@ -26,6 +27,7 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Clone (Clone (..))
 import Control.Monad.Borrow.Pure.Internal
 import Control.Monad.Borrow.Pure.Utils
 import Control.Syntax.DataFlow qualified as DataFlow
@@ -34,6 +36,8 @@ import Data.HashMap.RobinHood.Mutable.Linear qualified as Raw
 import Data.List qualified as P
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import GHC.TypeError (Unsatisfiable, unsatisfiable)
+import GHC.TypeLits (ErrorMessage (..))
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
 import Text.Show.Borrowed (Display (..))
 import Unsafe.Linear qualified as Unsafe
@@ -57,13 +61,20 @@ instance Dupable (HashMapUr k v) where
     !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
     (HM ref, HM $! Ref.new hm' lin)
 
+-- | 'HashMapUr' _CANNOT_ be 'Copyable', because it contains a mutable reference.
+instance
+  (Unsatisfiable ('ShowType (HashMapUr k v) ':<>: 'Text " cannot be Copyable")) =>
+  Copyable (HashMapUr k v)
+  where
+  copy = unsatisfiable
+
 -- | Copyable instance without deep cloning (values are unrestricted).
-instance Copyable (HashMapUr k v) where
-  copy = Unsafe.toLinear \(UnsafeAlias (HM !ref)) -> DataFlow.do
-    (lin, !ref) <- withLinearly ref
-    !hm <- freeRef ref
-    !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
-    HM $! Ref.new hm' lin
+instance Clone (HashMapUr k v) where
+  clone = Unsafe.toLinear \(UnsafeAlias (HM !ref)) -> Control.do
+    lin <- askLinearly
+    !hm <- Control.pure (freeRef ref)
+    !hm' <- Unsafe.toLinear (\(!_, !hm') -> Control.pure hm') $ dup hm
+    Control.pure $ HM $! Ref.new hm' lin
 
 instance (Show k, Show v) => Display (HashMapUr k v) where
   displayPrec _ bor = Control.do

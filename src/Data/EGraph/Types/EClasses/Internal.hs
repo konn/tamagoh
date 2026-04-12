@@ -22,6 +22,7 @@ module Data.EGraph.Types.EClasses.Internal (
 ) where
 
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Clone (Clone)
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
@@ -55,12 +56,27 @@ data EClass d l
 
 deriveGeneric ''EClass
 
-deriving via Generically (EClass d l) instance (Consumable d) => Consumable (EClass d l)
+deriving anyclass instance (Dupable d) => Clone (EClass d l)
 
-deriving via Generically (EClass d l) instance (Dupable d) => Dupable (EClass d l)
+deriving via
+  Generically (EClass d l)
+  instance
+    (Consumable d) => Consumable (EClass d l)
 
-deriving via Generically (EClass d l) instance (Copyable1 l, Show1 l, Display d) => Display (EClass d l)
+deriving via
+  Generically (EClass d l)
+  instance
+    (Dupable d) => Dupable (EClass d l)
+
+deriving via
+  Generically (EClass d l)
+  instance
+    (Copyable1 l, Show1 l, Display d) => Display (EClass d l)
 
 deriving newtype instance (Dupable d) => Dupable (EClasses d l)
 
-deriving via Raw d l instance (Copyable1 l, Show1 l, Display d) => Display (EClasses d l)
+deriving via
+  Raw d l
+  instance
+    (Copyable1 l, Show1 l, Display d) =>
+    Display (EClasses d l)

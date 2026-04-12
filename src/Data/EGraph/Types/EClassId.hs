@@ -6,6 +6,7 @@
 module Data.EGraph.Types.EClassId (EClassId (..), idToWord) where
 
 import Control.Monad.Borrow.Pure (Copyable)
+import Control.Monad.Borrow.Pure.Clone (Clone)
 import Data.Coerce (coerce)
 import Data.Hashable
 import Data.UnionFind.Linear (Key (..))
@@ -31,6 +32,7 @@ newtype EClassId = EClassId {getKey :: Key}
     , PL.Dupable
     , PL.Movable
     , Copyable
+    , Clone
     )
   deriving (Display) via AsCopyableShow EClassId
   deriving newtype (U.Unbox, G.Vector U.Vector, MG.MVector U.MVector)

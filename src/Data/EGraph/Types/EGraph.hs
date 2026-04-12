@@ -52,6 +52,7 @@ import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
 import Control.Functor.Linear qualified as Control
 import Control.Lens (ifolded, withIndex)
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Clone (Clone (clone))
 import Control.Monad.Borrow.Pure.Utils
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Control.Syntax.DataFlow qualified as DataFlow
@@ -447,7 +448,7 @@ repair egraph eid = Control.do
     !ps <-
       {- copy
         . fromMaybe (error "Must be just") -}
-      maybe (asksLinearly $ HMUr.empty 16) (Control.pure . copy) mps
+      maybe (asksLinearly $ HMUr.empty 16) clone mps
     Control.pure $! FHMUr.freeze ps
   (newParents, egraph) <- reborrowing' egraph \egraph -> Control.do
     (newPs, newPsLend) <- asksLinearlyM \lin -> Control.do
@@ -474,7 +475,7 @@ repair egraph eid = Control.do
       !ps <-
         {- copy
           . fromMaybe (error "Must be just") -}
-        maybe (asksLinearly $ HMUr.empty 16) (Control.pure . copy) mps
+        maybe (asksLinearly $ HMUr.empty 16) clone mps
       Control.pure $! FHMUr.freeze ps
     void $ iforRebor_ egraph ps \egraph pNode pClass -> Control.do
       (newAnal, egraph) <- sharing egraph \egraph -> Control.do
