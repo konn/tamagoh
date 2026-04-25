@@ -107,7 +107,6 @@ library
     Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen
     Data.HashMap.RobinHood.Mutable.Linear
     Data.Linear.Witness.Compat
-    Data.Record.Linear
     Data.Set.Mutable.Linear.Borrowed
     Data.Trie
     Data.UnionFind.Linear

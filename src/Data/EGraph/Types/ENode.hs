@@ -15,8 +15,6 @@
 module Data.EGraph.Types.ENode (ENode (..), children) where
 
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Clone
-import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
 import Data.Foldable qualified as F
 import Data.Functor.Classes (Eq1, Ord1, Show1)
@@ -29,7 +27,6 @@ import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Text.Show.Borrowed (AsCopyableShow (..), Display)
-import Unsafe.Linear qualified as Unsafe
 import Prelude (Eq (..), Ord, Show)
 import Prelude qualified as P
 

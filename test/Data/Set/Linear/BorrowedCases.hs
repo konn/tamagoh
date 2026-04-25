@@ -23,7 +23,6 @@ module Data.Set.Linear.BorrowedCases (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Clone
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Coerce.Directed (upcast)
 import Data.Hashable (Hashable)

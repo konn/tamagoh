@@ -27,7 +27,6 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Clone (Clone (..))
 import Control.Monad.Borrow.Pure.Internal
 import Control.Monad.Borrow.Pure.Utils
 import Control.Syntax.DataFlow qualified as DataFlow

@@ -33,8 +33,6 @@ module Data.Unrestricted.Linear.Lifted (
 
 import Control.Applicative (Const)
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal
-import Data.Coerce (Coercible, coerce)
 import Data.Functor.Linear qualified as Data
 import Data.Kind (Constraint, Type)
 import Data.Proxy (Proxy)
@@ -42,7 +40,6 @@ import Data.Unrestricted.Linear qualified as Ur
 import GHC.Base (Multiplicity (..))
 import Prelude.Linear
 import Prelude.Linear.Generically qualified as GLC
-import Unsafe.Linear qualified as Unsafe
 
 class Movable1 f where
   liftMove :: (a %1 -> Ur b) -> f a %1 -> Ur (f b)

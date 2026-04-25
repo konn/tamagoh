@@ -33,7 +33,6 @@ import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as Control
 import Control.Lens hiding (universe)
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Clone (Clone)
 import Data.EGraph.EMatch.Relational.Query (Relation (..))
 import Data.EGraph.Types
 import Data.Foldable qualified as F
@@ -47,7 +46,7 @@ import Data.HashSet (HashSet)
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.Maybe (fromMaybe)
-import Data.Record.Linear ((.#))
+import Data.Record.Linear.Experimental ((.#))
 import Data.Trie (Trie)
 import Data.Trie qualified as Trie
 import Data.Unrestricted.Linear

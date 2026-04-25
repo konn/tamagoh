@@ -14,7 +14,6 @@ module Data.Set.Mutable.Linear.Borrowed.Internal (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Clone
 import Control.Monad.Borrow.Pure.Internal
 import Control.Monad.Borrow.Pure.Utils (coerceLin)
 import Control.Syntax.DataFlow qualified as DataFlow

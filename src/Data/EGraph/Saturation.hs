@@ -48,7 +48,6 @@ import Control.Functor.Linear (StateT (..))
 import Control.Functor.Linear qualified as Control
 import Control.Lens (Lens', (?~), (^.), _1)
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Clone
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Borrow.Pure.Utils (forRebor2_)
 import Control.Monad.Trans.Maybe (MaybeT (..))
@@ -72,14 +71,14 @@ import Data.Hashable
 import Data.Hashable.Lifted (Hashable1)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (mapMaybe)
-import Data.Record.Linear
+import Data.Record.Linear.Experimental
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Semigroup (Arg (..), ArgMin, Min (..))
 import Data.Strict qualified as St
 import Data.Traversable qualified as Traverse
 import Data.Unrestricted.Linear (UrT (..), runUrT)
-import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
+import Data.Unrestricted.Linear.Lifted (Movable1)
 import GHC.Generics (Generic, Generic1)
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)

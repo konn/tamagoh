@@ -52,7 +52,6 @@ import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
 import Control.Functor.Linear qualified as Control
 import Control.Lens (ifolded, withIndex)
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Clone (Clone (clone))
 import Control.Monad.Borrow.Pure.Utils
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Control.Syntax.DataFlow qualified as DataFlow
@@ -73,7 +72,7 @@ import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen qualified a
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe qualified as P
-import Data.Record.Linear
+import Data.Record.Linear.Experimental
 import Data.Traversable qualified as P
 import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.UnionFind.Linear.Borrowed qualified as UFB
