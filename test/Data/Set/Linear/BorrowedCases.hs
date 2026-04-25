@@ -10,6 +10,7 @@
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeAbstractions #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE NoImplicitPrelude #-}
@@ -24,6 +25,7 @@ import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Clone
 import Control.Syntax.DataFlow qualified as DataFlow
+import Data.Coerce.Directed (upcast)
 import Data.Hashable (Hashable)
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
@@ -83,9 +85,9 @@ deriving via Generically SetDupResult instance Dupable SetDupResult
 
 deriving via Generically SetDupResult instance Movable SetDupResult
 
-copyCase :: Mut α (Set Int) %1 -> BO α (Ur SetDupResult)
+copyCase :: forall α. Mut α (Set Int) %1 -> BO α (Ur SetDupResult)
 copyCase dic = Control.do
-  (result, dic) <- reborrowing' dic \dic -> Control.do
+  (result, dic) <- reborrowing' dic \ @β dic -> Control.do
     (Ur initOrig, dic) <- sharing dic $ \dic -> Set.toList dic
     dic <- Set.insert 1 dic
     (Ur insertedOrig, dic) <- sharing dic $ \dic -> Set.toList dic
@@ -95,11 +97,9 @@ copyCase dic = Control.do
     dic <- Set.insert 2 dic
     (Ur twiceInsertedOrig, dic) <- sharing dic $ \dic -> Set.toList dic
     (Ur finalDup, duped) <- sharing duped \duped -> Set.toList duped
-
+    Control.void $ Control.pure (duped, dic)
     Control.pure $
-      After $
-        reclaim lentDuped `lseq`
-          duped `lseq`
-            dic `lseq`
-              SetDupResult {..}
+      upcast $
+        SetDupResult {..} Control.<$ reclaim' @(β /\ α) lentDuped
+
   Control.pure $ dic `lseq` move result

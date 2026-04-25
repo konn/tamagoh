@@ -14,7 +14,7 @@
 
 module Data.EGraph.Types.ENode (ENode (..), children) where
 
-import Control.Monad.Borrow.Pure (Copyable (..), Share)
+import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Clone
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
@@ -47,7 +47,7 @@ instance (Movable1 l) => Movable (ENode l) where
   {-# INLINE move #-}
 
 instance (Copyable1 l) => Copyable (ENode l) where
-  copy = ENode . copy1 . coerceShr @_ @(l EClassId)
+  copy = ENode . copy1 . coerceShare @(l EClassId) . unur . share
   {-# INLINE copy #-}
 
 deriving via
@@ -68,9 +68,6 @@ deriving newtype instance (Eq1 l) => Eq (ENode l)
 deriving newtype instance (Ord1 l) => Ord (ENode l)
 
 deriving newtype instance (Hashable1 l) => Hashable (ENode l)
-
-coerceShr :: (Coercible a b) => Share α a %1 -> Share α b
-coerceShr = Unsafe.toLinear \ !a -> coerce a
 
 children :: (P.Foldable l) => ENode l -> [EClassId]
 children = F.toList P.. unwrap
