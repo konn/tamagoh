@@ -46,7 +46,7 @@ import Data.HashSet (HashSet)
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.Maybe (fromMaybe)
-import Data.Record.Linear.Experimental ((.#))
+import Data.Record.Linear.Borrow.Experimental ((.#))
 import Data.Trie (Trie)
 import Data.Trie qualified as Trie
 import Data.Unrestricted.Linear

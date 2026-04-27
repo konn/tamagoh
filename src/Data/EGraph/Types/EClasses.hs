@@ -58,7 +58,7 @@ import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe.Linear
-import Data.Record.Linear.Experimental
+import Data.Record.Linear.Borrow.Experimental
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Set.Mutable.Linear.Borrowed qualified as Set

@@ -33,7 +33,7 @@ import Data.EGraph.Types.EClasses.Internal (EClasses)
 import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
-import Data.Record.Linear.Experimental
+import Data.Record.Linear.Borrow.Experimental
 import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.Vector.Unboxed.Mutable.Growable.Borrowed qualified as BUV
 import GHC.Generics (Generic, Generically (..))

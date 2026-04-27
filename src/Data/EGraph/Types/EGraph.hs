@@ -72,7 +72,7 @@ import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen qualified a
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe qualified as P
-import Data.Record.Linear.Experimental
+import Data.Record.Linear.Borrow.Experimental
 import Data.Traversable qualified as P
 import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.UnionFind.Linear.Borrowed qualified as UFB
