@@ -52,9 +52,8 @@ import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
 import Control.Functor.Linear qualified as Control
 import Control.Lens (ifolded, withIndex)
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Utils
+import Control.Monad.Borrow.Pure.Utils hiding ((:-))
 import Control.Monad.Trans.Maybe (MaybeT (..))
-import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (coerce)
 import Data.Coerce.Directed (upcast)
@@ -72,7 +71,7 @@ import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen qualified a
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe qualified as P
-import Data.Record.Linear.Borrow.Experimental
+import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Traversable qualified as P
 import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.UnionFind.Linear.Borrowed qualified as UFB
@@ -409,11 +408,7 @@ repair egraph eid = Control.do
       Nothing -> Control.pure $ Ur 0
       Just pare -> HMUr.size pare
   egraph <- reborrowing_ egraph \egraph -> Control.do
-    let %1 !(!hashcons, !classes, !uf) = DataFlow.do
-          (hashcons, egraph) <- splitRecord egraph -# #hashcons
-          (classes, egraph) <- egraph -# #classes
-          uf <- egraph !# #unionFind
-          (hashcons, classes, uf)
+    let %1 !(!hashcons, !classes, !uf) = egraph .@ (#hashcons, #classes, #unionFind)
     Ur !parents <-
       share classes & \(Ur classes) -> Control.do
         mpare <- EC.lookupParents classes eid

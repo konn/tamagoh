@@ -71,7 +71,7 @@ import Data.Hashable
 import Data.Hashable.Lifted (Hashable1)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (mapMaybe)
-import Data.Record.Linear.Borrow.Experimental
+import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.Semigroup (Arg (..), ArgMin, Min (..))

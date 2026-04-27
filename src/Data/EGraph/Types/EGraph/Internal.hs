@@ -8,6 +8,7 @@
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -17,6 +18,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# OPTIONS_GHC -Wno-partial-type-signatures #-}
 
 module Data.EGraph.Types.EGraph.Internal (
   module Data.EGraph.Types.EGraph.Internal,
@@ -33,7 +35,7 @@ import Data.EGraph.Types.EClasses.Internal (EClasses)
 import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
-import Data.Record.Linear.Borrow.Experimental
+import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.UnionFind.Linear.Borrowed (UnionFind)
 import Data.Vector.Unboxed.Mutable.Growable.Borrowed qualified as BUV
 import GHC.Generics (Generic, Generically (..))
@@ -73,8 +75,6 @@ data EGraph d l = EGraph
 
 deriveGeneric ''EGraph
 
-deriving anyclass instance SplittableRecord (EGraph l d)
-
 deriving via
   Generically (EGraph d l)
   instance
@@ -84,7 +84,7 @@ deriving via Generically (EGraph d l) instance Consumable (EGraph d l)
 
 deriving via Generically (EGraph d l) instance (Dupable d) => Dupable (EGraph d l)
 
-hashconsL :: RecordLabel (EGraph d l) "hashcons" (HashMapUr (ENode l) EClassId)
+hashconsL :: RecordLabel (EGraph d l) _ _
 hashconsL = #hashcons
 
 {- |

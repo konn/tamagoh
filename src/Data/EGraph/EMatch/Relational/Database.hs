@@ -46,7 +46,7 @@ import Data.HashSet (HashSet)
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.Maybe (fromMaybe)
-import Data.Record.Linear.Borrow.Experimental ((.#))
+import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Trie (Trie)
 import Data.Trie qualified as Trie
 import Data.Unrestricted.Linear
@@ -84,7 +84,7 @@ buildDatabase ::
   BO α (Ur (Database l))
 buildDatabase egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
-    Ur nodes <- HMUr.toList (egraph .# hashconsL)
+    Ur nodes <- HMUr.toList (egraph .@ hashconsL)
     Ur nodes <- Control.fmap move PL.$
       Data.forM nodes \(enode, id) ->
         move (enode, id) PL.& \(Ur (enode, id)) ->

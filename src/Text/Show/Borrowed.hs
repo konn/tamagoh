@@ -46,7 +46,7 @@ instance (Display a) => Display (Ref a) where
     Ur bor <- readSharedRef bor
     displayPrec d bor
 
-instance (Copyable a, Show a) => Display (Ur a) where
+instance (Show a) => Display (Ur a) where
   displayPrec d x =
     Control.pure $
       Ur $
