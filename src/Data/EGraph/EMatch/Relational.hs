@@ -127,7 +127,7 @@ genericJoin ::
   ConjunctiveQuery l v ->
   Database l ->
   [Substitution v]
-genericJoin (hd :- (atm@(Atom rel@MkRel {args}) :| [])) db = fromMaybe [] do
+genericJoin (hd ::- (atm@(Atom rel@MkRel {args}) :| [])) db = fromMaybe [] do
   -- Degenerate case: just a lookup!
   let vs = L.fold L.hashSet atm
   let frees :: [Substitution v]
@@ -144,7 +144,7 @@ genericJoin (hd :- (atm@(Atom rel@MkRel {args}) :| [])) db = fromMaybe [] do
     if null frees
       then matches
       else (<>) <$> matches <*> frees
-genericJoin (hd :- qs) db = fromMaybe [] do
+genericJoin (hd ::- qs) db = fromMaybe [] do
   (rels, varStat) <- runWriterT $ mapM (buildQueryState db) qs
   let vs =
         Heap.fromList $

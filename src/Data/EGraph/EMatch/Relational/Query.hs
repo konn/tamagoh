@@ -93,7 +93,7 @@ data Query l v
   deriving (Eq1, Ord1) via Generically1 (Query l)
 
 data ConjunctiveQuery l v
-  = (:-) {head :: [v], body :: NonEmpty (Atom l v)}
+  = (::-) {head :: [v], body :: NonEmpty (Atom l v)}
   deriving (Show, Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
   deriving anyclass (Hashable, Hashable1)
   deriving (Eq1, Ord1) via Generically1 (ConjunctiveQuery l)
@@ -135,13 +135,13 @@ compile = \case
         -- Not a nested query - no join required!
         let root = Fresh 0
             vs = HashSet.toList $ foldMap' (HashSet.singleton . PVar) pat0
-         in PatternQuery {root, patQuery = Conj $ vs :- NE.singleton (Atom $ QVar <$> MkRel {id = root, args = vars})}
+         in PatternQuery {root, patQuery = Conj $ vs ::- NE.singleton (Atom $ QVar <$> MkRel {id = root, args = vars})}
   pat0 ->
     let (root, atms) = runFreshM (aux pat0)
         vs = HashSet.toList $ foldMap' (HashSet.singleton . PVar) pat0
         patQuery = case NE.nonEmpty $ DL.toList atms of
           Nothing -> SelectAll root
-          Just atms' -> Conj $ vs :- atms'
+          Just atms' -> Conj $ vs ::- atms'
      in PatternQuery {..}
     where
       aux :: Pattern l v -> FreshM (CompiledVar v, DL.DList (Atom l (CompiledVar v)))

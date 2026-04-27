@@ -86,7 +86,7 @@ deriving via Generically SetDupResult instance Movable SetDupResult
 
 copyCase :: forall α. Mut α (Set Int) %1 -> BO α (Ur SetDupResult)
 copyCase dic = Control.do
-  (result, dic) <- reborrowing' dic \ @β dic -> Control.do
+  (result, dic) <- reborrowing' dic \dic -> Control.do
     (Ur initOrig, dic) <- sharing dic $ \dic -> Set.toList dic
     dic <- Set.insert 1 dic
     (Ur insertedOrig, dic) <- sharing dic $ \dic -> Set.toList dic
@@ -99,6 +99,6 @@ copyCase dic = Control.do
     Control.void $ Control.pure (duped, dic)
     Control.pure $
       upcast $
-        SetDupResult {..} Control.<$ reclaim' @(β /\ α) lentDuped
+        SetDupResult {..} Control.<$ reclaim' lentDuped
 
   Control.pure $ dic `lseq` move result

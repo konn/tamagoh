@@ -46,17 +46,14 @@ import Control.Functor.Linear qualified as Control
 import Control.Lens (FoldableWithIndex, ifor_)
 import Control.Lens qualified as Lens
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Affine (Affine (..), AsAffine (..))
-import Control.Monad.Borrow.Pure.Affine.Internal (Aff (..))
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear (Array)
 import Data.Array.Mutable.Linear qualified as Array
 import Data.Coerce (Coercible, coerce)
-import Data.Coerce.Directed (SubtypeWitness (..), upcast, type (<:) (..))
+import Data.Coerce.Directed (upcast, type (<:) (..))
 import Data.Functor.Linear qualified as Data
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
-import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
@@ -223,21 +220,6 @@ iforRebor2_ !bor1 !bor2 tb k = Control.do
   resl <- iforReborN_ (bor1 :- bor2 :- BNil) tb $ \(x :- y :- BNil) -> k x y
   case resl of
     bor1 :- bor2 :- BNil -> Control.pure (bor1, bor2)
-
-type Borrows :: BorrowKind -> Lifetime -> [Type] -> Type
-data Borrows bk α xs where
-  BNil :: Borrows bk α '[]
-  (:-) :: !(Borrow bk α x) %1 -> !(Borrows bk α xs) %1 -> Borrows bk α (x ': xs)
-
-instance Affine (Borrows bk α xs) where
-  aff = UnsafeAff
-
-deriving via AsAffine (Borrows bk α xs) instance Consumable (Borrows bk α xs)
-
-instance (β <= α) => Borrows bk α xs <: Borrows bk' β xs where
-  subtype = UnsafeSubtype
-
-infixr 5 :-
 
 -- >>> let !x = UnsafeAlias () :- undefined :- BNil in 42
 -- Prelude.undefined

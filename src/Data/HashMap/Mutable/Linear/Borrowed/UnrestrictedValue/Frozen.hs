@@ -17,6 +17,7 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen (
   -- * Construction
   freeze,
   thaw,
+  empty,
 
   -- * Query
   Keyed,
@@ -48,6 +49,9 @@ import Unsafe.Linear qualified as Unsafe
 import Prelude hiding (lookup)
 
 newtype ImmutableHashMapUr k v = ImmutableHashMapUr (RawLin.HashMap k v)
+
+empty :: Int -> Linearly %1 -> Ur (ImmutableHashMapUr k v)
+empty n lin = Unsafe.toLinear Ur (ImmutableHashMapUr (Raw.new n lin))
 
 unsafeFreeze :: Share α (Raw.HashMapUr k v) %m -> Ur (ImmutableHashMapUr k v)
 unsafeFreeze (UnsafeAlias (Raw.HM ref)) =

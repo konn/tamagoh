@@ -413,15 +413,13 @@ repair egraph eid = Control.do
       share classes & \(Ur classes) -> Control.do
         mpare <- EC.lookupParents classes eid
         -- This is safe because the parents are not modified in this region
-        FHMUr.unsafeFreeze . unur Control.<$> case mpare of
+        case mpare of
           Nothing ->
             -- FIXME: id MUST be present in classes - please review the invariant.
 
-            asksLinearly \lin ->
-              dup lin & \(lin, lin') ->
-                share $ borrow_ (HMUr.empty 16 lin) lin'
+            asksLinearly $ FHMUr.empty 16
           -- error $ "Impossible mpare None in Parents (divide): " <> P.show eid
-          Just pare -> Control.pure $ share pare
+          Just pare -> Control.pure $ FHMUr.unsafeFreeze $ unur $ share pare
     void $ iforRebor2_ hashcons uf parents \ !hashcons !uf !p_node !p_class -> Control.do
       -- NOTE:
       --    Seems like removing outdated node significantly worsens performance
