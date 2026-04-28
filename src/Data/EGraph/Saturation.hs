@@ -48,8 +48,8 @@ import Control.Functor.Linear (StateT (..))
 import Control.Functor.Linear qualified as Control
 import Control.Lens (Lens', (?~), (^.), _1)
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Experimental.Loop
 import Control.Monad.Borrow.Pure.Orphans ()
-import Control.Monad.Borrow.Pure.Utils (forRebor2_)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Coerce.Directed (upcast)
 import Data.Deriving (deriveShow1)
@@ -97,7 +97,7 @@ data MatchInfo l d = MatchInfo
   , nodes :: ![ENode l]
   , analysis :: !d
   }
-  deriving (Eq, Ord, Generic, Generic1, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Generic, Generic1, Functor, P.Foldable, Traversable)
 
 instance Show (SideCondition l d v) where
   showsPrec _ _ = showString "<side condition>"
@@ -289,21 +289,27 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
       BO α (Ur Bool, Mut α (EGraph d l))
     substitute egraph results = reborrowing' egraph \egraph -> Control.do
       !(var, lend) <- asksLinearly PL.$ borrowLinearOnly PL.. Ref.new False
-      (var, egraph) <- forRebor2_ var egraph results \var egraph (Ur (eid, subs, CompiledRule {..})) ->
-        case substPattern subs rhs of
-          Failure _ -> var `lseq` egraph `lseq` error "Substitution produces invalid expression"
-          Success pat -> Control.do
-            (Ur newEid, egraph) <- addNestedENode pat egraph
-            (Ur resl, egraph) <- unsafeMerge eid newEid egraph
-            case resl of
-              Merged {} -> Control.void PL.$ modifyRef (`lseq` True) var
-              AlreadyMerged {} -> Control.pure PL.$ consume var
-            Control.pure (consume egraph)
-      Control.pure PL.$
-        upcast PL.$
-          var `lseq`
-            egraph `lseq`
-              (move PL.. freeRef Control.<$> reclaim' lend)
+      varEGraph <-
+        forReborrowing_
+          (var :- egraph :- BNil)
+          results
+          \(var :- egraph :- BNil) (Ur (eid, subs, CompiledRule {..})) ->
+            case substPattern subs rhs of
+              Failure _ -> var `lseq` egraph `lseq` error "Substitution produces invalid expression"
+              Success pat -> Control.do
+                (Ur newEid, egraph) <- addNestedENode pat egraph
+                (Ur resl, egraph) <- unsafeMerge eid newEid egraph
+                case resl of
+                  Merged {} -> Control.void PL.$ modifyRef (`lseq` True) var
+                  AlreadyMerged {} -> Control.pure PL.$ consume var
+                Control.pure (consume egraph)
+      case varEGraph of
+        var :- egraph :- BNil ->
+          Control.pure PL.$
+            upcast PL.$
+              var `lseq`
+                egraph `lseq`
+                  (move PL.. freeRef Control.<$> reclaim' lend)
 
 addNestedENode ::
   forall d l α.

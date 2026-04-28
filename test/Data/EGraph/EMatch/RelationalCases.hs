@@ -52,18 +52,18 @@ intT i = wrapTerm $ I i
 
 mkCase1 :: Int -> Mut α (EGraph () Lang1) %1 -> BO α (Ur [(EClassId, Substitution String)])
 mkCase1 n egraph = Control.do
-  (ns, egraph) <- forRebor egraph (NE.fromList [1 .. n]) \egraph i ->
+  (ns, egraph) <- forReborrowing egraph (NE.fromList [1 .. n]) \egraph i ->
     move i & \(Ur i) -> Control.do
       (Ur _, eid, egraph) <- addTerm (intT i) egraph
       Control.pure $ egraph `lseq` eid
   Ur ns <- Control.pure $ move ns
-  (gs, egraph) <- forRebor egraph ns \egraph (Ur eid) -> Control.do
+  (gs, egraph) <- forReborrowing egraph ns \egraph (Ur eid) -> Control.do
     (Ur geid, egraph) <- addNode egraph $ ENode $ G eid
     Control.pure $ egraph `lseq` Ur (fromJust geid)
   Ur gs <- Control.pure $ move gs
   (Ur _, egraph) <- merges (unur Data.<$> gs) egraph
   let fs = NE.zipWith (\(Ur nid) (Ur gid) -> ENode $ F nid gid) ns gs
-  (fs, egraph) <- forRebor egraph fs \egraph node ->
+  (fs, egraph) <- forReborrowing egraph fs \egraph node ->
     move node & \(Ur node) -> Control.do
       (Ur feid, egraph) <- addNode egraph node
       Control.pure $ egraph `lseq` fromJust feid

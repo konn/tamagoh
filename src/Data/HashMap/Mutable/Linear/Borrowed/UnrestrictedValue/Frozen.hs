@@ -30,11 +30,13 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen (
   -- * Unsafe operations
   unsafeThaw,
   unsafeFreeze,
+  foldFrozen,
 ) where
 
 import Control.Lens (FoldableWithIndex)
 import Control.Lens qualified as Lens
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Experimental.Loop (Fold, IndexedFold)
 import Control.Monad.Borrow.Pure.Internal
 import Data.Function ((&))
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr, Keyed)
@@ -74,12 +76,19 @@ lookup key (ImmutableHashMapUr hm) = RawLin.lookup key hm PL.& \(Ur !may, !_) ->
 size :: ImmutableHashMapUr k v -> Int
 size (ImmutableHashMapUr hm) = RawLin.size hm & \(Ur !n, !_) -> n
 
-foldMapWithKey :: (Monoid w) => (k -> v -> w) -> ImmutableHashMapUr k v -> w
+foldMapWithKey :: (Monoid w) => (k -> v -> w) -> ImmutableHashMapUr k v %1 -> w
 foldMapWithKey f (ImmutableHashMapUr dic) = unur (Raw.foldMapWithKey (fmap Ur . f) dic)
 
+foldMapWithKeyL :: (PL.Monoid w) => (k -> v -> w) -> ImmutableHashMapUr k v %1 -> w
+foldMapWithKeyL f (ImmutableHashMapUr dic) = Raw.foldMapWithKey f dic
+
 instance Foldable (ImmutableHashMapUr k) where
-  foldMap = foldMapWithKey . const
+  foldMap f v = foldMapWithKey (\_ -> f) v
 
 instance FoldableWithIndex k (ImmutableHashMapUr k) where
-  ifoldMap = foldMapWithKey
+  ifoldMap f x = foldMapWithKey f x
   {-# INLINE ifoldMap #-}
+
+foldFrozen :: IndexedFold k (ImmutableHashMapUr k v) v
+foldFrozen f hm = foldMapWithKeyL (\k v -> f k v) hm
+{-# INLINE foldFrozen #-}

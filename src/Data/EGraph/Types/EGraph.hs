@@ -50,8 +50,9 @@ module Data.EGraph.Types.EGraph (
 import Algebra.Semilattice
 import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
 import Control.Functor.Linear qualified as Control
-import Control.Lens (ifolded, withIndex)
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Experimental.Borrows
+import Control.Monad.Borrow.Pure.Experimental.Loop (iforReborrowingOf_)
 import Control.Monad.Borrow.Pure.Utils hiding ((:-))
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Bifunctor.Linear qualified as Bi
@@ -391,7 +392,7 @@ rebuild = loop
             nubHash
               P.<$> P.mapM (\k -> move k & \(Ur k) -> UrT $ unsafeFind egraph k) todos
 
-          egraph <- forRebor_ egraph todos \egraph eid ->
+          egraph <- forReborrowing_ egraph todos \egraph eid ->
             move eid & \(Ur eid) -> repair egraph eid
           loop egraph
 
@@ -409,46 +410,43 @@ repair egraph eid = Control.do
       Just pare -> HMUr.size pare
   egraph <- reborrowing_ egraph \egraph -> Control.do
     let %1 !(!hashcons, !classes, !uf) = egraph .@ (#hashcons, #classes, #unionFind)
-    Ur !parents <-
-      share classes & \(Ur classes) -> Control.do
-        mpare <- EC.lookupParents classes eid
-        -- This is safe because the parents are not modified in this region
-        case mpare of
-          Nothing ->
-            -- FIXME: id MUST be present in classes - please review the invariant.
+    void $ sharing' classes \classes -> Control.do
+      mpare <- EC.lookupParents classes eid
+      -- This is safe because the parents are not modified in this region
+      (Ur parents, release) <- case mpare of
+        Nothing -> Control.do
+          -- FIXME: id MUST be present in classes - please review the invariant.
+          (pare, lend) <- borrowLinearlyM (HMUr.empty 16)
+          Control.pure (share pare, upcast $ consume Control.<$> reclaim' lend)
+        -- error $ "Impossible mpare None in Parents (divide): " <> P.show eid
+        Just pare -> Control.pure (share pare, After ())
+      void $ HMUr.iterRebor_ (upcast hashcons :- upcast uf :- BNil) parents \(hashcons :- uf :- BNil) !p_node !p_class -> Control.do
+        -- NOTE:
+        --    Seems like removing outdated node significantly worsens performance
+        --    on some cases. Hence, as it doesn't affect soundness, we stop deleting it
+        --    at the cost of some memory leakage.
+        --    One alternative is to remove conditionally when the p_node is outdated,
+        --    but that worsens performance in some cases by ~100x.
 
-            asksLinearly $ FHMUr.empty 16
-          -- error $ "Impossible mpare None in Parents (divide): " <> P.show eid
-          Just pare -> Control.pure $ FHMUr.unsafeFreeze $ unur $ share pare
-    void $ iforRebor2_ hashcons uf parents \ !hashcons !uf !p_node !p_class -> Control.do
-      -- NOTE:
-      --    Seems like removing outdated node significantly worsens performance
-      --    on some cases. Hence, as it doesn't affect soundness, we stop deleting it
-      --    at the cost of some memory leakage.
-      --    One alternative is to remove conditionally when the p_node is outdated,
-      --    but that worsens performance in some cases by ~100x.
-
-      -- !hashcons <- void . HMUr.delete p_node <%= hashcons
-      (Ur !p_node, uf) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node <$~ uf
-      (Ur !p_class, uf) <- UFB.unsafeFind (coerce p_class) <$~ uf
-      Control.pure (consume uf)
-      void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node (coerce p_class) hashcons
+        -- !hashcons <- void . HMUr.delete p_node <%= hashcons
+        (Ur !p_node, uf) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node <$~ uf
+        (Ur !p_class, uf) <- UFB.unsafeFind (coerce p_class) <$~ uf
+        Control.pure (consume uf)
+        void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node (coerce p_class) hashcons
+      Control.pure $ release
 
   (Ur parents, egraph) <- sharing egraph \egraph -> Control.do
     -- FIXME: id MUST be present in classes - please review the invariant.
     !mps <- EC.lookupParents (egraph .# #classes) eid
-    !ps <-
-      {- copy
-        . fromMaybe (error "Must be just") -}
-      maybe (asksLinearly $ HMUr.empty 16) clone mps
-    Control.pure $! FHMUr.freeze ps
+    maybe
+      (asksLinearly $ FHMUr.empty 16)
+      (Control.fmap FHMUr.freeze . clone)
+      mps
   (newParents, egraph) <- reborrowing' egraph \egraph -> Control.do
-    (newPs, newPsLend) <- asksLinearlyM \lin -> Control.do
-      ps <- asksLinearly $ HMUr.empty @(ENode _) @EClassId numParents
-      Control.pure $ borrow ps lin
-    (egraph, newPs) <- forRebor2Of_ (ifolded P.. withIndex) egraph newPs parents $
-      \egraph newPs ncs ->
-        move ncs & \(Ur (p_node, p_class)) -> Control.do
+    (newPs, newPsLend) <- borrowLinearlyM $ HMUr.empty @(ENode _) @EClassId numParents
+    egPs <- iforReborrowingOf_ FHMUr.foldFrozen (egraph :- newPs :- BNil) parents $
+      \(egraph :- newPs :- BNil) p_node p_class ->
+        move (p_node, p_class) & \(Ur (p_node, p_class)) -> Control.do
           (Ur p_node, egraph) <- {-# SCC "repair/loop2/unsafeCanon" #-} unsafeCanonicalize p_node <$~ egraph
           (Ur mem, newPs) <- sharing newPs \newPs -> HMUr.lookup p_node newPs
           Ur newId <- case mem of
@@ -458,34 +456,37 @@ repair egraph eid = Control.do
                 Control.pure $ egraph `lseq` Ur (getMergedId eid)
             Nothing -> unsafeFind egraph p_class
           Control.void $ {-# SCC "upwardMerge/insert" #-} HMUr.insert p_node newId newPs
+    case egPs of
+      egraph :- newPs :- BNil -> Control.do
+        egraph <- newPs `lseq` reborrowing_ egraph (modifyAnalysis id eid)
+        -- Rebuild analysis after modification
+        (Ur ps, egraph) <- sharing egraph \egraph -> Control.do
+          -- FIXME: id MUST be present in classes - please review the invariant.
+          !mps <- EC.lookupParents (egraph .# #classes) eid
+          !ps <-
+            {- copy
+              . fromMaybe (error "Must be just") -}
+            maybe (asksLinearly $ HMUr.empty 16) clone mps
+          Control.pure $! FHMUr.freeze ps
+        void $ iforReborrowingOf_ FHMUr.foldFrozen egraph ps \egraph pNode pClass ->
+          move (pNode, pClass) & \(Ur (pNode, pClass)) ->
+            Control.do
+              (newAnal, egraph) <- sharing egraph \egraph -> Control.do
+                Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
+                Ur old <- EC.lookupAnalysis (egraph .# #classes) pClass
+                let !d = P.maybe analysis (/\ analysis) old
+                if Just d P.== old
+                  then Control.pure Nothing
+                  else Control.pure $ Just $ Ur d
+              case newAnal of
+                Nothing -> Control.pure $ consume egraph
+                Just (Ur d) -> Control.do
+                  egraph <- reborrowing_ egraph \egraph -> Control.do
+                    void $ EC.setAnalysis pClass d (egraph .# #classes)
+                  !set <- {-# SCC "update_worklist/insert" #-} BUV.push pClass (egraph .# #worklist)
+                  Control.pure $ consume set
 
-    egraph <- newPs `lseq` reborrowing_ egraph (modifyAnalysis id eid)
-    -- Rebuild analysis after modification
-    (Ur ps, egraph) <- sharing egraph \egraph -> Control.do
-      -- FIXME: id MUST be present in classes - please review the invariant.
-      !mps <- EC.lookupParents (egraph .# #classes) eid
-      !ps <-
-        {- copy
-          . fromMaybe (error "Must be just") -}
-        maybe (asksLinearly $ HMUr.empty 16) clone mps
-      Control.pure $! FHMUr.freeze ps
-    void $ iforRebor_ egraph ps \egraph pNode pClass -> Control.do
-      (newAnal, egraph) <- sharing egraph \egraph -> Control.do
-        Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
-        Ur old <- EC.lookupAnalysis (egraph .# #classes) pClass
-        let !d = P.maybe analysis (/\ analysis) old
-        if Just d P.== old
-          then Control.pure Nothing
-          else Control.pure $ Just $ Ur d
-      case newAnal of
-        Nothing -> Control.pure $ consume egraph
-        Just (Ur d) -> Control.do
-          egraph <- reborrowing_ egraph \egraph -> Control.do
-            void $ EC.setAnalysis pClass d (egraph .# #classes)
-          !set <- {-# SCC "update_worklist/insert" #-} BUV.push pClass (egraph .# #worklist)
-          Control.pure $ consume set
-
-    Control.pure $ upcast $ reclaim' newPsLend
+        Control.pure $ upcast $ reclaim' newPsLend
 
   void $ setParents eid newParents (egraph .# #classes)
 

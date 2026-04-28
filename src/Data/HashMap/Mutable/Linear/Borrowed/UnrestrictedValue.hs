@@ -7,6 +7,7 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
@@ -48,11 +49,14 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (
   take_,
   union,
   extend,
+  iterRebor_,
 ) where
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Experimental.Loop (for_)
 import Control.Syntax.DataFlow qualified as DataFlow
+import Data.Bifunctor qualified as BiNL
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear (Keyed)
@@ -61,6 +65,7 @@ import Data.HashMap.RobinHood.Mutable.Linear qualified as Raw
 import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
+import Prelude qualified as P
 
 -- * Construction
 
@@ -178,3 +183,14 @@ extend (HM dicRef') dic = Control.do
   let %1 !dic' = freeRef dicRef'
   !dic <- modifyRef (\ !s -> Raw.union s dic') $ coerceBor dic
   Control.pure $! recoerceBor dic
+
+iterRebor_ ::
+  (Reborrowable bor) =>
+  bor α a %1 ->
+  Borrow bk α (HashMapUr k v) %1 ->
+  (forall β. bor (β /\ α) a %1 -> k -> v -> BO (β /\ α) ()) ->
+  BO α (bor α a)
+iterRebor_ bor dic f = Control.do
+  Ur (P.map (BiNL.bimap Ur Ur) -> ents) <- toList dic
+  flip Control.execStateT bor $ for_ ents \(Ur k, Ur v) ->
+    Control.StateT \bor -> locally bor \bor -> f bor k v
