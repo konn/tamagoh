@@ -27,7 +27,6 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Experimental.Loop hiding (toList)
 import Control.Monad.Borrow.Pure.Internal
 import Control.Monad.Borrow.Pure.Utils
 import Control.Syntax.DataFlow qualified as DataFlow
@@ -39,7 +38,6 @@ import Data.Ref.Linear qualified as Ref
 import GHC.TypeError (Unsatisfiable, unsatisfiable)
 import GHC.TypeLits (ErrorMessage (..))
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
-import Prelude.Linear qualified as PL
 import Text.Show.Borrowed (Display (..))
 import Unsafe.Linear qualified as Unsafe
 

@@ -55,6 +55,7 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Experimental.Loop (for_)
+import Control.Monad.Borrow.Pure.Experimental.Reborrowable
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Bifunctor qualified as BiNL
 import Data.Bifunctor.Linear qualified as Bi

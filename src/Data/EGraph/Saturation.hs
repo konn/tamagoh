@@ -51,7 +51,6 @@ import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.Experimental.Loop
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Trans.Maybe (MaybeT (..))
-import Data.Coerce.Directed (upcast)
 import Data.Deriving (deriveShow1)
 import Data.EGraph.EMatch.Relational (ematchDb)
 import Data.EGraph.EMatch.Relational.Database (Database, buildDatabase)

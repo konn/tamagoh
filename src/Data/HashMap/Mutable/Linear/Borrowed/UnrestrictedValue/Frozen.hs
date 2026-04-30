@@ -36,7 +36,7 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen (
 import Control.Lens (FoldableWithIndex)
 import Control.Lens qualified as Lens
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Experimental.Loop (Fold, IndexedFold)
+import Control.Monad.Borrow.Pure.Experimental.Loop (IndexedFold)
 import Control.Monad.Borrow.Pure.Internal
 import Data.Function ((&))
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr, Keyed)

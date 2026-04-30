@@ -57,7 +57,6 @@ import Control.Monad.Borrow.Pure.Utils hiding ((:-))
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (coerce)
-import Data.Coerce.Directed (upcast)
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.EClasses (setParents)
 import Data.EGraph.Types.EClasses qualified as EC
