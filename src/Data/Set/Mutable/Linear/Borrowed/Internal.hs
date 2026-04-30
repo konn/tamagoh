@@ -14,7 +14,7 @@ module Data.Set.Mutable.Linear.Borrowed.Internal (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.BO.Unsafe
 import Control.Monad.Borrow.Pure.Utils (coerceLin)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear qualified as Array
@@ -23,8 +23,9 @@ import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Internal qualified as RawHM
 import Data.List.Linear qualified as List
 import Data.Maybe qualified as P
-import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import Data.Ref.Linear.Borrow (Ref)
+import Data.Ref.Linear.Borrow qualified as Ref
 import Data.Set.Mutable.Linear.Internal qualified as Raw
 import Data.Unrestricted.Linear qualified as Ur
 import GHC.TypeError (ErrorMessage (..), Unsatisfiable)
@@ -44,7 +45,7 @@ newtype Set k = Set (Ref (Raw.Set k))
   deriving newtype (LinearOnly)
 
 instance Consumable (Set k) where
-  consume = \(Set ref) -> consume $ freeRef ref
+  consume = \(Set ref) -> consume $ Ref.free ref
   {-# INLINE consume #-}
 
 instance Dupable (Set k) where
@@ -53,7 +54,7 @@ instance Dupable (Set k) where
   {-# NOINLINE dup2 #-}
   dup2 = Unsafe.toLinear \(Set !ref) -> DataFlow.do
     (lin, !ref) <- withLinearly ref
-    (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, freeRef ref)) ref
+    (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, Ref.free ref)) ref
     case hm of
       Raw.Set hm -> DataFlow.do
         !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
@@ -67,7 +68,7 @@ instance Clone (Set k) where
   -- NOTE: Contrary to HashMap, we do not need deep duplication here,
   -- because Set only contains keys, and keys are nonlinear by convention.
   clone = Unsafe.toLinear \(UnsafeAlias (Set !ref)) -> Control.do
-    !hm <- Control.pure $ freeRef ref
+    !hm <- Control.pure $ Ref.free ref
     case hm of
       Raw.Set hm -> DataFlow.do
         !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
@@ -99,7 +100,7 @@ askRaw_ ::
   BO α a
 askRaw_ f dic = case share dic of
   Ur !dic -> Control.do
-    Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias !dic) <- Ref.readShare (coerceBor dic)
     case f dic of
       !res -> Control.pure res
 

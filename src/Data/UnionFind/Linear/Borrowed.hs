@@ -34,10 +34,11 @@ module Data.UnionFind.Linear.Borrowed (
 import Control.Functor.Linear (asks, runReader)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.BO.Unsafe
 import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Ref.Linear qualified as Ref
+import Data.Ref.Linear.Borrow qualified as Ref
 import Data.UnionFind.Linear (Key)
 import Data.UnionFind.Linear qualified as Raw
 import Data.UnionFind.Linear.Borrowed.Internal
@@ -62,7 +63,7 @@ find ::
   Key -> Borrow k α UnionFind %m -> BO α (Ur (Maybe Key))
 find key (UnsafeAlias bor) = Control.do
   let %1 borRef = coerceUF (UnsafeAlias bor :: Mut α _)
-  (!key, UnsafeAlias !a) <- updateRef (Control.pure . Raw.find key) borRef
+  (!key, UnsafeAlias !a) <- Ref.update (Control.pure . Raw.find key) borRef
   Control.pure $ unsafeLeak a `lseq` key
 
 member ::
@@ -71,19 +72,19 @@ member ::
 member key bor =
   share bor & \(Ur bor) -> Control.do
     let %1 borRef = coerceUF bor
-    Ur (UnsafeAlias (Raw.UnionFind n _ _)) <- readSharedRef borRef
+    Ur (UnsafeAlias (Raw.UnionFind n _ _)) <- Ref.readShare borRef
     Control.pure $ Ur (Raw.getKey key P.< n)
 
 unsafeFind :: forall k α m. Key -> Borrow k α UnionFind %m -> BO α (Ur Key)
 unsafeFind key (UnsafeAlias bor) = Control.do
   let %1 borRef = coerceUF (UnsafeAlias bor :: Mut α _)
-  (!key, UnsafeAlias !a) <- updateRef (Control.pure . Raw.unsafeFind key) borRef
+  (!key, UnsafeAlias !a) <- Ref.update (Control.pure . Raw.unsafeFind key) borRef
   Control.pure $ unsafeLeak a `lseq` key
 
 fresh :: Mut α UnionFind %1 -> BO α (Ur Key, Mut α UnionFind)
 fresh uf = Control.do
   let %1 borRef = coerceUF uf
-  Bi.second recoerceUF Control.<$> updateRef (Control.pure . Raw.fresh) borRef
+  Bi.second recoerceUF Control.<$> Ref.update (Control.pure . Raw.fresh) borRef
 
 union ::
   Key ->
@@ -92,7 +93,7 @@ union ::
   BO α (Ur (Maybe Key), Mut α UnionFind)
 union k1 k2 uf = Control.do
   let %1 borRef = coerceUF uf
-  Bi.second recoerceUF Control.<$> updateRef (Control.pure . Raw.union k1 k2) borRef
+  Bi.second recoerceUF Control.<$> Ref.update (Control.pure . Raw.union k1 k2) borRef
 
 unsafeUnion ::
   Key ->
@@ -101,14 +102,14 @@ unsafeUnion ::
   BO α (Ur Key, Mut α UnionFind)
 unsafeUnion k1 k2 uf = Control.do
   let %1 borRef = coerceUF uf
-  Bi.second recoerceUF Control.<$> updateRef (Control.pure . Raw.unsafeUnion k1 k2) borRef
+  Bi.second recoerceUF Control.<$> Ref.update (Control.pure . Raw.unsafeUnion k1 k2) borRef
 
 equivalent ::
   forall k α m.
   Key -> Key -> Borrow k α UnionFind %m -> BO α (Ur (Maybe Bool))
 equivalent k1 k2 (UnsafeAlias uf) = Control.do
   let %1 borRef = coerceUF (UnsafeAlias uf :: Mut α _)
-  (r, uf) <- updateRef (Control.pure . Raw.equivalent k1 k2) borRef
+  (r, uf) <- Ref.update (Control.pure . Raw.equivalent k1 k2) borRef
   Control.pure $ uf `lseq` r
 
 {- |
@@ -121,5 +122,5 @@ unsafeEquivalent ::
   Key -> Key -> Borrow k α UnionFind %m -> BO α (Ur Bool)
 unsafeEquivalent k1 k2 (UnsafeAlias uf) = Control.do
   let %1 borRef = coerceUF (UnsafeAlias uf :: Mut α _)
-  (r, uf) <- updateRef (Control.pure . Raw.unsafeEquivalent k1 k2) borRef
+  (r, uf) <- Ref.update (Control.pure . Raw.unsafeEquivalent k1 k2) borRef
   Control.pure $ uf `lseq` r

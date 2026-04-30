@@ -16,7 +16,6 @@ module Data.UnionFind.Linear.Immutable (
 import Control.Monad.Borrow.Pure (Linearly)
 import Control.Monad.Borrow.Pure.Freeze hiding (freeze, thaw, unsafeThaw)
 import Control.Monad.Borrow.Pure.Freeze qualified as Freeze
-import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
 import Data.UnionFind.Linear (Key)
 import Data.UnionFind.Linear qualified as Unborrowed
@@ -34,7 +33,7 @@ data UnionFind where
   UnionFind :: {-# UNPACK #-} !Unborrowed.UnionFind %'Many -> UnionFind
 
 instance Freeze Raw.UnionFind UnionFind where
-  basicFreeze = Unsafe.toLinear \(Raw.UF !uf) -> Ur $! UnionFind $! freeRef uf
+  basicFreeze = Unsafe.toLinear \(Raw.UF !uf) -> Ur $! UnionFind $! Ref.free uf
   {-# NOINLINE basicUnsafeThaw #-}
   basicUnsafeThaw = GHC.noinline \(UnionFind !uf) lin ->
     Raw.UF PL.$! Ref.new uf lin

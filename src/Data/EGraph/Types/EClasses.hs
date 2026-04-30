@@ -41,7 +41,7 @@ import Algebra.Semilattice
 import Control.Functor.Linear (void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal (Alias (..))
+import Control.Monad.Borrow.Pure.BO.Unsafe (Alias (..))
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (Coercible, coerce)
 import Data.EGraph.Types.EClassId
@@ -59,8 +59,8 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe.Linear
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
-import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import Data.Ref.Linear.Borrow qualified as Ref
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted (Movable1)
@@ -80,7 +80,7 @@ analyses clss =
         ( \(Ur k, bor) ->
             move bor & \(Ur bor) -> Control.do
               Ur nodes <- Set.toList (bor .# #nodes)
-              Ur anal <- Data.fmap copy Control.<$> readSharedRef (bor .# #analysis)
+              Ur anal <- Data.fmap copy Control.<$> Ref.readShare (bor .# #analysis)
               Control.pure (k, (nodes, anal))
         )
         dic
@@ -110,7 +110,7 @@ lookupAnalysis classes eid =
     case mclass of
       Nothing -> Control.pure (Ur Nothing)
       Just eclass -> Control.do
-        Ur (UnsafeAlias !a) <- readSharedRef (eclass .# #analysis)
+        Ur (UnsafeAlias !a) <- Ref.readShare (eclass .# #analysis)
         Control.pure (Ur (Just a))
 
 setAnalysis ::
@@ -126,7 +126,7 @@ setAnalysis eid d classes = Control.do
   case mclass of
     Nothing -> Control.pure $ Ur False
     Just eclass -> Control.do
-      ref <- modifyRef (`lseq` d) $ eclass .# #analysis
+      ref <- Ref.modify (`lseq` d) $ eclass .# #analysis
       Control.pure $ ref `lseq` Ur True
 
 delete ::
@@ -254,7 +254,7 @@ unsafeMerge eid1 eid2 clss
       let %1 !EClass {nodes = !rnodes, parents = !rparents, analysis = !ra} = case mr of
             Nothing -> error "EGraph.Types.EClasses.unsafeMerge: eid2 not found"
             Just eclass -> eclass
-      let %1 !(Ur ranalysis) = move $ freeRef ra
+      let %1 !(Ur ranalysis) = move $ Ref.free ra
       clss <- reborrowing_ clss \clss0 -> Control.do
         let clss = coerceLin clss0 :: Mut _ (Raw d l)
         l <- HMB.lookup eid1 clss
@@ -265,7 +265,7 @@ unsafeMerge eid1 eid2 clss
             l <- reborrowing_ l \l -> void $ HMUr.extend rparents (l .# #parents)
 
             void $ reborrowing_ l \l -> Control.do
-              void $ modifyRef (\la -> move la & \(Ur la) -> la /\ ranalysis) (l .# #analysis)
+              void $ Ref.modify (\la -> move la & \(Ur la) -> la /\ ranalysis) (l .# #analysis)
 
       Control.pure clss
 

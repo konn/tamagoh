@@ -33,6 +33,7 @@ module Data.Unrestricted.Linear.Lifted (
 
 import Control.Applicative (Const)
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Copyable
 import Data.Functor.Linear qualified as Data
 import Data.Kind (Constraint, Type)
 import Data.Proxy (Proxy)

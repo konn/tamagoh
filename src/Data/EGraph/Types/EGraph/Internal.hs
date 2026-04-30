@@ -28,6 +28,7 @@ import Algebra.Semilattice (Semilattice)
 import Control.Functor.Linear qualified as Control
 import Control.Lens (Lens', view, _1, _2, _3, _4)
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Copyable
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
 import Data.Bifunctor qualified as Bi
 import Data.EGraph.Types.EClassId

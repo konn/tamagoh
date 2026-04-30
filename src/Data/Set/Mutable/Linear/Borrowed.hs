@@ -33,7 +33,7 @@ module Data.Set.Mutable.Linear.Borrowed (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.BO.Unsafe
 import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear qualified as Array
@@ -44,8 +44,9 @@ import Data.DList qualified as DL
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Internal qualified as RawHM
 import Data.Linear.Witness.Compat (fromPB)
-import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import Data.Ref.Linear.Borrow (Ref)
+import Data.Ref.Linear.Borrow qualified as Ref
 import Data.Set.Mutable.Linear (Keyed)
 import Data.Set.Mutable.Linear.Borrowed.Internal
 import Data.Set.Mutable.Linear.Internal qualified as Raw
@@ -75,7 +76,7 @@ fromList = Unsafe.toLinear \ !keys -> \l ->
 
 insert :: (Keyed k) => k -> Mut α (Set k) %1 -> BO α (Mut α (Set k))
 insert = Unsafe.toLinear \ !key -> \ !set -> Control.do
-  set <- modifyRef (\ !s -> Raw.insert key s) (coerceBor set)
+  set <- Ref.modify (\ !s -> Raw.insert key s) (coerceBor set)
   Control.pure $! recoerceBor set
 
 inserts :: (Keyed k) => [k] -> Mut α (Set k) %1 -> BO α (Mut α (Set k))
@@ -91,7 +92,7 @@ askRaw ::
   BO α a
 askRaw f dic = case share dic of
   Ur dic -> Control.do
-    Ur (UnsafeAlias dic) <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias dic) <- Ref.readShare (coerceBor dic)
     case f dic of
       -- NOTE: This @dic@ is RAW memory block,
       -- so we MUST NOT 'consume' it here, and instead just intentionally leak it.
@@ -125,7 +126,7 @@ rawToList' = \(Raw.Set (RawHM.HashMap _ n !robinArr)) ->
    in go 0 robinArr P.mempty
 
 toListUnborrowed :: Set k %1 -> Ur [k]
-toListUnborrowed (Set ref) = rawToList' (freeRef ref)
+toListUnborrowed (Set ref) = rawToList' (Ref.free ref)
 
 null :: (Keyed k) => Borrow bk α (Set k) %m -> BO α (Ur Bool)
 {-# INLINE null #-}
@@ -148,7 +149,7 @@ take set = Control.do
 -- | Takes all elements from the set, leaving it empty with specified capacity.
 takeWithCapa :: forall k α. (Keyed k) => Int -> Mut α (Set k) %1 -> BO α (Set k, Mut α (Set k))
 takeWithCapa n set = Control.do
-  Bi.second recoerceBor Control.<$> updateRef go (coerceBor set)
+  Bi.second recoerceBor Control.<$> Ref.update go (coerceBor set)
   where
     go :: Raw.Set k %1 -> BO α (Set k, Raw.Set k)
     go s = asksLinearlyM \lin ->
@@ -170,13 +171,13 @@ swap ::
   BO α (Set k, Mut α (Set k))
 swap keys dic = asksLinearlyM \lin -> Control.do
   Bi.second recoerceBor
-    Control.<$> updateRef (\old -> Control.pure (Set $! Ref.new old lin, freeRef $ inner keys)) (coerceBor dic)
+    Control.<$> Ref.update (\old -> Control.pure (Set $! Ref.new old lin, Ref.free $ inner keys)) (coerceBor dic)
 
 extend :: forall k α. (Keyed k) => Set k %1 -> Mut α (Set k) %1 -> BO α (Mut α (Set k))
 extend (Set keysRef) dic = Control.do
   let %1 dic' = coerceLin dic :: Mut α (Ref (Raw.Set k))
-      %1 !keys = freeRef keysRef
-  dic' <- modifyRef (\ !s -> Raw.union s keys) dic'
+      %1 !keys = Ref.free keysRef
+  dic' <- Ref.modify (\ !s -> Raw.union s keys) dic'
   Control.pure $! recoerceBor dic'
 
 coerceLin :: (Coercible a b) => a %1 -> b
@@ -185,4 +186,4 @@ coerceLin = Unsafe.toLinear \ !a -> coerce a
 union :: (Keyed k) => Set k %1 -> Set k %1 -> Set k
 union (Set set1) (Set set2) = DataFlow.do
   (l, set1) <- withLinearly set1
-  Set $ Ref.new (Raw.union (freeRef set1) (freeRef set2)) l
+  Set $ Ref.new (Raw.union (Ref.free set1) (Ref.free set2)) l

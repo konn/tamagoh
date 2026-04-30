@@ -33,7 +33,7 @@ module Data.HashMap.Mutable.Linear.Borrowed (
 import Control.Functor.Linear (StateT (..), runStateT)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.BO.Unsafe
 import Control.Monad.Borrow.Pure.Utils (swapTuple, unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear qualified as Array
@@ -49,8 +49,9 @@ import Data.HashMap.Mutable.Linear.Internal qualified as Raw
 import Data.HashMap.Mutable.Linear.Witness qualified as Raw
 import Data.HashSet qualified as IHS
 import Data.Linear.Witness.Compat (fromPB)
-import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import Data.Ref.Linear.Borrow (Ref)
+import Data.Ref.Linear.Borrow qualified as Ref
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
@@ -75,7 +76,7 @@ insert ::
   BO α (Maybe v, Mut α (HashMap k v))
 insert key !v !dic = Control.do
   (mval, dic) <-
-    updateRef
+    Ref.update
       ( \dic ->
           Control.fmap swapTuple $
             flip runStateT (Just v) $
@@ -88,7 +89,7 @@ delete ::
   (Keyed k) => k -> Mut α (HashMap k v) %1 -> BO α (Maybe v, Mut α (HashMap k v))
 delete key dic = Control.do
   (mval, dic) <-
-    updateRef
+    Ref.update
       ( \dic ->
           Control.fmap swapTuple $
             flip runStateT Nothing $
@@ -110,7 +111,7 @@ alter ::
   BO α (Mut α (HashMap k v))
 alter f k =
   Control.fmap recoerceBor
-    . modifyRef (Raw.alter (Unsafe.toLinear $ forceMay . f . forceMay) k)
+    . Ref.modify (Raw.alter (Unsafe.toLinear $ forceMay . f . forceMay) k)
     . coerceBor
 
 alterF ::
@@ -121,7 +122,7 @@ alterF ::
   BO α (Mut α (HashMap k v))
 alterF f key dic = Control.do
   ((), dic) <-
-    updateRef
+    Ref.update
       ( Control.fmap ((),)
           . Raw.alterF (Control.fmap (Unsafe.toLinear Ur . forceMay) . Unsafe.toLinear f . forceMay) key
       )
@@ -134,7 +135,7 @@ askRaw ::
   BO α a
 askRaw f dic = case share dic of
   Ur !dic -> Control.do
-    Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias !dic) <- Ref.readShare (coerceBor dic)
     case f dic of
       -- NOTE: This @dic@ is RAW memory block,
       -- so we MUST NOT 'consume' it here, and instead just intentionally leak it.
@@ -172,7 +173,7 @@ askRaw_ ::
 {-# INLINE askRaw_ #-}
 askRaw_ f dic = case share dic of
   Ur !dic -> Control.do
-    Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias !dic) <- Ref.readShare (coerceBor dic)
     case move (f dic) of
       Ur !res -> Control.pure res
 
@@ -203,12 +204,12 @@ swap ::
   BO α (HashMap k v, Mut α (HashMap k v))
 swap keys dic = asksLinearlyM \lin -> Control.do
   Bi.second recoerceBor
-    Control.<$> updateRef (\ !old -> Control.pure (HM $ Ref.new old lin, freeRef $ inner keys)) (coerceBor dic)
+    Control.<$> Ref.update (\ !old -> Control.pure (HM $ Ref.new old lin, Ref.free $ inner keys)) (coerceBor dic)
 
 -- | Takes all elements from the set, leaving it empty.
 take :: forall k v α. (Keyed k) => Mut α (HashMap k v) %1 -> BO α (HashMap k v, Mut α (HashMap k v))
 take dic = Control.do
-  Bi.second recoerceBor Control.<$> updateRef go (coerceBor dic)
+  Bi.second recoerceBor Control.<$> Ref.update go (coerceBor dic)
   where
     go :: Raw.HashMap k v %1 -> BO α (HashMap k v, Raw.HashMap k v)
     go s = asksLinearlyM \lin ->
@@ -222,4 +223,4 @@ take_ set = Control.fmap (uncurry $ flip lseq) $ take set
 union :: (Keyed k) => HashMap k v %1 -> HashMap k v %1 -> HashMap k v
 union (HM ref1) (HM ref2) = DataFlow.do
   (l, ref1) <- withLinearly ref1
-  HM $! Ref.new (Raw.union (freeRef ref1) (freeRef ref2)) l
+  HM $! Ref.new (Raw.union (Ref.free ref1) (Ref.free ref2)) l

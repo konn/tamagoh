@@ -14,11 +14,12 @@ module Data.UnionFind.Linear.Borrowed.Internal (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.BO.Unsafe
 import Control.Monad.Borrow.Pure.Utils (coerceLin)
 import Control.Syntax.DataFlow qualified as DataFlow
-import Data.Ref.Linear (freeRef)
+import Data.Ref.Linear (Ref)
 import Data.Ref.Linear qualified as Ref
+import Data.Ref.Linear.Borrow qualified as Ref
 import Data.UnionFind.Linear qualified as Raw
 import Data.UnionFind.Linear.Internal qualified as Raw
 import Data.Vector.Mutable.Linear.Unboxed qualified as Vector
@@ -33,7 +34,7 @@ newtype UnionFind = UF (Ref Raw.UnionFind)
 
 instance Dupable UnionFind where
   dup2 = Unsafe.toLinear \(UF ref) -> DataFlow.do
-    !uf <- Unsafe.toLinear freeRef ref
+    !uf <- Unsafe.toLinear Ref.free ref
     (ref, !uf2) <- Unsafe.toLinear (\(_, uf2) -> (ref, uf2)) $ dup2 uf
     (lin, ref) <- withLinearly ref
     (UF ref, UF $! Ref.new uf2 lin)
@@ -41,7 +42,7 @@ instance Dupable UnionFind where
 instance Display UnionFind where
   displayPrec _ ref = Control.do
     let %1 borRef = coerceUF ref
-    Ur (UnsafeAlias (Raw.UnionFind !n !parent !rank)) <- readSharedRef borRef
+    Ur (UnsafeAlias (Raw.UnionFind !n !parent !rank)) <- Ref.readShare borRef
     let Ur ps = Vector.toList parent
         Ur rs = Vector.toList rank
     Control.pure $
@@ -56,7 +57,7 @@ instance Display UnionFind where
           P.. showString " }"
 
 instance Consumable UnionFind where
-  consume (UF ref) = consume $ freeRef ref
+  consume (UF ref) = consume $ Ref.free ref
   {-# INLINE consume #-}
 
 coerceUF :: Borrow k α UnionFind %1 -> Borrow k α (Ref Raw.UnionFind)

@@ -27,14 +27,15 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.BO.Unsafe
 import Control.Monad.Borrow.Pure.Utils
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Function qualified as P
 import Data.HashMap.RobinHood.Mutable.Linear qualified as Raw
 import Data.List qualified as P
-import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import Data.Ref.Linear.Borrow (Ref)
+import Data.Ref.Linear.Borrow qualified as Ref
 import GHC.TypeError (Unsatisfiable, unsatisfiable)
 import GHC.TypeLits (ErrorMessage (..))
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
@@ -48,7 +49,7 @@ newtype HashMapUr k v = HM (Ref (Raw.HashMap k v))
   deriving newtype (LinearOnly)
 
 instance Consumable (HashMapUr k v) where
-  consume = \(HM ref) -> consume $ freeRef ref
+  consume = \(HM ref) -> consume $ Ref.free ref
   {-# INLINE consume #-}
 
 -- | Dupable instance without deep cloning (values are unrestricted).
@@ -56,7 +57,7 @@ instance Dupable (HashMapUr k v) where
   {-# NOINLINE dup2 #-}
   dup2 = Unsafe.toLinear \(HM !ref) -> DataFlow.do
     (lin, !ref) <- withLinearly ref
-    (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, freeRef ref)) ref
+    (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, Ref.free ref)) ref
     !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
     (HM ref, HM $! Ref.new hm' lin)
 
@@ -71,7 +72,7 @@ instance
 instance Clone (HashMapUr k v) where
   clone = Unsafe.toLinear \(UnsafeAlias (HM !ref)) -> Control.do
     lin <- askLinearly
-    !hm <- Control.pure (freeRef ref)
+    !hm <- Control.pure (Ref.free ref)
     !hm' <- Unsafe.toLinear (\(!_, !hm') -> Control.pure hm') $ dup hm
     Control.pure $ HM $! Ref.new hm' lin
 
@@ -97,7 +98,7 @@ askRaw_ ::
 {-# INLINE askRaw_ #-}
 askRaw_ f dic = case share dic of
   Ur !dic -> Control.do
-    Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias !dic) <- Ref.readShare (coerceBor dic)
     case f dic of
       !res -> Control.pure res
 
@@ -124,7 +125,7 @@ askRaw ::
   BO α a
 askRaw f dic = case share dic of
   Ur !dic -> Control.do
-    Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias !dic) <- Ref.readShare (coerceBor dic)
     case f dic of
       -- NOTE: This @dic@ is RAW memory block,
       -- so we MUST NOT 'consume' it here, and instead just intentionally leak it.

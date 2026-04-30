@@ -15,6 +15,7 @@
 module Data.EGraph.Types.ENode (ENode (..), children) where
 
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Clone
 import Data.EGraph.Types.EClassId
 import Data.Foldable qualified as F
 import Data.Functor.Classes (Eq1, Ord1, Show1)

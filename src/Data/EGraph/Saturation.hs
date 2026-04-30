@@ -48,6 +48,7 @@ import Control.Functor.Linear (StateT (..))
 import Control.Functor.Linear qualified as Control
 import Control.Lens (Lens', (?~), (^.), _1)
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Clone
 import Control.Monad.Borrow.Pure.Experimental.Loop
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Trans.Maybe (MaybeT (..))
@@ -71,17 +72,17 @@ import Data.Hashable.Lifted (Hashable1)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (mapMaybe)
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
-import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import Data.Ref.Linear.Borrow qualified as Ref
 import Data.Semigroup (Arg (..), ArgMin, Min (..))
 import Data.Strict qualified as St
 import Data.Traversable qualified as Traverse
 import Data.Unrestricted.Linear (UrT (..), runUrT)
-import Data.Unrestricted.Linear.Lifted (Movable1)
+import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
 import GHC.Generics (Generic, Generic1)
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
-import Prelude.Linear (Consumable (consume), Dupable, Movable, Ur (..), consume, lseq, move)
+import Prelude.Linear (lseq)
 import Prelude.Linear qualified as PL
 import Text.Show.Borrowed (AsCopyableShow (..), Display)
 import Validation (Validation (..))
@@ -287,7 +288,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
       [Ur (EClassId, Substitution v, CompiledRule l d v)] %1 ->
       BO α (Ur Bool, Mut α (EGraph d l))
     substitute egraph results = reborrowing' egraph \egraph -> Control.do
-      !(var, lend) <- asksLinearly PL.$ borrowLinearOnly PL.. Ref.new False
+      !(var, lend) <- borrowLinearlyM (Ref.new False)
       varEGraph <-
         forReborrowing_
           (var :- egraph :- BNil)
@@ -299,7 +300,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                 (Ur newEid, egraph) <- addNestedENode pat egraph
                 (Ur resl, egraph) <- unsafeMerge eid newEid egraph
                 case resl of
-                  Merged {} -> Control.void PL.$ modifyRef (`lseq` True) var
+                  Merged {} -> Control.void PL.$ Ref.modify (`lseq` True) var
                   AlreadyMerged {} -> Control.pure PL.$ consume var
                 Control.pure (consume egraph)
       case varEGraph of
@@ -308,7 +309,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
             upcast PL.$
               var `lseq`
                 egraph `lseq`
-                  (move PL.. freeRef Control.<$> reclaim' lend)
+                  (move PL.. Ref.free Control.<$> reclaim' lend)
 
 addNestedENode ::
   forall d l α.

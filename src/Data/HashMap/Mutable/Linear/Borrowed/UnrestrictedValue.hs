@@ -63,8 +63,8 @@ import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear (Keyed)
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal
 import Data.HashMap.RobinHood.Mutable.Linear qualified as Raw
-import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import Data.Ref.Linear.Borrow qualified as Ref
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
 import Prelude qualified as P
 
@@ -89,7 +89,7 @@ insert ::
   BO α (Ur (Maybe v), Mut α (HashMapUr k v))
 insert key !v !dic = Control.do
   (Ur mval, dic) <-
-    updateRef
+    Ref.update
       (\dic -> Control.pure $ Raw.insert key v dic)
       (coerceBor dic)
   Control.pure (Ur $ forceMay mval, recoerceBor dic)
@@ -98,7 +98,7 @@ delete ::
   (Keyed k) => k -> Mut α (HashMapUr k v) %1 -> BO α (Ur (Maybe v), Mut α (HashMapUr k v))
 delete key dic = Control.do
   (Ur mval, dic) <-
-    updateRef
+    Ref.update
       (\dic -> Control.pure $ Raw.delete key dic)
       (coerceBor dic)
   Control.pure (Ur $ forceMay mval, recoerceBor dic)
@@ -116,7 +116,7 @@ alter ::
   BO α (Mut α (HashMapUr k v))
 alter f k =
   Control.fmap recoerceBor
-    . modifyRef (Raw.alter f k)
+    . Ref.modify (Raw.alter f k)
     . coerceBor
 
 alterF ::
@@ -127,7 +127,7 @@ alterF ::
   BO α (Mut α (HashMapUr k v))
 alterF f key dic = Control.do
   ((), dic) <-
-    updateRef
+    Ref.update
       ( Control.fmap ((),)
           . Raw.alterF (\ !may -> Data.fmap forceMay Control.<$> f (forceMay may)) key
       )
@@ -158,12 +158,12 @@ swap ::
   BO α (HashMapUr k v, Mut α (HashMapUr k v))
 swap keys dic = asksLinearlyM \lin -> Control.do
   Bi.second recoerceBor
-    Control.<$> updateRef (\ !old -> Control.pure (HM $ Ref.new old lin, freeRef $ inner keys)) (coerceBor dic)
+    Control.<$> Ref.update (\ !old -> Control.pure (HM $ Ref.new old lin, Ref.free $ inner keys)) (coerceBor dic)
 
 -- | Takes all elements from the map, leaving it empty.
 take :: forall k v α. Mut α (HashMapUr k v) %1 -> BO α (HashMapUr k v, Mut α (HashMapUr k v))
 take dic = Control.do
-  Bi.second recoerceBor Control.<$> updateRef go (coerceBor dic)
+  Bi.second recoerceBor Control.<$> Ref.update go (coerceBor dic)
   where
     go :: Raw.HashMap k v %1 -> BO α (HashMapUr k v, Raw.HashMap k v)
     go s = asksLinearlyM \lin ->
@@ -177,12 +177,12 @@ take_ dic = Control.fmap (uncurry $ flip lseq) $ take dic
 union :: (Keyed k) => HashMapUr k v %1 -> HashMapUr k v %1 -> HashMapUr k v
 union (HM ref1) (HM ref2) = DataFlow.do
   (l, ref1) <- withLinearly ref1
-  HM $! Ref.new (Raw.union (freeRef ref1) (freeRef ref2)) l
+  HM $! Ref.new (Raw.union (Ref.free ref1) (Ref.free ref2)) l
 
 extend :: (Keyed k) => HashMapUr k v %1 -> Mut α (HashMapUr k v) %1 -> BO α (Mut α (HashMapUr k v))
 extend (HM dicRef') dic = Control.do
-  let %1 !dic' = freeRef dicRef'
-  !dic <- modifyRef (\ !s -> Raw.union s dic') $ coerceBor dic
+  let %1 !dic' = Ref.free dicRef'
+  !dic <- Ref.modify (\ !s -> Raw.union s dic') $ coerceBor dic
   Control.pure $! recoerceBor dic
 
 iterRebor_ ::

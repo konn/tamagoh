@@ -26,10 +26,12 @@ module Text.Show.Borrowed (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.BO.Unsafe
 import Data.Functor.Linear qualified as Data
 import Data.Int
 import Data.List.Linear qualified as List
+import Data.Ref.Linear.Borrow (Ref)
+import Data.Ref.Linear.Borrow qualified as Ref
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Word
 import GHC.Exts (Any, Multiplicity (..))
@@ -43,7 +45,7 @@ class Display a where
 
 instance (Display a) => Display (Ref a) where
   displayPrec d bor = Control.do
-    Ur bor <- readSharedRef bor
+    Ur bor <- Ref.readShare bor
     displayPrec d bor
 
 instance (Show a) => Display (Ur a) where

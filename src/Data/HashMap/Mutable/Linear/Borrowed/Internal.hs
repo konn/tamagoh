@@ -15,7 +15,7 @@ module Data.HashMap.Mutable.Linear.Borrowed.Internal (
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Internal
+import Control.Monad.Borrow.Pure.BO.Unsafe
 import Control.Monad.Borrow.Pure.Utils (coerceLin, deepCloneArray', unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Array.Mutable.Linear qualified as Array
@@ -26,8 +26,9 @@ import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear qualified as Raw
 import Data.HashMap.Mutable.Linear.Internal qualified as Raw
 import Data.List.Linear qualified as List
-import Data.Ref.Linear (freeRef)
 import Data.Ref.Linear qualified as Ref
+import Data.Ref.Linear.Borrow (Ref)
+import Data.Ref.Linear.Borrow qualified as Ref
 import Data.Unrestricted.Linear qualified as Ur
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
 import Text.Show.Borrowed (Display (..))
@@ -57,7 +58,7 @@ newtype HashMap k v = HM (Ref (Raw.HashMap k v))
   deriving newtype (LinearOnly)
 
 instance Consumable (HashMap k v) where
-  consume = \(HM ref) -> consume $ freeRef ref
+  consume = \(HM ref) -> consume $ Ref.free ref
   {-# INLINE consume #-}
 
 instance (Show k, Display v) => Display (HashMap k v) where
@@ -80,7 +81,7 @@ instance (Dupable v) => Dupable (HashMap k v) where
   -- otherwise, the duplicated cells would be 'consume'd earlier and can (and actually) cause SEGV.
   dup2 = Unsafe.toLinear \(HM !ref) -> DataFlow.do
     (lin, !ref) <- withLinearly ref
-    (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, freeRef ref)) ref
+    (ref, !hm) <- Unsafe.toLinear (\ref -> (ref, Ref.free ref)) ref
     hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ deepCloneHashMap hm
     (HM ref, HM $ Ref.new hm' lin)
 
@@ -90,7 +91,7 @@ toBorrowList ::
   BO α [(Ur k, Borrow bk α v)]
 toBorrowList ref =
   share ref & \(Ur dic) -> Control.do
-    Ur (UnsafeAlias !dic) <- readSharedRef (coerceBor dic)
+    Ur (UnsafeAlias !dic) <- Ref.readShare (coerceBor dic)
     Unsafe.toLinear
       ( \(Raw.HashMap _ n !robinArr) ->
           let go :: Int -> Array.Array (Maybe (Raw.RobinVal k v)) %1 -> DList (Ur k, Borrow bk α v) -> BO α [(Ur k, Borrow bk α v)]

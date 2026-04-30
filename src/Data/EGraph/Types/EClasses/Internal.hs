@@ -22,12 +22,14 @@ module Data.EGraph.Types.EClasses.Internal (
 ) where
 
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.Copyable
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
+import Data.Ref.Linear.Borrow (Ref)
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
