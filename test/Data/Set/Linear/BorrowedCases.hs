@@ -24,7 +24,6 @@ module Data.Set.Linear.BorrowedCases (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Syntax.DataFlow qualified as DataFlow
-import Data.Coerce.Directed (upcast)
 import Data.Hashable (Hashable)
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import Data.Set.Mutable.Linear.Borrowed qualified as Set
@@ -91,7 +90,7 @@ copyCase dic = Control.do
     dic <- Set.insert 1 dic
     (Ur insertedOrig, dic) <- sharing dic $ \dic -> Set.toList dic
     (dupedRaw, dic) <- sharing dic $ \dic -> clone dic
-    let %1 !(duped, lentDuped) = borrowLinearOnly dupedRaw
+    (duped, lentDuped) <- borrowM dupedRaw
     (Ur initDup, duped) <- sharing duped \duped -> Set.toList duped
     dic <- Set.insert 2 dic
     (Ur twiceInsertedOrig, dic) <- sharing dic $ \dic -> Set.toList dic

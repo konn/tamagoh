@@ -13,7 +13,7 @@ import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Data.Maybe (isJust)
 import Data.UnionFind.Linear.Borrowed
-import Prelude.Linear (Ur (..), lseq, move, unur)
+import Prelude.Linear (lseq, unur)
 import Prelude.Linear qualified as PL
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -25,7 +25,7 @@ test_union =
     [ testCase "disjoint" do
         let Ur (bothJust, noneq) = linearly \l -> runBO l Control.do
               uf0 <- asksLinearly empty
-              let %1 !(uf, lend) = borrowLinearOnly uf0
+              (uf, lend) <- borrowM uf0
               (Ur key1, uf) <- fresh uf
               (Ur key2, uf) <- fresh uf
               (eql, uf) <- sharing uf \uf -> Control.do
@@ -41,7 +41,7 @@ test_union =
         let (key1, key2, newKey, k1, k2) = linearly \l ->
               runBO l Control.do
                 uf0 <- asksLinearly empty
-                let %1 !(uf, lend) = borrowLinearOnly uf0
+                (uf, lend) <- borrowM uf0
                 (Ur key1, uf) <- fresh uf
                 (Ur key2, uf) <- fresh uf
                 (Ur newKey, uf) <- union key1 key2 uf
@@ -62,7 +62,7 @@ test_union =
         let ((key1, key2, key3), newKey, k1, k2, k3) = linearly \l ->
               runBO l Control.do
                 uf0 <- asksLinearly empty
-                let %1 !(uf, lend) = borrowLinearOnly uf0
+                (uf, lend) <- borrowM uf0
                 (Ur key1, uf) <- fresh uf
                 (Ur key2, uf) <- fresh uf
                 (Ur key3, uf) <- fresh uf
