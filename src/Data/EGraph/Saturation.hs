@@ -231,7 +231,11 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
               if madeProgress
                 then Control.do
                   egraph <- rebuild egraph
-                  go (iterNum + 1) schedState' (subtract 1 <$> remaining) egraph
+                  (Ur currentSize', egraph) <- size <$~ egraph
+                  (Ur numClasses', egraph) <- numEClasses <$~ egraph
+                  if currentSize' /= currentSize || numClasses' /= numClasses
+                    then go (iterNum + 1) schedState' (subtract 1 <$> remaining) egraph
+                    else Control.pure egraph
                 else Control.pure egraph
 
     -- Collect matches, respecting scheduler bans.

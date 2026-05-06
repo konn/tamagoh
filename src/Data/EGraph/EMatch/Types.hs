@@ -26,7 +26,12 @@ import Validation
 newtype Substitution v = Substitution {substitution :: HashMap v EClassId}
   deriving (Eq, Ord, Show, Generic)
   deriving anyclass (Hashable)
-  deriving newtype (Semigroup, Monoid)
+  deriving newtype (Monoid)
+
+instance (Hashable v) => Semigroup (Substitution v) where
+  Substitution l <> Substitution r
+    | HM.size l < HM.size r = Substitution $ HM.union r l
+    | otherwise = Substitution $ HM.union l r
 
 mapMaybeVar ::
   forall v v'.
