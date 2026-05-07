@@ -238,6 +238,7 @@ benchmark tamagoh-bench-hashmap
     pure-borrow,
     tamagoh,
     tasty-bench,
+    unordered-containers,
 
   ghc-options:
     -threaded

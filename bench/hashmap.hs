@@ -12,6 +12,7 @@ import Control.Monad.Borrow.Pure (linearly)
 import Data.HashMap.Mutable.Linear qualified as LB
 import Data.HashMap.Mutable.Linear.Witness qualified as LB
 import Data.HashMap.RobinHood.Mutable.Linear qualified as RH
+import Data.HashMap.Strict qualified as UCHM
 import Data.Hashable (Hashable (..))
 import Data.Linear.Witness.Compat (fromPB)
 import GHC.Generics (Generic)
@@ -19,8 +20,9 @@ import Prelude.Linear (Ur (..), lseq, unur, (&))
 import Prelude.Linear qualified as PL
 import Test.Tasty.Bench
 
--- | Key with expensive equality but cheap hash.
--- Hash only uses the prefix (Int), but Eq compares the full payload.
+{- | Key with expensive equality but cheap hash.
+Hash only uses the prefix (Int), but Eq compares the full payload.
+-}
 data ExpensiveKey = ExpensiveKey
   { ekPrefix :: {-# UNPACK #-} !Int
   , ekPayload :: ![Int] -- expensive to compare
@@ -52,6 +54,9 @@ insertManyLB :: (Hashable k) => [(k, v)] -> LB.HashMap k v %1 -> LB.HashMap k v
 insertManyLB [] hm = hm
 insertManyLB ((k, v) : rest) hm = insertManyLB rest (LB.insert k v hm)
 
+benchInsertUCHM :: (Hashable k) => [(k, v)] -> [(k, v)]
+benchInsertUCHM kvs = UCHM.toList (foldr (uncurry UCHM.insert) UCHM.empty kvs)
+
 -- | Benchmark fromList
 benchFromListRH :: (Hashable k) => [(k, v)] -> [(k, v)]
 benchFromListRH kvs = unur PL.$ linearly \lin ->
@@ -61,6 +66,10 @@ benchFromListRH kvs = unur PL.$ linearly \lin ->
 benchFromListLB :: (Hashable k) => [(k, v)] -> [(k, v)]
 benchFromListLB kvs = unur PL.$ linearly \lin ->
   LB.toList (LB.fromListL kvs PL.$ fromPB lin)
+
+-- | Benchmark fromList
+benchFromListUCHM :: (Hashable k) => [(k, v)] -> [(k, v)]
+benchFromListUCHM kvs = UCHM.toList (UCHM.fromList kvs)
 
 -- | Benchmark lookup after insert
 benchLookupRH :: forall k v. (Hashable k) => [(k, v)] -> [k] -> Int
@@ -85,23 +94,32 @@ benchLookupLB kvs keys = unur PL.$ LB.empty (length kvs) \hm ->
       LB.lookup k hm & \(Ur mv, hm') ->
         goLB (acc + maybe 0 (const 1) mv) ks hm'
 
+benchLookupUCHM :: forall k v. (Hashable k) => [(k, v)] -> [k] -> Int
+benchLookupUCHM kvs keys = go 0 keys (foldr (uncurry UCHM.insert) UCHM.empty kvs)
+  where
+    go !acc [] _ = acc
+    go !acc (k : ks) hm =
+      go (acc + maybe 0 (const 1) (UCHM.lookup k hm)) ks hm
+
 -- | Generate test data
 mkTestData :: Int -> [(Int, Int)]
 mkTestData n = [(i, i) | i <- [1 .. n]]
 
--- | Generate expensive key test data.
--- Keys have unique prefixes but large payloads (100 elements each).
--- This creates many hash collisions when prefixes collide mod capacity.
+{- | Generate expensive key test data.
+Keys have unique prefixes but large payloads (100 elements each).
+This creates many hash collisions when prefixes collide mod capacity.
+-}
 mkExpensiveTestData :: Int -> [(ExpensiveKey, Int)]
 mkExpensiveTestData n =
   [ (ExpensiveKey i [i .. i + 99], i)
   | i <- [1 .. n]
   ]
 
--- | Generate expensive keys with hash collisions.
--- All keys have the same prefix (same hash) but different payloads.
--- This maximizes the benefit of fingerprint check since all slots
--- have the same hash, forcing full equality checks without fingerprint.
+{- | Generate expensive keys with hash collisions.
+All keys have the same prefix (same hash) but different payloads.
+This maximizes the benefit of fingerprint check since all slots
+have the same hash, forcing full equality checks without fingerprint.
+-}
 mkCollidingExpensiveTestData :: Int -> [(ExpensiveKey, Int)]
 mkCollidingExpensiveTestData n =
   [ (ExpensiveKey 42 [i .. i + 99], i) -- all hash to same bucket!
@@ -126,6 +144,7 @@ main = do
                 (show n)
                 [ bench "robin-hood" $ nf benchInsertRH kvs
                 , bench "linear-base" $ nf benchInsertLB kvs
+                , bench "unordered-containers" $ nf benchInsertUCHM kvs
                 ]
           )
           sizes
@@ -137,6 +156,7 @@ main = do
                 (show n)
                 [ bench "robin-hood" $ nf benchFromListRH kvs
                 , bench "linear-base" $ nf benchFromListLB kvs
+                , bench "unordered-containers" $ nf benchFromListUCHM kvs
                 ]
           )
           sizes
@@ -149,6 +169,7 @@ main = do
                     (show n)
                     [ bench "robin-hood" $ nf (benchLookupRH kvs) keys
                     , bench "linear-base" $ nf (benchLookupLB kvs) keys
+                    , bench "unordered-containers" $ nf (benchLookupUCHM kvs) keys
                     ]
           )
           sizes
@@ -160,6 +181,7 @@ main = do
                 (show n)
                 [ bench "robin-hood" $ nf benchInsertRH kvs
                 , bench "linear-base" $ nf benchInsertLB kvs
+                , bench "unordered-containers" $ nf benchInsertUCHM kvs
                 ]
           )
           sizes
@@ -172,6 +194,7 @@ main = do
                     (show n)
                     [ bench "robin-hood" $ nf (benchLookupRH kvs) keys
                     , bench "linear-base" $ nf (benchLookupLB kvs) keys
+                    , bench "unordered-containers" $ nf (benchLookupUCHM kvs) keys
                     ]
           )
           sizes
@@ -184,6 +207,7 @@ main = do
                     (show n)
                     [ bench "robin-hood" $ nf (benchLookupRH kvs) keys
                     , bench "linear-base" $ nf (benchLookupLB kvs) keys
+                    , bench "unordered-containers" $ nf (benchLookupUCHM kvs) keys
                     ]
           )
           smallSizes
