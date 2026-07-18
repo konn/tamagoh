@@ -53,7 +53,7 @@ import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Deriving (deriveShow1)
 import Data.EGraph.EMatch.Relational (ematchDb)
-import Data.EGraph.EMatch.Relational.Database (Database, buildDatabase)
+import Data.EGraph.EMatch.Relational.Database (buildDatabase)
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types (Substitution (..), substPattern)
 import Data.EGraph.Saturation.Scheduler
@@ -69,7 +69,8 @@ import Data.HashSet qualified as HashSet
 import Data.Hashable
 import Data.Hashable.Lifted (Hashable1)
 import Data.IntMap.Strict qualified as IM
-import Data.Maybe (mapMaybe)
+import Data.List.NonEmpty qualified as NE
+import Data.Maybe (isJust, mapMaybe)
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Ref.Linear qualified as Ref
 import Data.Ref.Linear.Borrow qualified as Ref
@@ -206,10 +207,37 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
         else Control.do
           (Ur (results, matchCounts), egraph) <- sharing egraph \egraph -> Control.do
             Ur db <- buildDatabase egraph
-            Ur anals <- EC.analyses (egraph .# #classes)
-            -- Canonicalize the keys in analyses map to match database's canonical ids
-            Ur canonAnals <- canonicalizeAnalyses anals egraph
-            Control.pure (Ur $ collect iterNum schedState canonAnals db)
+            -- Match all non-banned rules against the database, then fetch
+            -- class data ON DEMAND: only for the e-classes referenced by
+            -- matches of rules that actually have side conditions (instead
+            -- of snapshotting every class's nodes and analysis up front).
+            let raws = flip map indexedRules \(ruleIdx, rule@CompiledRule {..}) ->
+                  let banned = case config.scheduler of
+                        Nothing -> False
+                        Just _ -> isBanned iterNum ruleIdx schedState
+                   in if banned
+                        then (ruleIdx, rule, [], 0)
+                        else
+                          let ms = ematchDb lhs db
+                              -- NB: apply ALL matches of a non-banned rule (as
+                              -- hegg and egg do); the scheduler statistic only
+                              -- feeds the backoff, which bans over-productive
+                              -- rules on LATER iterations. The statistic is
+                              -- hegg-compatible: total substitution size =
+                              -- #matches x #query-variables.
+                              !nVars = V.length lhs.varNames
+                           in (ruleIdx, rule, ms, length ms * nVars)
+                !neededIds =
+                  HashSet.toList $
+                    HashSet.fromList
+                      [ eid
+                      | (_, rule, ms, _) <- raws
+                      , isJust rule.condition
+                      , (_, subs) <- ms
+                      , eid <- PHM.elems subs.substitution
+                      ]
+            Ur anals <- lookupMatchInfos neededIds egraph
+            Control.pure (Ur $ collect anals raws)
           if null results
             then
               -- Check if we're stuck due to banning - reset scheduler and try once more
@@ -238,41 +266,15 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                     else Control.pure egraph
                 else Control.pure egraph
 
-    -- Collect matches, respecting scheduler bans.
-    -- Rules are limited to their threshold to prevent explosion.
-    -- Returns (matches, match counts per rule for scheduler update)
+    -- Filter raw matches through their rules' side conditions and pair each
+    -- rule with its scheduler statistic.
     collect ::
-      Int ->
-      SchedulerState ->
       PHM.HashMap EClassId ([ENode l], d) ->
-      Database l ->
+      [(Int, CompiledRule l d v, [(EClassId, Substitution v)], Int)] ->
       ([Ur (EClassId, Substitution v, CompiledRule l d v)], [(Int, Int)])
-    collect iterNum schedState analyses db =
-      let (matchesList, countsList) = unzip $ flip map indexedRules \(ruleIdx, rule@CompiledRule {..}) ->
-            -- Check if rule is banned
-            let banned = case config.scheduler of
-                  Nothing -> False
-                  Just _ -> isBanned iterNum ruleIdx schedState
-             in if banned
-                  then ([], (ruleIdx, 0))
-                  else
-                    let matches = ematchDb lhs db
-                        allValidMatches = mapMaybe (check analyses rule) matches
-                        -- NB: apply ALL matches of a non-banned rule (as hegg
-                        -- and egg do); the scheduler statistic only feeds the
-                        -- backoff, which bans over-productive rules on LATER
-                        -- iterations. Truncating here (the previous
-                        -- behaviour) selects a match-order-dependent SUBSET
-                        -- of rewrites, making the whole saturation trajectory
-                        -- sensitive to internal enumeration order.
-                        --
-                        -- The statistic is hegg-compatible: the TOTAL
-                        -- substitution size over all raw matches, i.e.
-                        -- #matches x #query-variables (every complete match
-                        -- binds every query variable, internals included).
-                        !nVars = V.length lhs.varNames
-                        !totalSubstSize = length matches * nVars
-                     in (allValidMatches, (ruleIdx, totalSubstSize))
+    collect analyses raws =
+      let (matchesList, countsList) = unzip $ flip map raws \(ruleIdx, rule, ms, stat) ->
+            (mapMaybe (check analyses rule) ms, (ruleIdx, stat))
        in (concat matchesList, countsList)
 
     check analyses rule (eid, subs) =
@@ -365,23 +367,26 @@ This is necessary because e-matching returns canonical e-class ids,
 but the analyses map from EC.analyses uses original ids.
 After merges, we need to ensure lookups by canonical id succeed.
 -}
-canonicalizeAnalyses ::
+lookupMatchInfos ::
   forall d l bk α m.
-  (Semilattice d) =>
-  PHM.HashMap EClassId ([ENode l], d) ->
+  [EClassId] ->
   Borrow bk α (EGraph d l) %m ->
   BO α (Ur (PHM.HashMap EClassId ([ENode l], d)))
-canonicalizeAnalyses anals egraph =
-  share egraph PL.& \(Ur egraph) -> runUrT do
-    let entries = PHM.toList anals
-    canonEntries <- Traverse.forM entries \(eid, val) -> do
-      canonEid <- UrT $ unsafeFind egraph eid
-      P.pure (canonEid, val)
-    -- Merge entries with the same canonical id (combine nodes and join analysis)
-    P.pure $ PHM.fromListWith mergeEntries canonEntries
-  where
-    mergeEntries :: ([ENode l], d) -> ([ENode l], d) -> ([ENode l], d)
-    mergeEntries (nodes1, d1) (nodes2, d2) = (nodes1 <> nodes2, d1 /\ d2)
+lookupMatchInfos eids egraph =
+  share egraph PL.& \(Ur egraph) -> Control.do
+    let go ::
+          [EClassId] ->
+          PHM.HashMap EClassId ([ENode l], d) ->
+          BO α (Ur (PHM.HashMap EClassId ([ENode l], d)))
+        go [] acc = Control.pure (Ur acc)
+        go (eid : rest) acc = Control.do
+          Ur mnodes <- lookupEClass eid egraph
+          Ur manal <- getAnalysis eid egraph
+          case (,) P.<$> mnodes P.<*> manal of
+            Nothing -> go rest acc
+            Just (nodes, anal) ->
+              go rest (PHM.insert eid (NE.toList nodes, anal) acc)
+    go eids PHM.empty
 
 newtype ExtractBest l cost = ExtractBest
   { optimal :: ArgMin cost (ENode l)
