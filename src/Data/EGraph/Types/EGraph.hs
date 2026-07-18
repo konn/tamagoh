@@ -469,42 +469,18 @@ repair ::
   EClassId ->
   BO α ()
 repair egraph eid = Control.do
-  (Ur numParents, egraph) <- sharing egraph \egraph -> Control.do
-    mpare <- EC.lookupParents (egraph .# #classes) eid
-    case mpare of
-      -- FIXME: id MUST be present in classes - please review the invariant.
-      Nothing -> Control.pure $ Ur 0
-      Just pare -> HMUr.size pare
-  egraph <- reborrowing_ egraph \egraph -> Control.do
-    let %1 !(!hashcons, !classes, !uf) = egraph .@ (#hashcons, #classes, #unionFind)
-    void $ sharing' classes \classes -> Control.do
-      mpare <- EC.lookupParents classes eid
-      -- This is safe because the parents are not modified in this region
-      (Ur parents, release) <- case mpare of
-        Nothing -> Control.do
-          -- FIXME: id MUST be present in classes - please review the invariant.
-          (pare, lend) <- borrowLinearlyM (HMUr.empty 16)
-          Control.pure (share pare, upcast $ consume Control.<$> reclaim' lend)
-        -- error $ "Impossible mpare None in Parents (divide): " <> P.show eid
-        Just pare -> Control.pure (share pare, After ())
-      -- Share the union-find once for the whole loop (path compression is
-      -- observably pure through a shared borrow) instead of opening a
-      -- sub-lifetime per parent.
-      share uf & \(Ur uf) -> Control.do
-        void $ HMUr.iterRebor_ (upcast hashcons :- BNil) parents \(hashcons :- BNil) !p_node !p_class -> Control.do
-          -- NOTE:
-          --    Seems like removing outdated node significantly worsens performance
-          --    on some cases. Hence, as it doesn't affect soundness, we stop deleting it
-          --    at the cost of some memory leakage.
-          --    One alternative is to remove conditionally when the p_node is outdated,
-          --    but that worsens performance in some cases by ~100x.
-
-          -- !hashcons <- void . HMUr.delete p_node <%= hashcons
-          Ur !p_node <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node (upcast uf :: Share _ UnionFind)
-          Ur !p_class <- UFB.unsafeFind (coerce p_class) (upcast uf :: Share _ UnionFind)
-          void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node (coerce p_class) hashcons
-        Control.pure $ release
-
+  -- Single pass over a frozen snapshot of the parents (merging inside the
+  -- loop mutates the classes map, so the copy is required — hegg likewise
+  -- materialises its worklist up front). Per parent: canonicalise ONCE, let
+  -- the insert into the fresh parents map double as the congruence lookup
+  -- (its returned old value is the collision signal, cf. hegg's
+  -- insertLookupNM), and refresh the global hashcons with the same
+  -- canonical pair.
+  --
+  -- NOTE on the hashcons: stale (pre-canonical) keys are deliberately kept.
+  -- Removing outdated nodes significantly worsens performance on some cases;
+  -- as it doesn't affect soundness, we keep them at the cost of some memory
+  -- leakage.
   (Ur parents, egraph) <- sharing egraph \egraph -> Control.do
     -- FIXME: id MUST be present in classes - please review the invariant.
     !mps <- EC.lookupParents (egraph .# #classes) eid
@@ -512,20 +488,26 @@ repair egraph eid = Control.do
       (asksLinearly $ FHMUr.empty 16)
       (Control.fmap FHMUr.freeze . clone)
       mps
+  let !numParents = FHMUr.size parents
   (newParents, egraph) <- reborrowing' egraph \egraph -> Control.do
     (newPs, newPsLend) <- borrowLinearlyM $ HMUr.empty @(ENode _) @EClassId numParents
     egPs <- iforReborrowingOf_ FHMUr.foldFrozen (egraph :- newPs :- BNil) parents $
       \(egraph :- newPs :- BNil) p_node p_class ->
         move (p_node, p_class) & \(Ur (p_node, p_class)) -> Control.do
-          (Ur p_node, egraph) <- {-# SCC "repair/loop2/unsafeCanon" #-} unsafeCanonicalize p_node <$~ egraph
-          (Ur mem, newPs) <- sharing newPs \newPs -> HMUr.lookup p_node newPs
-          Ur newId <- case mem of
-            Just class' ->
-              move class' & \(Ur class') -> Control.do
-                (Ur eid, egraph) <- unsafeMerge p_class class' egraph
-                Control.pure $ egraph `lseq` Ur (getMergedId eid)
-            Nothing -> unsafeFind egraph p_class
-          Control.void $ {-# SCC "upwardMerge/insert" #-} HMUr.insert p_node newId newPs
+          (Ur p_node, egraph) <- {-# SCC "repair/unsafeCanon" #-} unsafeCanonicalize p_node <$~ egraph
+          (Ur p_class, egraph) <- flip unsafeFind p_class <$~ egraph
+          (Ur prev, newPs) <- {-# SCC "upwardMerge/insert" #-} HMUr.insert p_node p_class newPs
+          (Ur newId, newPs, egraph) <- case prev of
+            Just class'
+              | class' P./= p_class -> Control.do
+                  (Ur res, egraph) <- unsafeMerge p_class class' egraph
+                  let !newId = getMergedId res
+                  (Ur _, newPs) <- HMUr.insert p_node newId newPs
+                  Control.pure (Ur newId, newPs, egraph)
+            _ -> Control.pure (Ur p_class, newPs, egraph)
+          egraph <- reborrowing_ egraph \egraph ->
+            void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node newId (egraph .# #hashcons)
+          Control.pure (newPs `lseq` consume egraph)
     case egPs of
       egraph :- newPs :- BNil ->
         -- Analysis propagation is handled separately via the analysis
