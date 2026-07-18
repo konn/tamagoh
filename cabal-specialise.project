@@ -1,0 +1,20 @@
+-- P2.0a experiment: bound the win from cross-module specialization of the
+-- polymorphic hot path (BO/UrT/StateT plumbing) without touching source.
+-- See workspace/TUNE-PLAN.md.
+import: ./cabal.project
+import: ./cabal.project.freeze
+
+package tamagoh
+  ghc-options:
+    -fexpose-all-unfoldings
+    -fspecialise-aggressively
+
+package pure-borrow
+  ghc-options:
+    -fexpose-all-unfoldings
+    -fspecialise-aggressively
+
+package linear-base
+  ghc-options:
+    -fexpose-all-unfoldings
+    -fspecialise-aggressively

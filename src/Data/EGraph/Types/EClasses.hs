@@ -66,6 +66,7 @@ import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear
 import Unsafe.Linear qualified as Unsafe
+import Prelude qualified as P
 
 analyses ::
   (Movable d, Copyable d, Movable1 l, Hashable1 l) =>
@@ -232,10 +233,15 @@ merge eid1 eid2 clss = Control.do
   (Ur mem2, clss) <- member eid2 <$~ clss
   if not mem1 || not mem2
     then Control.pure (Ur False, clss)
-    else (Ur True,) Control.<$> unsafeMerge eid1 eid2 clss
+    else Control.do
+      (Ur _changed, clss) <- unsafeMerge eid1 eid2 clss
+      Control.pure (Ur True, clss)
 
 {- | @'unsafeMerge' eid1 eid2 class@ merges the e-classes identified by @eid1@ and @eid2@, without cheking the exitence of the eids.
   Your must pass the canonical id as @eid1@, and the non-canonical id as @eid2@.
+
+  Returns whether the meet changed the analysis value of the surviving class
+  (so the caller can schedule parent re-analysis).
 -}
 unsafeMerge ::
   forall α d l.
@@ -246,16 +252,16 @@ unsafeMerge ::
   EClassId ->
   EClassId ->
   Mut α (EClasses d l) %1 ->
-  BO α (Mut α (EClasses d l))
+  BO α (Ur Bool, Mut α (EClasses d l))
 unsafeMerge eid1 eid2 clss
-  | eid1 == eid2 = Control.pure clss
+  | eid1 == eid2 = Control.pure (Ur False, clss)
   | otherwise = Control.do
       (mr, clss) <- delete clss eid2
       let %1 !EClass {nodes = !rnodes, parents = !rparents, analysis = !ra} = case mr of
             Nothing -> error "EGraph.Types.EClasses.unsafeMerge: eid2 not found"
             Just eclass -> eclass
       let %1 !(Ur ranalysis) = move $ Ref.free ra
-      clss <- reborrowing_ clss \clss0 -> Control.do
+      reborrowing clss \clss0 -> Control.do
         let clss = coerceLin clss0 :: Mut _ (Raw d l)
         l <- HMB.lookup eid1 clss
         case l of
@@ -264,10 +270,17 @@ unsafeMerge eid1 eid2 clss
             l <- reborrowing_ l \l -> void $ Set.extend rnodes (l .# #nodes)
             l <- reborrowing_ l \l -> void $ HMUr.extend rparents (l .# #parents)
 
-            void $ reborrowing_ l \l -> Control.do
-              void $ Ref.modify (\la -> move la & \(Ur la) -> la /\ ranalysis) (l .# #analysis)
-
-      Control.pure clss
+            (changed, l) <- reborrowing l \l -> Control.do
+              (changed, ref) <-
+                Ref.update
+                  ( \la ->
+                      move la & \(Ur la) ->
+                        let !new = la /\ ranalysis
+                         in Control.pure (Ur (new P./= la), new)
+                  )
+                  (l .# #analysis)
+              Control.pure $ ref `lseq` changed
+            Control.pure $ l `lseq` changed
 
 coerceLin :: (Coercible a b) => a %1 -> b
 coerceLin = Unsafe.toLinear \ !a -> coerce a

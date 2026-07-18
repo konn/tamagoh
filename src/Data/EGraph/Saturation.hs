@@ -44,7 +44,6 @@ module Data.EGraph.Saturation (
 import Algebra.Semilattice
 import Control.DeepSeq
 import Control.Exception (Exception)
-import Control.Functor.Linear (StateT (..))
 import Control.Functor.Linear qualified as Control
 import Control.Lens (Lens', (?~), (^.), _1)
 import Control.Monad.Borrow.Pure
@@ -322,16 +321,40 @@ addNestedENode ::
   Mut α (EGraph d l) %1 ->
   BO α (Ur EClassId, Mut α (EGraph d l))
 {-# INLINE addNestedENode #-}
-addNestedENode pat egraph =
-  Control.runStateT (runUrT PL.$ go pat) egraph
+addNestedENode pat egraph = go pat egraph
   where
+    -- Direct BO-level recursion threading the e-graph explicitly instead of
+    -- an UrT-over-StateT tower: no per-node transformer plumbing.
     go ::
       Pattern l EClassId ->
-      UrT (StateT (Mut α (EGraph d l)) (BO α)) EClassId
-    go (Metavar eid) = UrT PL.$ StateT \egraph -> sharing egraph \egraph -> unsafeFind egraph eid
-    go (PNode p) = do
-      eids <- ENode <$> P.traverse go p
-      UrT PL.$ StateT \egraph -> addCanonicalNode eids egraph
+      Mut α (EGraph d l) %1 ->
+      BO α (Ur EClassId, Mut α (EGraph d l))
+    go (Metavar eid) egraph = sharing egraph \egraph -> unsafeFind egraph eid
+    go (PNode p) egraph = Control.do
+      (Ur eids, egraph) <- goChildren (F.toList p) [] egraph
+      addCanonicalNode (ENode (refill p eids)) egraph
+
+    goChildren ::
+      [Pattern l EClassId] ->
+      [EClassId] ->
+      Mut α (EGraph d l) %1 ->
+      BO α (Ur [EClassId], Mut α (EGraph d l))
+    goChildren [] acc egraph = Control.pure (Ur (P.reverse acc), egraph)
+    goChildren (p : ps) acc egraph = Control.do
+      (Ur eid, egraph) <- go p egraph
+      goChildren ps (eid : acc) egraph
+
+    -- Rebuild the node shape with each child pattern replaced by its id.
+    refill :: l (Pattern l EClassId) -> [EClassId] -> l EClassId
+    refill shape vals =
+      P.snd $
+        Traverse.mapAccumL
+          ( \xs0 _ -> case xs0 of
+              x : xs -> (xs, x)
+              [] -> P.error "addNestedENode: impossible: child count mismatch"
+          )
+          vals
+          shape
 
 {- | Canonicalize the keys in the analyses map.
 This is necessary because e-matching returns canonical e-class ids,

@@ -18,6 +18,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# OPTIONS_GHC -Wno-partial-type-signatures #-}
 
 module Data.EGraph.Types.EGraph (
   EGraph (..),
@@ -118,6 +119,7 @@ new = runReader Control.do
   nodes <- asks $ HMUr.empty 2048
   hashcons <- asks $ HMUr.empty 2048
   worklist <- asks BUV.new
+  analysisWorklist <- asks BUV.new
   Control.pure EGraph {..}
 
 find :: Borrow k α (EGraph d l) %m -> EClassId -> BO α (Ur (Maybe EClassId))
@@ -242,16 +244,36 @@ unsafeFind egraph (EClassId k) = Control.do
   coerceLin Data.<$> UFB.unsafeFind k uf
 
 unsafeMakeAnalyzeNode ::
+  forall l d k α m.
   (Analysis l d) =>
   ENode l ->
   Borrow k α (EGraph d l) %m ->
   BO α (Ur d)
 unsafeMakeAnalyzeNode enode egraph =
-  share egraph & \(Ur egraph) -> runUrT do
+  share egraph & \(Ur egraph) -> Control.do
     let ecs = egraph .# #classes
-    makeAnalysis P.<$> P.forM enode.unwrap \eid -> do
-      eid <- UrT $ unsafeFind egraph eid
-      (eid,) P.. P.fromJust P.<$> UrT (EC.lookupAnalysis ecs eid)
+        -- Direct recursion over the children instead of a UrT-wrapped
+        -- traversal: no per-child transformer plumbing.
+        go :: [EClassId] -> [(EClassId, d)] -> BO α (Ur d)
+        go [] acc =
+          Control.pure $! Ur $! makeAnalysis $! refill enode.unwrap (P.reverse acc)
+        go (eid : rest) acc = Control.do
+          Ur eid <- unsafeFind egraph eid
+          Ur manal <- EC.lookupAnalysis ecs eid
+          go rest ((eid, P.fromJust manal) : acc)
+    go (children enode) []
+  where
+    -- Rebuild the node shape with each child replaced by its (id, analysis).
+    refill :: l EClassId -> [(EClassId, d)] -> l (EClassId, d)
+    refill shape vals =
+      P.snd $
+        P.mapAccumL
+          ( \xs0 _ -> case xs0 of
+              x : xs -> (xs, x)
+              [] -> P.error "unsafeMakeAnalyzeNode: impossible: child count mismatch"
+          )
+          vals
+          shape
 
 addNode ::
   (Analysis l d, Hashable1 l) =>
@@ -282,9 +304,9 @@ addCanonicalNode enode egraph = Control.do
         (Ur !d, egraph) <- sharing egraph $ unsafeMakeAnalyzeNode enode
         void $ EC.insertIfNew eid enode d $ egraph .# #classes
       egraph <- reborrowing_ egraph \egraph -> Control.do
-        void $ HMUr.insert enode eid (egraph .# #hashcons)
-      egraph <- reborrowing_ egraph \egraph -> Control.do
-        !dic <- HMUr.insert eid enode (egraph .# #nodes)
+        let %1 !(!hashcons, !nodes) = egraph .@ (#hashcons, #nodes)
+        void $ HMUr.insert enode eid hashcons
+        !dic <- HMUr.insert eid enode nodes
         Control.pure $! consume dic
       egraph <- modifyAnalysis id eid <%= egraph
 
@@ -353,11 +375,18 @@ unsafeMerge eid1 eid2 egraph = Control.do
           unsafeCanonicalize (fromMaybe (error "unsafeMerge: getOriginalNode failed") node) egraph
         void $ HMUr.insert node eid (egraph .# #hashcons)
 
-      egraph <- reborrowing_ egraph \egraph -> Control.do
-        void $ EC.unsafeMerge eid outdatedId $ egraph .# #classes
+      (Ur analChanged, egraph) <- reborrowing egraph \egraph -> Control.do
+        (changed, clss) <- EC.unsafeMerge eid outdatedId $ egraph .# #classes
+        Control.pure $ clss `lseq` changed
 
-      egraph <- reborrowing_ egraph \egraph ->
-        void $ BUV.push eid (egraph .# #worklist)
+      egraph <- reborrowing_ egraph \egraph -> Control.do
+        let %1 !(!wl, !awl) = egraph .@ (#worklist, #analysisWorklist)
+        void $ BUV.push eid wl
+        -- If the meet changed the winner's analysis, its parents need
+        -- re-analysis (egg's analysis_pending discipline).
+        if analChanged
+          then void $ BUV.push eid awl
+          else Control.pure (consume awl)
 
       Control.pure (Ur (Merged eid), egraph)
 
@@ -382,7 +411,23 @@ rebuild = loop
     loop egraph = Control.do
       (Ur isNull, egraph) <- sharing egraph \e -> BUV.null $ e .# #worklist
       if isNull
-        then Control.pure egraph
+        then Control.do
+          -- Congruence is restored; propagate pending analysis changes
+          -- to parents (egg's analysis_pending discipline).
+          (Ur isANull, egraph) <- sharing egraph \e -> BUV.null $ e .# #analysisWorklist
+          if isANull
+            then Control.pure egraph
+            else Control.do
+              (Ur todos, egraph) <- reborrowing egraph \egraph -> Control.do
+                todos <- BUV.takeOut_ (egraph .# #analysisWorklist)
+                Control.pure (BUV.toList todos)
+              (Ur todos, egraph) <- sharing egraph \egraph -> runUrT do
+                nubHash
+                  P.<$> P.mapM (\k -> move k & \(Ur k) -> UrT $ unsafeFind egraph k) todos
+
+              egraph <- forReborrowing_ egraph todos \egraph eid ->
+                move eid & \(Ur eid) -> repairAnal egraph eid
+              loop egraph
         else Control.do
           (Ur todos, egraph) <- reborrowing egraph \egraph -> Control.do
             todos <- BUV.takeOut_ (egraph .# #worklist)
@@ -419,20 +464,23 @@ repair egraph eid = Control.do
           Control.pure (share pare, upcast $ consume Control.<$> reclaim' lend)
         -- error $ "Impossible mpare None in Parents (divide): " <> P.show eid
         Just pare -> Control.pure (share pare, After ())
-      void $ HMUr.iterRebor_ (upcast hashcons :- upcast uf :- BNil) parents \(hashcons :- uf :- BNil) !p_node !p_class -> Control.do
-        -- NOTE:
-        --    Seems like removing outdated node significantly worsens performance
-        --    on some cases. Hence, as it doesn't affect soundness, we stop deleting it
-        --    at the cost of some memory leakage.
-        --    One alternative is to remove conditionally when the p_node is outdated,
-        --    but that worsens performance in some cases by ~100x.
+      -- Share the union-find once for the whole loop (path compression is
+      -- observably pure through a shared borrow) instead of opening a
+      -- sub-lifetime per parent.
+      share uf & \(Ur uf) -> Control.do
+        void $ HMUr.iterRebor_ (upcast hashcons :- BNil) parents \(hashcons :- BNil) !p_node !p_class -> Control.do
+          -- NOTE:
+          --    Seems like removing outdated node significantly worsens performance
+          --    on some cases. Hence, as it doesn't affect soundness, we stop deleting it
+          --    at the cost of some memory leakage.
+          --    One alternative is to remove conditionally when the p_node is outdated,
+          --    but that worsens performance in some cases by ~100x.
 
-        -- !hashcons <- void . HMUr.delete p_node <%= hashcons
-        (Ur !p_node, uf) <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node <$~ uf
-        (Ur !p_class, uf) <- UFB.unsafeFind (coerce p_class) <$~ uf
-        Control.pure (consume uf)
-        void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node (coerce p_class) hashcons
-      Control.pure $ release
+          -- !hashcons <- void . HMUr.delete p_node <%= hashcons
+          Ur !p_node <- {-# SCC "repair/loop1/unsafeCanon" #-} unsafeCanonicalize' p_node (upcast uf :: Share _ UnionFind)
+          Ur !p_class <- UFB.unsafeFind (coerce p_class) (upcast uf :: Share _ UnionFind)
+          void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node (coerce p_class) hashcons
+        Control.pure $ release
 
   (Ur parents, egraph) <- sharing egraph \egraph -> Control.do
     -- FIXME: id MUST be present in classes - please review the invariant.
@@ -456,38 +504,47 @@ repair egraph eid = Control.do
             Nothing -> unsafeFind egraph p_class
           Control.void $ {-# SCC "upwardMerge/insert" #-} HMUr.insert p_node newId newPs
     case egPs of
-      egraph :- newPs :- BNil -> Control.do
-        egraph <- newPs `lseq` reborrowing_ egraph (modifyAnalysis id eid)
-        -- Rebuild analysis after modification
-        (Ur ps, egraph) <- sharing egraph \egraph -> Control.do
-          -- FIXME: id MUST be present in classes - please review the invariant.
-          !mps <- EC.lookupParents (egraph .# #classes) eid
-          !ps <-
-            {- copy
-              . fromMaybe (error "Must be just") -}
-            maybe (asksLinearly $ HMUr.empty 16) clone mps
-          Control.pure $! FHMUr.freeze ps
-        void $ iforReborrowingOf_ FHMUr.foldFrozen egraph ps \egraph pNode pClass ->
-          move (pNode, pClass) & \(Ur (pNode, pClass)) ->
-            Control.do
-              (newAnal, egraph) <- sharing egraph \egraph -> Control.do
-                Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
-                Ur old <- EC.lookupAnalysis (egraph .# #classes) pClass
-                let !d = P.maybe analysis (/\ analysis) old
-                if Just d P.== old
-                  then Control.pure Nothing
-                  else Control.pure $ Just $ Ur d
-              case newAnal of
-                Nothing -> Control.pure $ consume egraph
-                Just (Ur d) -> Control.do
-                  egraph <- reborrowing_ egraph \egraph -> Control.do
-                    void $ EC.setAnalysis pClass d (egraph .# #classes)
-                  !set <- {-# SCC "update_worklist/insert" #-} BUV.push pClass (egraph .# #worklist)
-                  Control.pure $ consume set
-
-        Control.pure $ upcast $ reclaim' newPsLend
+      egraph :- newPs :- BNil ->
+        -- Analysis propagation is handled separately via the analysis
+        -- worklist (see 'repairAnal'); congruence repair ends here.
+        newPs `lseq` egraph `lseq` Control.pure (upcast $ reclaim' newPsLend)
 
   void $ setParents eid newParents (egraph .# #classes)
+
+{- | Analysis counterpart of 'repair': called (from 'rebuild') for classes
+whose analysis value changed. Runs the analysis-driven modification hook for
+the class itself, then recomputes the analyses of its parents, propagating
+further changes through the analysis worklist.
+-}
+repairAnal ::
+  (Movable1 l, Analysis l d) =>
+  Mut α (EGraph d l) %1 ->
+  EClassId ->
+  BO α ()
+repairAnal egraph eid = Control.do
+  egraph <- reborrowing_ egraph (modifyAnalysis id eid)
+  (Ur ps, egraph) <- sharing egraph \egraph -> Control.do
+    !mps <- EC.lookupParents (egraph .# #classes) eid
+    !ps <- maybe (asksLinearly $ HMUr.empty 16) clone mps
+    Control.pure $! FHMUr.freeze ps
+  void $ iforReborrowingOf_ FHMUr.foldFrozen egraph ps \egraph pNode pClass ->
+    move (pNode, pClass) & \(Ur (pNode, pClass)) ->
+      Control.do
+        (newAnal, egraph) <- sharing egraph \egraph -> Control.do
+          Ur pClass <- unsafeFind egraph pClass
+          Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
+          Ur old <- EC.lookupAnalysis (egraph .# #classes) pClass
+          let !d = P.maybe analysis (/\ analysis) old
+          if Just d P.== old
+            then Control.pure Nothing
+            else Control.pure $ Just $ Ur (pClass, d)
+        case newAnal of
+          Nothing -> Control.pure $ consume egraph
+          Just (Ur (pClass, d)) -> Control.do
+            egraph <- reborrowing_ egraph \egraph -> Control.do
+              void $ EC.setAnalysis pClass d (egraph .# #classes)
+            !set <- {-# SCC "update_analysis_worklist/insert" #-} BUV.push pClass (egraph .# #analysisWorklist)
+            Control.pure $ consume set
 
 numEClasses :: Borrow k α (EGraph d l) %m -> BO α (Ur Int)
 numEClasses egraph = Control.do

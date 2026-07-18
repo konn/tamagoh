@@ -71,6 +71,10 @@ data EGraph d l = EGraph
   -}
   , worklist :: !(BUV.Vector EClassId)
   -- ^ A set of eclass-ids that need to be repaired.
+  , analysisWorklist :: !(BUV.Vector EClassId)
+  {- ^ E-class ids whose analysis value has changed; their parents'
+  analyses must be recomputed (cf. egg's @analysis_pending@).
+  -}
   }
   deriving (Generic)
 
