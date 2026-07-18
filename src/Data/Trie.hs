@@ -14,9 +14,10 @@ module Data.Trie (
   focus,
   project,
   match,
+  toKey,
+  fromKey,
 ) where
 
-import Control.Foldl qualified as L
 import Control.Lens hiding (cons, indices)
 import Control.Monad ((<$!>))
 import Data.EGraph.EMatch.Relational.Query
@@ -24,21 +25,36 @@ import Data.EGraph.Types.EClassId (EClassId)
 import Data.FMList qualified as FML
 import Data.Foldable (foldMap')
 import Data.Foldable qualified as F
-import Data.HashMap.Strict (HashMap)
-import Data.HashMap.Strict qualified as HM
-import Data.HashSet (HashSet)
-import Data.HashSet qualified as HashSet
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
-import Data.IntSet qualified as IntSet
+import Data.IntSet (IntSet)
+import Data.IntSet qualified as IS
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Monoid (Alt (Alt))
 import GHC.Generics
 
--- Invariant: keys are subset of branches's keys
-data Trie = Trie {size :: {-# UNPACK #-} !Word, branches :: {-# UNPACK #-} !(HashMap EClassId Trie)}
+-- | E-class ids are 'Word' newtypes; rows are indexed by their 'Int' image.
+toKey :: EClassId -> IM.Key
+{-# INLINE toKey #-}
+toKey = fromIntegral
+
+fromKey :: IM.Key -> EClassId
+{-# INLINE fromKey #-}
+fromKey = fromIntegral
+
+{- | A relation trie. Every level caches its key-set ('keys'), so projecting
+the domain of a variable at this level is O(1) (cf. hegg's @tkeys@ — "quite
+important for performance!").
+
+Invariant: @keys == IM.keysSet branches@.
+-}
+data Trie = Trie
+  { size :: {-# UNPACK #-} !Word
+  , keys :: !IntSet
+  , branches :: !(IntMap Trie)
+  }
   deriving (Eq, Ord, Generic)
 
 size :: Trie -> Word
@@ -54,37 +70,36 @@ type Row = [EClassId]
 toRows :: Trie -> [Row]
 toRows = FML.toList . go
   where
-    go (Trie _ hm)
-      | HM.null hm = FML.singleton []
+    go (Trie _ _ hm)
+      | IM.null hm = FML.singleton []
       | otherwise =
           foldMap'
             ( \(i, t) ->
-                fmap (i :) (go t)
+                fmap (fromKey i :) (go t)
             )
-            (HM.toList hm)
+            (IM.toList hm)
 {-# INLINE toRows #-}
 
 empty :: Trie
-empty = Trie 0 HM.empty
+empty = Trie 0 IS.empty IM.empty
 {-# INLINE empty #-}
 
 member :: [EClassId] -> Trie -> Bool
 member [] _ = True
-member (i : is) (Trie _ vec) =
-  if HM.member i vec
-    then member is $ vec HM.! i
-    else False
+member (i : is) (Trie _ _ vec) =
+  maybe False (member is) (IM.lookup (toKey i) vec)
 {-# INLINE member #-}
 
 singleton :: [EClassId] -> Trie
-singleton [] = Trie 0 HM.empty
-singleton (i : is) = Trie 1 $ HM.singleton i (singleton is)
+singleton [] = Trie 0 IS.empty IM.empty
+singleton (i : is) = Trie 1 (IS.singleton (toKey i)) $ IM.singleton (toKey i) (singleton is)
 {-# INLINE singleton #-}
 
 insert :: [EClassId] -> Trie -> Trie
 insert [] trie = trie
-insert (i : is) (Trie n vec) =
-  Trie (n + 1) $ HM.alter (Just . maybe (singleton is) (insert is)) i vec
+insert (i : is) (Trie n ks vec) =
+  Trie (n + 1) (IS.insert (toKey i) ks) $
+    IM.alter (Just . maybe (singleton is) (insert is)) (toKey i) vec
 {-# INLINE insert #-}
 
 {- | Focus the trie on the given indices.
@@ -94,69 +109,80 @@ focus :: NonEmpty (Int, EClassId) -> Trie -> Trie
 focus = fmap (fromMaybe empty) . go 0 . NE.toList
   where
     wrapTrie n = \hm ->
-      if HM.null hm
+      if IM.null hm
         then Nothing
-        else Just $ Trie n hm
+        else Just $ Trie n (IM.keysSet hm) hm
     go :: Int -> [(Int, EClassId)] -> Trie -> Maybe Trie
     go !_ [] trie = Just trie
-    go !i kks@((k, eid) : ks) (Trie n vec)
-      | i < k = wrapTrie n $ HM.mapMaybe (go (i + 1) kks) vec
+    go !i kks@((k, eid) : ks) (Trie n _ vec)
+      | i < k = wrapTrie n $ IM.mapMaybe (go (i + 1) kks) vec
       | otherwise =
-          fmap (\t -> Trie t.size $ HM.singleton eid t) . go (i + 1) ks =<< HM.lookup eid vec
+          fmap (\t -> Trie t.size (IS.singleton (toKey eid)) $ IM.singleton (toKey eid) t) . go (i + 1) ks
+            =<< IM.lookup (toKey eid) vec
 {-# INLINE focus #-}
 
-project :: NonEmpty Int -> Trie -> HashSet EClassId
+-- | Domain of a variable occurring at the given column positions.
+project :: NonEmpty Int -> Trie -> IntSet
 project indices =
-  HashSet.fromList
-    . FML.toList
-    -- NB: accumulate in 'FML.FMList' (O(1) @(<>)@); a plain-list @foldMap'@ in the
-    -- @otherwise@ branch below would be a left-nested @(++)@, i.e. O(N^2).
-    . probe 0 (NE.fromList $ IntSet.toAscList $ IntSet.fromList $ F.toList indices)
+  probe 0 (NE.fromList $ IS.toAscList $ IS.fromList $ F.toList indices)
   where
-    probe :: Int -> NonEmpty Int -> Trie -> FML.FMList EClassId
+    probe :: Int -> NonEmpty Int -> Trie -> IntSet
     probe !n (i :| is) trie
-      | n == i = FML.fromList $ mapMaybe (uncurry $ go (n + 1) is) $ HM.toList trie.branches
+      | n == i = case is of
+          -- Fast path: the variable occurs only at this column; its domain
+          -- is exactly this level's cached key-set.
+          [] -> trie.keys
+          i' : is' ->
+            IS.fromList $
+              mapMaybe
+                (\(eid, t) -> go (n + 1) (i' :| is') eid t)
+                (IM.toList trie.branches)
       | otherwise = foldMap' (probe (n + 1) (i :| is)) trie.branches
-    go :: Int -> [Int] -> EClassId -> Trie -> Maybe EClassId
-    go !_ [] !eid _ = pure eid
-    go !n (i : is) !eid !trie
+    go :: Int -> NonEmpty Int -> IM.Key -> Trie -> Maybe IM.Key
+    go !n (i :| is) !eid !trie
       | n == i = do
-          trie' <- HM.lookup eid trie.branches
-          go (n + 1) is eid trie'
+          trie' <- IM.lookup eid trie.branches
+          case is of
+            [] -> pure eid
+            i' : is' -> go (n + 1) (i' :| is') eid trie'
       | otherwise =
-          alaf Alt foldMap (go (n + 1) (i : is) eid) trie.branches
+          alaf Alt foldMap (go (n + 1) (i :| is) eid) trie.branches
 
 cons :: EClassId -> Trie -> Trie
 {-# INLINE cons #-}
-cons i = Trie <$> (.size) <*> HM.singleton i
+cons i t = Trie t.size (IS.singleton (toKey i)) (IM.singleton (toKey i) t)
 
 fromRows :: [Row] -> Trie
 fromRows = go
   where
-    go [] = Trie 0 HM.empty
-    go ([] : _) = Trie 0 HM.empty
+    go [] = empty
+    go ([] : _) = empty
     go rows =
-      L.fold
-        ( L.premap uncons $
-            L.handles _Just $
-              L.foldByKeyHashMap (go <$> L.list) <&> \dic ->
-                Trie (sum (fmap (.size) dic)) dic
-        )
-        rows
+      let dic =
+            IM.map go $
+              IM.fromListWith
+                (flip (<>))
+                [(toKey x, [xs]) | x : xs <- rows]
+          -- NB: faithful to the previous implementation, sizes bottom out at
+          -- 0 for leaf levels, so a database built via 'fromRows' reports
+          -- size 0 throughout. Kept as-is to preserve the variable-ordering
+          -- heuristic's observed behaviour; see TUNE-PLAN.
+          !sz = sum (fmap (.size) dic)
+       in Trie sz (IM.keysSet dic) dic
 
 match :: [EClassIdOrVar VarId] -> Trie -> [IntMap EClassId]
 match = go IM.empty
   where
     go !sub [] _ = [sub]
-    go !sub (x : xs) (Trie _ hm) = case x of
-      EId eid -> fromMaybe [] $ go sub xs <$!> HM.lookup eid hm
+    go !sub (x : xs) (Trie _ _ hm) = case x of
+      EId eid -> fromMaybe [] $ go sub xs <$!> IM.lookup (toKey eid) hm
       QVar v ->
         foldMap
           ( \(eid, trie') ->
               case IM.lookup v sub of
-                Nothing -> go (IM.insert v eid sub) xs trie'
+                Nothing -> go (IM.insert v (fromKey eid) sub) xs trie'
                 Just eid'
-                  | eid == eid' -> go sub xs trie'
+                  | fromKey eid == eid' -> go sub xs trie'
                   | otherwise -> []
           )
-          (HM.toList hm)
+          (IM.toList hm)

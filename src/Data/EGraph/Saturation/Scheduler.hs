@@ -119,7 +119,9 @@ updateStats BackoffScheduler {..} currentIter matchCounts state =
        in if matchCount > threshold
             then
               let newTimesBanned = prevTimesBanned + 1
-                  newBanDuration = banLength * (2 ^ newTimesBanned)
+                  -- hegg/egg semantics: the ban duration doubles per PREVIOUS
+                  -- ban count (first ban = banLength, then 2x, 4x, ...).
+                  newBanDuration = banLength * (2 ^ prevTimesBanned)
                   newStat =
                     RuleStat
                       { bannedUntil = currentIter + newBanDuration

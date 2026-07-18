@@ -35,7 +35,6 @@ import Data.Foldable1 (foldl1')
 import Data.Functor qualified as Functor
 import Data.Generics.Labels ()
 import Data.HashMap.Strict qualified as HM
-import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
@@ -95,7 +94,7 @@ query ::
   Database l ->
   [IntSubst]
 query (Conj cq) = genericJoin cq
-query (SelectAll v) = map (IM.singleton v) . HS.toList . universe
+query (SelectAll v) = map (IM.singleton v . Trie.fromKey) . IS.toList . universe
 
 data RelationState l = RelationState
   { atom :: !(Atom l VarId)
@@ -143,7 +142,7 @@ genericJoin (hd ::- (atm@(Atom rel@MkRel {args}) :| [])) db = fromMaybe [] do
       frees =
         filter (not . IM.null) $
           sequenceA $
-            IM.fromSet (const $ HS.toList $ universe db) $
+            IM.fromSet (const $ map Trie.fromKey $ IS.toList $ universe db) $
               IS.fromList hd `IS.difference` vs
   trie <- db ^. at (toOperator args)
   let !matches = Trie.match (F.toList rel) trie
@@ -170,7 +169,7 @@ genericJoin (hd ::- qs) db = fromMaybe [] do
     go [] !_qs sub = FML.singleton sub
     go (v : vs) !qs sub =
       let (!doms, !qs') =
-            Bi.first (sortOn HS.size . catMaybes . NE.toList) $
+            Bi.first (sortOn IS.size . catMaybes . NE.toList) $
               Functor.unzip $
                 fmap
                   ( \q ->
@@ -187,5 +186,10 @@ genericJoin (hd ::- qs) db = fromMaybe [] do
                   qs
           !domain = case NE.nonEmpty doms of
             Nothing -> universe db
-            Just xs' -> foldl1' HS.intersection xs'
-       in foldMap' (\eid -> go vs (($ eid) <$> qs') (IM.insert v eid sub)) domain
+            Just xs' -> foldl1' IS.intersection xs'
+       in foldMap'
+            ( \k ->
+                let !eid = Trie.fromKey k
+                 in go vs (($ eid) <$> qs') (IM.insert v eid sub)
+            )
+            (IS.toList domain)

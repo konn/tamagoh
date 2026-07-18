@@ -78,6 +78,7 @@ import Data.Strict qualified as St
 import Data.Traversable qualified as Traverse
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
+import Data.Vector qualified as V
 import GHC.Generics (Generic, Generic1)
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
@@ -257,18 +258,21 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                   else
                     let matches = ematchDb lhs db
                         allValidMatches = mapMaybe (check analyses rule) matches
-                        -- Get threshold for this rule (increases with bans)
-                        threshold = case config.scheduler of
-                          Nothing -> maxBound -- No limit
-                          Just BackoffScheduler {matchLimit} ->
-                            let timesBanned = case IM.lookup ruleIdx schedState of
-                                  Nothing -> 0
-                                  Just RuleStat {timesBanned = tb} -> tb
-                             in matchLimit * (2 ^ timesBanned)
-                        -- Limit matches to threshold to prevent explosion
-                        limitedMatches = take threshold allValidMatches
-                        actualCount = length allValidMatches
-                     in (limitedMatches, (ruleIdx, actualCount))
+                        -- NB: apply ALL matches of a non-banned rule (as hegg
+                        -- and egg do); the scheduler statistic only feeds the
+                        -- backoff, which bans over-productive rules on LATER
+                        -- iterations. Truncating here (the previous
+                        -- behaviour) selects a match-order-dependent SUBSET
+                        -- of rewrites, making the whole saturation trajectory
+                        -- sensitive to internal enumeration order.
+                        --
+                        -- The statistic is hegg-compatible: the TOTAL
+                        -- substitution size over all raw matches, i.e.
+                        -- #matches x #query-variables (every complete match
+                        -- binds every query variable, internals included).
+                        !nVars = V.length lhs.varNames
+                        !totalSubstSize = length matches * nVars
+                     in (allValidMatches, (ruleIdx, totalSubstSize))
        in (concat matchesList, countsList)
 
     check analyses rule (eid, subs) =

@@ -42,9 +42,10 @@ import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
-import Data.HashSet (HashSet)
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
+import Data.IntSet (IntSet)
+import Data.IntSet qualified as IS
 import Data.Maybe (fromMaybe)
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Trie (Trie)
@@ -112,13 +113,13 @@ deriving newtype instance (Hashable1 l) => Hashable (Operator l)
 
 data Database l = Database
   { database :: !(HashMap (Operator l) Trie)
-  , universe :: !(HashSet EClassId)
+  , universe :: !IntSet
   }
   deriving (Generic)
 
 deriving instance (Show1 l) => Show (Database l)
 
-universe :: Database l -> HashSet EClassId
+universe :: Database l -> IntSet
 universe = (.universe)
 
 fromRelations :: (HasDatabase l) => [Relation l EClassId] -> Database l
@@ -126,7 +127,7 @@ fromRelations rels =
   let (universe, database) =
         L.fold
           ( (,)
-              <$> L.handles folded L.hashSet
+              <$> L.handles folded (L.Fold (\s e -> IS.insert (Trie.toKey e) s) IS.empty id)
               <*> L.premap
                 (\rel@MkRel {args} -> (toOperator args, F.toList rel))
                 (L.foldByKeyHashMap (Trie.fromRows <$> L.list))
