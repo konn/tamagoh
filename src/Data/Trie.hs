@@ -20,6 +20,7 @@ module Data.Trie (
 
 import Control.Lens hiding (cons, indices)
 import Control.Monad ((<$!>))
+import Data.DList qualified as DL
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.Types.EClassId (EClassId)
 import Data.FMList qualified as FML
@@ -159,10 +160,12 @@ fromRows = go
     go ([] : _) = empty
     go rows =
       let dic =
-            IM.map go $
+            -- NB: group with DList values — (<>) on lists inside
+            -- fromListWith would left-nest (++) and go quadratic per key.
+            IM.map (go . DL.toList) $
               IM.fromListWith
                 (flip (<>))
-                [(toKey x, [xs]) | x : xs <- rows]
+                [(toKey x, DL.singleton xs) | x : xs <- rows]
           -- NB: faithful to the previous implementation, sizes bottom out at
           -- 0 for leaf levels, so a database built via 'fromRows' reports
           -- size 0 throughout. Kept as-is to preserve the variable-ordering
