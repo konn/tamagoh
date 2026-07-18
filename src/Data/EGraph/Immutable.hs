@@ -237,7 +237,7 @@ extractBestOf ::
 extractBestOf lens eid = withRaw (Raw.extractBestOf lens eid)
 
 saturate ::
-  (Language l, Show1 l, Hashable v, Show v, Analysis l d) =>
+  (Language l, Hashable v, Analysis l d) =>
   SaturationConfig ->
   [Rule l d v] ->
   EGraph d l ->
@@ -250,7 +250,7 @@ saturate cfg rules = do
         Control.void PL.$ Raw.saturate cfg rules egraph
 
 ematch ::
-  (Language l, Show1 l, Hashable v, Show v) =>
+  (Language l, Hashable v) =>
   Pattern l v ->
   EGraph d l ->
   [(EClassId, Substitution v)]

@@ -20,7 +20,6 @@ import Control.Foldl qualified as L
 import Control.Lens hiding (cons, indices)
 import Control.Monad ((<$!>))
 import Data.EGraph.EMatch.Relational.Query
-import Data.EGraph.EMatch.Types (Substitution, insertVar, lookupVar)
 import Data.EGraph.Types.EClassId (EClassId)
 import Data.FMList qualified as FML
 import Data.Foldable (foldMap')
@@ -29,7 +28,8 @@ import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.HashSet (HashSet)
 import Data.HashSet qualified as HashSet
-import Data.Hashable (Hashable)
+import Data.IntMap.Strict (IntMap)
+import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IntSet
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
@@ -144,8 +144,8 @@ fromRows = go
         )
         rows
 
-match :: (Hashable v) => [EClassIdOrVar v] -> Trie -> [Substitution v]
-match = go mempty
+match :: [EClassIdOrVar VarId] -> Trie -> [IntMap EClassId]
+match = go IM.empty
   where
     go !sub [] _ = [sub]
     go !sub (x : xs) (Trie _ hm) = case x of
@@ -153,8 +153,8 @@ match = go mempty
       QVar v ->
         foldMap
           ( \(eid, trie') ->
-              case lookupVar v sub of
-                Nothing -> go (insertVar v eid sub) xs trie'
+              case IM.lookup v sub of
+                Nothing -> go (IM.insert v eid sub) xs trie'
                 Just eid'
                   | eid == eid' -> go sub xs trie'
                   | otherwise -> []

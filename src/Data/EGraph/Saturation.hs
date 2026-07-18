@@ -140,7 +140,7 @@ data CompiledRule l d v = CompiledRule
   , rhs :: !(Pattern l v)
   , condition :: !(Maybe (SideCondition l d v))
   }
-  deriving (Show, GHC.Generic, GHC.Generic1)
+  deriving (Show, GHC.Generic)
 
 data SaturationError l v = DanglingVariables (HashSet.HashSet v)
   deriving (Show, Eq, Ord)
@@ -180,7 +180,7 @@ defaultConfig =
 
 saturate ::
   forall d l v α.
-  (Analysis l d, Language l, Show1 l, Hashable v, Show v) =>
+  (Analysis l d, Language l, Hashable v) =>
   SaturationConfig ->
   [CompiledRule l d v] ->
   Mut α (EGraph d l) %1 ->

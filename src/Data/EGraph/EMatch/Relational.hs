@@ -20,31 +20,26 @@ module Data.EGraph.EMatch.Relational (
   compile,
 ) where
 
-import Control.Foldl qualified as L
 import Control.Functor.Linear qualified as Control
-import Control.Lens (at, folded, indexing, withIndex, (%~), (&), (^.))
+import Control.Lens (at, (%~), (&), (^.))
 import Control.Monad.Borrow.Pure
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Writer (WriterT (..), tell)
 import Data.Bifunctor qualified as Bi
-import Data.Coerce (coerce)
 import Data.EGraph.EMatch.Relational.Database
 import Data.EGraph.EMatch.Relational.Query
-import Data.EGraph.EMatch.Types
+import Data.EGraph.EMatch.Types (Substitution (..))
 import Data.EGraph.Types
 import Data.FMList qualified as FML
 import Data.Foldable (foldMap')
 import Data.Foldable qualified as F
 import Data.Foldable1 (foldl1')
 import Data.Functor qualified as Functor
-import Data.Functor.Classes (Show1)
 import Data.Generics.Labels ()
-import Data.HashMap.Monoidal (MonoidalHashMap (..))
-import Data.HashMap.Monoidal qualified as MHM
 import Data.HashMap.Strict qualified as HM
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
-import Data.Heap qualified as Heap
+import Data.IntMap.Strict (IntMap)
+import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
 import Data.List (sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
@@ -53,14 +48,18 @@ import Data.Ord (Down (..))
 import Data.Semigroup (Min (..), Sum (..))
 import Data.Trie (project)
 import Data.Trie qualified as Trie
-import Data.Tuple qualified as Tuple
-import Data.Unrestricted.Linear (Ur (..))
 import Data.Unrestricted.Linear.Lifted (Movable1)
+import Data.Vector qualified as V
 import GHC.Generics (Generic, Generically (..))
 import Prelude.Linear qualified as PL
 
+{- | Internal substitution over interned 'VarId's; translated back to the
+user-facing 'Substitution' only at the 'ematchDb' boundary.
+-}
+type IntSubst = IntMap EClassId
+
 ematch ::
-  (Hashable v, Show v, Show1 l, Traversable l, HasDatabase l, Movable1 l) =>
+  (Hashable v, Traversable l, HasDatabase l, Movable1 l) =>
   Pattern l v ->
   Borrow k α (EGraph d l) %m ->
   BO α (Ur [(EClassId, Substitution v)])
@@ -70,32 +69,40 @@ ematch pat egraph =
     Control.pure PL.$ Ur $ ematchDb (compile pat) db
 
 ematchDb ::
-  (Hashable v, Show v, Show1 l, HasDatabase l) =>
+  (Hashable v, HasDatabase l) =>
   PatternQuery l v -> Database l -> [(EClassId, Substitution v)]
 ematchDb PatternQuery {..} db =
   map
-    ( \subs ->
-        let subs' = mapMaybeVar \case { PVar v -> Just v; _ -> Nothing } subs
-            rootId = fromMaybe (error $ "ematchDB: var not found: " <> show (patQuery, root, subs)) $ lookupVar root subs
+    ( \sub ->
+        let !rootId = IM.findWithDefault (error "ematchDb: root variable unbound") root sub
+            !subs' =
+              Substitution $
+                V.ifoldl'
+                  ( \acc i mname -> case mname of
+                      Just name | Just eid <- IM.lookup i sub -> HM.insert name eid acc
+                      _ -> acc
+                  )
+                  HM.empty
+                  varNames
          in (rootId, subs')
     )
     $ query patQuery db
 
 query ::
-  forall l v.
-  (Hashable v, HasDatabase l) =>
-  Query l v ->
+  forall l.
+  (HasDatabase l) =>
+  Query l VarId ->
   Database l ->
-  [Substitution v]
+  [IntSubst]
 query (Conj cq) = genericJoin cq
-query (SelectAll v) = map (singletonVar v) . HS.toList . universe
+query (SelectAll v) = map (IM.singleton v) . HS.toList . universe
 
-data RelationState l v = RelationState
-  { atom :: !(Atom l v)
+data RelationState l = RelationState
+  { atom :: !(Atom l VarId)
   , database :: !Trie.Trie
-  , positions :: !(HM.HashMap v (NonEmpty Int))
+  , positions :: !(IntMap (NonEmpty Int))
   }
-  deriving (Show, Eq, Ord, Generic)
+  deriving (Show, Generic)
 
 data VarWeight = VarWeight
   { numRels :: !(Down (Sum Word))
@@ -104,80 +111,81 @@ data VarWeight = VarWeight
   deriving (Show, Eq, Ord, Generic)
   deriving (Semigroup, Monoid) via Generically VarWeight
 
-type VarStats v = MonoidalHashMap v VarWeight
-
 buildQueryState ::
-  (HasDatabase l, Hashable v) =>
+  (HasDatabase l) =>
   Database l ->
-  Atom l v ->
-  WriterT (VarStats v) Maybe (RelationState l v)
+  Atom l VarId ->
+  Maybe (RelationState l, IntMap VarWeight)
 buildQueryState db atom@(Atom MkRel {args}) = do
-  !database <- lift $ db ^. at (toOperator args)
-  let !positions = L.foldOver (indexing folded . withIndex) (L.premap Tuple.swap $ L.foldByKeyHashMap $ NE.fromList <$> L.list) atom
+  !database <- db ^. at (toOperator args)
+  -- Column positions of each variable. At compile time every column is a
+  -- 'QVar', so traversal order equals row-column order (id : children).
+  let !positions =
+        IM.fromListWith (flip (<>)) [(v, NE.singleton i) | (i, v) <- zip [0 ..] (F.toList atom)]
       weight =
         VarWeight
           { numRels = Down (Sum 1)
           , smallestDbSize = Min (Trie.size database)
           }
-  tell $ weight <$ MonoidalHashMap positions
-  pure RelationState {..}
+      !stats = IM.map (const weight) positions
+  pure (RelationState {..}, stats)
 
 genericJoin ::
-  forall l v.
-  (Hashable v, HasDatabase l) =>
-  ConjunctiveQuery l v ->
+  forall l.
+  (HasDatabase l) =>
+  ConjunctiveQuery l VarId ->
   Database l ->
-  [Substitution v]
+  [IntSubst]
 genericJoin (hd ::- (atm@(Atom rel@MkRel {args}) :| [])) db = fromMaybe [] do
   -- Degenerate case: just a lookup!
-  let vs = L.fold L.hashSet atm
-  let frees :: [Substitution v]
+  let vs = IS.fromList (F.toList atm)
+  let frees :: [IntSubst]
       frees =
-        coerce $
-          filter (not . HM.null) $
-            sequenceA $
-              fmap (const $ HS.toList $ universe db) $
-                HS.toMap $
-                  L.fold L.hashSet hd `HS.difference` vs
+        filter (not . IM.null) $
+          sequenceA $
+            IM.fromSet (const $ HS.toList $ universe db) $
+              IS.fromList hd `IS.difference` vs
   trie <- db ^. at (toOperator args)
   let !matches = Trie.match (F.toList rel) trie
   pure $
     if null frees
       then matches
-      else (<>) <$> matches <*> frees
+      else IM.union <$> matches <*> frees
 genericJoin (hd ::- qs) db = fromMaybe [] do
-  (rels, varStat) <- runWriterT $ mapM (buildQueryState db) qs
-  let vs =
-        Heap.fromList $
-          map (uncurry $ flip Heap.Entry) $
-            MHM.toList $
-              varStat <> MHM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) $ F.toList hd)
+  relsStats <- mapM (buildQueryState db) qs
+  let rels = fst <$> relsStats
+      varStat =
+        IM.unionWith
+          (<>)
+          (foldl1' (IM.unionWith (<>)) (snd <$> relsStats))
+          (IM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) hd))
+      -- Variable elimination order, decided once up-front (cheapest first).
+      order = map fst $ sortOn snd $ IM.toList varStat
   -- NB: @go@ accumulates in 'FML.FMList', whose @(<>)@ is O(1); accumulating in a
   -- plain list here would be a left-nested @(++)@ (via @foldMap'@) and hence O(N^2)
   -- in the number of matches. Materialise to a list exactly once, at the boundary.
-  pure $ FML.toList (go vs rels mempty)
+  pure $ FML.toList (go order rels IM.empty)
   where
     -- TODO: consider some selection strategy
-    go !vvs !qs sub = case Heap.viewMin vvs of
-      Nothing -> FML.singleton sub
-      Just (Heap.Entry {payload = v}, vs) ->
-        let (!doms, !qs') =
-              Bi.first (sortOn HS.size . catMaybes . NE.toList) $
-                Functor.unzip $
-                  fmap
-                    ( \q ->
-                        case HM.lookup v q.positions of
-                          Nothing -> (Nothing, const q)
-                          Just poss ->
-                            ( Just $ project poss q.database
-                            , \eid ->
-                                q
-                                  & #atom %~ substAtom v eid
-                                  & #database %~ Trie.focus ((,eid) <$> poss)
-                            )
-                    )
-                    qs
-            !domain = case NE.nonEmpty doms of
-              Nothing -> universe db
-              Just xs' -> foldl1' HS.intersection xs'
-         in foldMap' (\eid -> go vs (($ eid) <$> qs') (insertVar v eid sub)) domain
+    go [] !_qs sub = FML.singleton sub
+    go (v : vs) !qs sub =
+      let (!doms, !qs') =
+            Bi.first (sortOn HS.size . catMaybes . NE.toList) $
+              Functor.unzip $
+                fmap
+                  ( \q ->
+                      case IM.lookup v q.positions of
+                        Nothing -> (Nothing, const q)
+                        Just poss ->
+                          ( Just $ project poss q.database
+                          , \eid ->
+                              q
+                                & #atom %~ substAtom v eid
+                                & #database %~ Trie.focus ((,eid) <$> poss)
+                          )
+                  )
+                  qs
+          !domain = case NE.nonEmpty doms of
+            Nothing -> universe db
+            Just xs' -> foldl1' HS.intersection xs'
+       in foldMap' (\eid -> go vs (($ eid) <$> qs') (IM.insert v eid sub)) domain
