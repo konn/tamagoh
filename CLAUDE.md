@@ -24,6 +24,45 @@ The project uses GHC's Linear Haskell extension extensively with `linear-base` a
 
 Before you do the performance tuning, you must first take the corresponding benchmark suite and use it as a baseline. If no corresponding benchmark suite is found, please start from implementing it before you do performance tuning.
 
+### Guiding Principles (learned from the 2026-07 hegg-parity work; see `workspace/TUNE-PLAN.md`)
+
+1. **Scheduling dominates micro-optimisation.** In equality saturation, *which* rewrites get
+   applied matters far more than how fast each one is applied. Keep the backoff scheduler
+   hegg/egg-faithful: apply ALL matches of non-banned rules (never truncate a rule's match list —
+   truncation makes the applied-rewrite set depend on internal enumeration order), ban by total
+   substitution size (#matches × #query-vars), and let bans take effect on later iterations.
+2. **Trajectories are cliff-sensitive; keep the engine deterministic and order-robust.** Near
+   `nodeLimit`/`maxIterations` cliffs, any change to enumeration order can swing a case ~2×
+   either way. Never rely on hash-iteration or heap-internal order for anything semantic; use
+   deterministic, name-independent orders (e.g. ascending interned ids). Judge benchmarks by the
+   i1–i6 aggregate, not single cases.
+3. **The match engine speaks dense `Int`s; user names live only at the boundary.** Pattern
+   variables are interned to `0..n-1` (`varNames` maps back); substitutions, positions and
+   domains are `IntMap`/`IntSet`; the `Trie` caches a per-level key-set so single-occurrence
+   domains are O(1). Nothing in the join's inner loop may hash or compare structured data.
+4. **Accumulate in a free monoid, materialise once.** A strict fold (`foldMap'`,
+   `IM.fromListWith`, …) over the *list* monoid is a quadratic left-nested `(++)` trap — this bug
+   was found three separate times. Use `FMList`/`DList` and convert with `toList` at the boundary.
+5. **In pure-borrow hot loops, prefer direct recursion over transformer towers.** Per-element
+   `UrT`/`StateT`-over-`BO` traversals and per-element sub-lifetimes (`sharing`/`reborrowing`
+   inside a loop body) are measurable constants. Flatten to explicit `BO`-level recursion over
+   `F.toList` + a `refill` of the node shape; `share` a borrow once *outside* the loop and
+   `upcast` it in; consolidate adjacent reborrow blocks with `.@` record splits.
+6. **Separate congruence dirtiness from analysis dirtiness** (egg's `pending` vs
+   `analysis_pending`): `repair` restores congruence only; `repairAnal` propagates analysis
+   changes, and only for classes whose analysis value actually changed (detected at the meet).
+7. **Per-iteration work should be proportional to what changed** — or at least cheap per node.
+   No whole-graph snapshots per iteration; fetch class data on demand for the matches that need
+   it; the database build must not deep-copy nodes.
+8. **Measure before keeping.** Every optimisation lands with a before/after CSV
+   (`cabal bench tamagoh-bench-math --benchmark-options "--csv ..."`) and an unchanged test
+   outcome; re-profile (`cabal-bench.project`, `-fprof-late`) after each structural change
+   because the ranking shifts. Mutation is not automatically faster: the egg-style register
+   vector lost to a ≤7-entry persistent `IntMap` and was rejected. Linear mutation earns its
+   place where mutation is real (union-find, hashcons, worklists), not in tiny transient
+   accumulators. Beware machine-load drift: hegg runs in the same suite as a control — read
+   results *relative* to it.
+
 ## Haskell Development
 
 - Use `cabal` CLI for Haskell environment interaction (building, testing, running)
