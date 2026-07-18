@@ -209,7 +209,8 @@ insertIfNew eid enode analysis clss = Control.do
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
       nodes <- asksLinearly $ Set.singleton enode
-      parents <- asksLinearly $ HMUr.empty 128
+      -- Most classes have few parents; start small (the map grows on demand).
+      parents <- asksLinearly $ HMUr.empty 8
       analysis <- asksLinearly $ Ref.new analysis
       (mop, clss) <- HMB.insert eid EClass {parents, nodes, analysis} $ coerceLin clss
       clss <- reborrowing_ clss \clss -> Control.do

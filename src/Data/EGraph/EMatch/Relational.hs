@@ -47,7 +47,6 @@ import Data.Ord (Down (..))
 import Data.Semigroup (Min (..), Sum (..))
 import Data.Trie (project)
 import Data.Trie qualified as Trie
-import Data.Unrestricted.Linear.Lifted (Movable1)
 import Data.Vector qualified as V
 import GHC.Generics (Generic, Generically (..))
 import Prelude.Linear qualified as PL
@@ -58,7 +57,7 @@ user-facing 'Substitution' only at the 'ematchDb' boundary.
 type IntSubst = IntMap EClassId
 
 ematch ::
-  (Hashable v, Traversable l, HasDatabase l, Movable1 l) =>
+  (Hashable v, Traversable l, HasDatabase l) =>
   Pattern l v ->
   Borrow k α (EGraph d l) %m ->
   BO α (Ur [(EClassId, Substitution v)])

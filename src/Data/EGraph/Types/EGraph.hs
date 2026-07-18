@@ -64,6 +64,7 @@ import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.EGraph.Internal
 import Data.EGraph.Types.ENode
 import Data.EGraph.Types.Term
+import Data.Foldable qualified as F
 import Data.Foldable1 (Foldable1, foldlM1)
 import Data.Functor.Foldable (cataA)
 import Data.Functor.Linear qualified as Data
@@ -193,7 +194,21 @@ instance (P.Traversable l, Hashable1 l) => Equatable l (Term l) where
     Ur meid2 <- lookupTerm term2 egraph
     Control.pure $ Ur $ (P.==) P.<$> meid1 P.<*> meid2
 
+-- | Rebuild a node shape from the list of its (transformed) children.
+refill :: (P.Traversable l) => l b -> [a] -> l a
+{-# INLINE refill #-}
+refill shape vals =
+  P.snd $
+    P.mapAccumL
+      ( \xs0 _ -> case xs0 of
+          x : xs -> (xs, x)
+          [] -> P.error "refill: impossible: child count mismatch"
+      )
+      vals
+      shape
+
 canonicalize ::
+  forall l d k α m.
   (P.Traversable l) =>
   ENode l ->
   Borrow k α (EGraph d l) %m ->
@@ -201,15 +216,17 @@ canonicalize ::
 canonicalize (ENode node) egraph =
   share egraph & \(Ur egraph) -> Control.do
     let uf = egraph .# #unionFind
-    runUrT $
-      coerce P.. P.sequenceA
-        P.<$> P.mapM
-          ( \eid ->
-              UrT $
-                Data.fmap (coerceLin @_ @(Maybe EClassId))
-                  Control.<$> UFB.find (coerce eid) uf
-          )
-          node
+        -- Direct recursion over the children instead of a UrT-wrapped
+        -- traversal: no per-child transformer plumbing.
+        go :: [EClassId] -> [EClassId] -> BO α (Ur (Maybe (ENode l)))
+        go [] acc =
+          Control.pure $! Ur $! Just $! ENode (refill node (P.reverse acc))
+        go (eid : rest) acc = Control.do
+          Ur meid <- UFB.find (coerce eid) uf
+          case meid of
+            Nothing -> Control.pure (Ur Nothing)
+            Just eid' -> go rest (coerce eid' : acc)
+    go (F.toList node) []
 
 -- | Canonicalize a node, without checking the existence of eclass ids.
 unsafeCanonicalize ::
@@ -222,21 +239,20 @@ unsafeCanonicalize enode egraph =
 
 -- | A variant of 'unsafeCanonicalize' that uses underlying 'UnionFind'.
 unsafeCanonicalize' ::
+  forall l bk α m.
   (P.Traversable l) =>
   ENode l ->
   Borrow bk α UnionFind %m ->
   BO α (Ur (ENode l))
 unsafeCanonicalize' (ENode node) uf =
   share uf & \(Ur uf) -> Control.do
-    runUrT $
-      coerce
-        P.<$> P.mapM
-          ( \eid ->
-              UrT $
-                Data.fmap (coerceLin @_ @(EClassId))
-                  Control.<$> UFB.unsafeFind (coerce eid) uf
-          )
-          node
+    let go :: [EClassId] -> [EClassId] -> BO α (Ur (ENode l))
+        go [] acc =
+          Control.pure $! Ur $! ENode (refill node (P.reverse acc))
+        go (eid : rest) acc = Control.do
+          Ur k <- UFB.unsafeFind (coerce eid) uf
+          go rest (coerce k : acc)
+    go (F.toList node) []
 
 unsafeFind :: Borrow k α (EGraph d l) %m -> EClassId -> BO α (Ur EClassId)
 unsafeFind egraph (EClassId k) = Control.do
@@ -262,18 +278,6 @@ unsafeMakeAnalyzeNode enode egraph =
           Ur manal <- EC.lookupAnalysis ecs eid
           go rest ((eid, P.fromJust manal) : acc)
     go (children enode) []
-  where
-    -- Rebuild the node shape with each child replaced by its (id, analysis).
-    refill :: l EClassId -> [(EClassId, d)] -> l (EClassId, d)
-    refill shape vals =
-      P.snd $
-        P.mapAccumL
-          ( \xs0 _ -> case xs0 of
-              x : xs -> (xs, x)
-              [] -> P.error "unsafeMakeAnalyzeNode: impossible: child count mismatch"
-          )
-          vals
-          shape
 
 addNode ::
   (Analysis l d, Hashable1 l) =>

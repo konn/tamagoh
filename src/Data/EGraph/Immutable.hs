@@ -257,7 +257,7 @@ ematch ::
 ematch pat = withRaw PL.$ Rel.ematch pat
 
 buildDatabase ::
-  (HasDatabase l, Movable1 l, Traversable l) =>
+  (HasDatabase l, Traversable l) =>
   EGraph d l ->
   Database l
 buildDatabase = withRaw RawDb.buildDatabase

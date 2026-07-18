@@ -37,7 +37,6 @@ import Data.EGraph.EMatch.Relational.Query (Relation (..))
 import Data.EGraph.Types
 import Data.Foldable qualified as F
 import Data.Functor.Classes
-import Data.Functor.Linear qualified as Data
 import Data.Generics.Labels ()
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
 import Data.HashMap.Strict (HashMap)
@@ -46,13 +45,9 @@ import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
-import Data.Maybe (fromMaybe)
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Trie (Trie)
 import Data.Trie qualified as Trie
-import Data.Unrestricted.Linear
-import Data.Unrestricted.Linear qualified as Ur
-import Data.Unrestricted.Linear.Lifted
 import GHC.Generics
 import Generics.Linear.TH qualified as GL
 import Prelude.Linear qualified as PL
@@ -80,22 +75,23 @@ deriving via Generically Wildcard instance Movable Wildcard
 deriving via AsCopyableShow Wildcard instance Display Wildcard
 
 buildDatabase ::
-  (HasDatabase l, Movable1 l, Traversable l) =>
+  forall l d k α m.
+  (HasDatabase l, Traversable l) =>
   Borrow k α (EGraph d l) %m ->
   BO α (Ur (Database l))
 buildDatabase egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
     Ur nodes <- HMUr.toList (egraph .@ hashconsL)
-    Ur nodes <- Control.fmap move PL.$
-      Data.forM nodes \(enode, id) ->
-        move (enode, id) PL.& \(Ur (enode, id)) ->
-          (,)
-            Control.<$> (unur PL.. Ur.lift (fromMaybe (error "buildDatabase: canonicalize failed")) Control.<$> canonicalize enode egraph)
-            Control.<*> (unur Control.<$> unsafeFind egraph id)
-    Control.pure PL.$
-      Ur $
-        fromRelations $
-          PL.map (\(ENode args, id) -> MkRel {id, args}) nodes
+    -- Direct recursion: canonicalise each (node, id) pair into a relation
+    -- row without deep-copying the node ('unsafeCanonicalize' already
+    -- produces a fresh node) or any per-node transformer plumbing.
+    let go :: [(ENode l, EClassId)] -> [Relation l EClassId] -> BO α (Ur (Database l))
+        go [] acc = Control.pure PL.$ Ur PL.$ fromRelations acc
+        go ((enode, eid) : rest) acc = Control.do
+          Ur (ENode args) <- unsafeCanonicalize enode egraph
+          Ur eid' <- unsafeFind egraph eid
+          go rest (MkRel {id = eid', args} : acc)
+    go nodes []
 
 {- | An operator is a pattern with all metavariables replaced by unit.
 NOTE: We must preapare separate tries for each operators with the same
