@@ -32,6 +32,7 @@ import Data.EGraph.EMatch.Relational.Database
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types
 import Data.EGraph.Types
+import Data.FMList qualified as FML
 import Data.Foldable (foldMap')
 import Data.Foldable qualified as F
 import Data.Foldable1 (foldl1')
@@ -151,11 +152,14 @@ genericJoin (hd ::- qs) db = fromMaybe [] do
           map (uncurry $ flip Heap.Entry) $
             MHM.toList $
               varStat <> MHM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) $ F.toList hd)
-  pure $ go vs rels mempty
+  -- NB: @go@ accumulates in 'FML.FMList', whose @(<>)@ is O(1); accumulating in a
+  -- plain list here would be a left-nested @(++)@ (via @foldMap'@) and hence O(N^2)
+  -- in the number of matches. Materialise to a list exactly once, at the boundary.
+  pure $ FML.toList (go vs rels mempty)
   where
     -- TODO: consider some selection strategy
     go !vvs !qs sub = case Heap.viewMin vvs of
-      Nothing -> [sub]
+      Nothing -> FML.singleton sub
       Just (Heap.Entry {payload = v}, vs) ->
         let (!doms, !qs') =
               Bi.first (sortOn HS.size . catMaybes . NE.toList) $

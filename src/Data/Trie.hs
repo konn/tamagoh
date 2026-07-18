@@ -108,11 +108,14 @@ focus = fmap (fromMaybe empty) . go 0 . NE.toList
 project :: NonEmpty Int -> Trie -> HashSet EClassId
 project indices =
   HashSet.fromList
+    . FML.toList
+    -- NB: accumulate in 'FML.FMList' (O(1) @(<>)@); a plain-list @foldMap'@ in the
+    -- @otherwise@ branch below would be a left-nested @(++)@, i.e. O(N^2).
     . probe 0 (NE.fromList $ IntSet.toAscList $ IntSet.fromList $ F.toList indices)
   where
-    probe :: Int -> NonEmpty Int -> Trie -> [EClassId]
+    probe :: Int -> NonEmpty Int -> Trie -> FML.FMList EClassId
     probe !n (i :| is) trie
-      | n == i = mapMaybe (uncurry $ go (n + 1) is) $ HM.toList trie.branches
+      | n == i = FML.fromList $ mapMaybe (uncurry $ go (n + 1) is) $ HM.toList trie.branches
       | otherwise = foldMap' (probe (n + 1) (i :| is)) trie.branches
     go :: Int -> [Int] -> EClassId -> Trie -> Maybe EClassId
     go !_ [] !eid _ = pure eid
