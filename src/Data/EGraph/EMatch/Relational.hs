@@ -56,6 +56,7 @@ user-facing 'Substitution' only at the 'ematchDb' boundary.
 -}
 type IntSubst = IntMap EClassId
 
+{-# INLINEABLE ematch #-}
 ematch ::
   (Hashable v, Traversable l, HasDatabase l) =>
   Pattern l v ->
@@ -66,6 +67,7 @@ ematch pat egraph =
     Ur db <- buildDatabase egraph
     Control.pure PL.$ Ur $ ematchDb (compile pat) db
 
+{-# INLINEABLE ematchDb #-}
 ematchDb ::
   (Hashable v, HasDatabase l) =>
   PatternQuery l v -> Database l -> [(EClassId, Substitution v)]
@@ -86,6 +88,7 @@ ematchDb PatternQuery {..} db =
     )
     $ query patQuery db
 
+{-# INLINEABLE query #-}
 query ::
   forall l.
   (HasDatabase l) =>
@@ -128,6 +131,7 @@ buildQueryState db atom@(Atom MkRel {args}) = do
       !stats = IM.map (const weight) positions
   pure (RelationState {..}, stats)
 
+{-# INLINEABLE genericJoin #-}
 genericJoin ::
   forall l.
   (HasDatabase l) =>

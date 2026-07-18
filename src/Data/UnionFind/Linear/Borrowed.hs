@@ -58,6 +58,7 @@ NOTE: This function uses path compression, which mutates the internal state;
 but this SHOULD NOT affect the external behavior of the union-find structure,
 so we provide it in for _any_ 'Borrow's (in particular, for 'Share's)  unrestrictedly.
 -}
+{-# INLINE find #-}
 find ::
   forall k α m.
   Key -> Borrow k α UnionFind %m -> BO α (Ur (Maybe Key))
@@ -66,6 +67,7 @@ find key (UnsafeAlias bor) = Control.do
   (!key, UnsafeAlias !a) <- Ref.update (Control.pure . Raw.find key) borRef
   Control.pure $ unsafeLeak a `lseq` key
 
+{-# INLINE member #-}
 member ::
   forall k α m.
   Key -> Borrow k α UnionFind %m -> BO α (Ur Bool)
@@ -75,17 +77,20 @@ member key bor =
     Ur (UnsafeAlias (Raw.UnionFind n _ _)) <- Ref.readShare borRef
     Control.pure $ Ur (Raw.getKey key P.< n)
 
+{-# INLINE unsafeFind #-}
 unsafeFind :: forall k α m. Key -> Borrow k α UnionFind %m -> BO α (Ur Key)
 unsafeFind key (UnsafeAlias bor) = Control.do
   let %1 borRef = coerceUF (UnsafeAlias bor :: Mut α _)
   (!key, UnsafeAlias !a) <- Ref.update (Control.pure . Raw.unsafeFind key) borRef
   Control.pure $ unsafeLeak a `lseq` key
 
+{-# INLINE fresh #-}
 fresh :: Mut α UnionFind %1 -> BO α (Ur Key, Mut α UnionFind)
 fresh uf = Control.do
   let %1 borRef = coerceUF uf
   Bi.second recoerceUF Control.<$> Ref.update (Control.pure . Raw.fresh) borRef
 
+{-# INLINE union #-}
 union ::
   Key ->
   Key ->
@@ -95,6 +100,7 @@ union k1 k2 uf = Control.do
   let %1 borRef = coerceUF uf
   Bi.second recoerceUF Control.<$> Ref.update (Control.pure . Raw.union k1 k2) borRef
 
+{-# INLINE unsafeUnion #-}
 unsafeUnion ::
   Key ->
   Key ->
@@ -104,6 +110,7 @@ unsafeUnion k1 k2 uf = Control.do
   let %1 borRef = coerceUF uf
   Bi.second recoerceUF Control.<$> Ref.update (Control.pure . Raw.unsafeUnion k1 k2) borRef
 
+{-# INLINE equivalent #-}
 equivalent ::
   forall k α m.
   Key -> Key -> Borrow k α UnionFind %m -> BO α (Ur (Maybe Bool))
@@ -117,6 +124,7 @@ NOTE: This function uses path compression, which mutates the internal state;
 but this SHOULD NOT affect the external behavior of the union-find structure,
 so we provide it in for _any_ 'Borrow's (in particular, for 'Share's)  unrestrictedly.
 -}
+{-# INLINE unsafeEquivalent #-}
 unsafeEquivalent ::
   forall k α m.
   Key -> Key -> Borrow k α UnionFind %m -> BO α (Ur Bool)

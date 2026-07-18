@@ -180,6 +180,7 @@ defaultConfig =
     , scheduler = Just defaultScheduler
     }
 
+{-# INLINEABLE saturate #-}
 saturate ::
   forall d l v α.
   (Analysis l d, Language l, Hashable v) =>
@@ -367,6 +368,7 @@ This is necessary because e-matching returns canonical e-class ids,
 but the analyses map from EC.analyses uses original ids.
 After merges, we need to ensure lookups by canonical id succeed.
 -}
+{-# INLINEABLE lookupMatchInfos #-}
 lookupMatchInfos ::
   forall d l bk α m.
   [EClassId] ->

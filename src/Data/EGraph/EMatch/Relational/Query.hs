@@ -156,6 +156,7 @@ data PatternQuery l v = PatternQuery
   }
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
+{-# INLINEABLE compile #-}
 compile ::
   forall l v.
   (Hashable v, Traversable l) =>

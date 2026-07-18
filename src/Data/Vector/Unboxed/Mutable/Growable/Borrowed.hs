@@ -59,14 +59,17 @@ instance (Unbox a) => Dupable (Vector a) where
     !hm' <- Unsafe.toLinear (\(!_, !hm') -> hm') $ dup hm
     (Vector ref, Vector $! Ref.new hm' lin)
 
+{-# INLINE freeze #-}
 freeze :: (U.Unbox a) => Vector a %1 -> Ur (U.Vector a)
 freeze (Vector ref) = LUV.freeze $ Ref.free ref
 
+{-# INLINE new #-}
 new :: (Unbox a) => Linearly %1 -> Vector a
 new l = flip runReader l Control.do
   !vec <- reader $ LUV.emptyL . fromPB
   Vector Control.<$> reader (Ref.new vec)
 
+{-# INLINE fromList #-}
 fromList :: (Unbox a) => [a] -> Linearly %1 -> Vector a
 fromList xs l = flip runReader l Control.do
   !vec <- reader $ LUV.fromListL xs . fromPB
@@ -80,13 +83,16 @@ capacity :: (Unbox a) => Borrow bk α (Vector a) %m -> BO α (Ur Int)
 {-# INLINE capacity #-}
 capacity = askRaw LUV.capacity
 
+{-# INLINE push #-}
 push :: (Unbox a) => a -> Mut α (Vector a) %1 -> BO α (Mut α (Vector a))
 push !x vec = Control.do
   recoerceBor Control.<$> Ref.modify (LUV.push x) (coerceBor vec)
 
+{-# INLINE null #-}
 null :: Borrow bk α (Vector a) %m -> BO α (Ur Bool)
 null = Control.fmap (Data.fmap (== 0)) . size
 
+{-# INLINE pop #-}
 pop :: (Unbox a) => Mut α (Vector a) %1 -> BO α (Ur (Maybe a), Mut α (Vector a))
 pop vec = Control.do
   Bi.second recoerceBor

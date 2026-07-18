@@ -59,21 +59,25 @@ inner :: Set k %1 -> Ref (Raw.Set k)
 {-# INLINE inner #-}
 inner = coerceLin
 
+{-# INLINE empty #-}
 empty :: (Keyed k) => Int -> Linearly %1 -> Set k
 empty size l =
   dup l & \(l, l') ->
     Set $ Ref.new (Raw.emptyL size $ fromPB l) l'
 
+{-# INLINE singleton #-}
 singleton :: (Keyed k) => k -> Linearly %1 -> Set k
 singleton !key l =
   dup l & \(l, l') ->
     Set $! Ref.new (Raw.fromListL [key] $ fromPB l) l'
 
+{-# INLINE fromList #-}
 fromList :: (Keyed k) => [k] -> Linearly %1 -> Set k
 fromList = Unsafe.toLinear \ !keys -> \l ->
   dup l & \(l, l') ->
     Set $! Ref.new (Raw.fromListL keys $ fromPB l) l'
 
+{-# INLINE insert #-}
 insert :: (Keyed k) => k -> Mut α (Set k) %1 -> BO α (Mut α (Set k))
 insert = Unsafe.toLinear \ !key -> \ !set -> Control.do
   set <- Ref.modify (\ !s -> Raw.insert key s) (coerceBor set)
@@ -99,6 +103,7 @@ askRaw f dic = case share dic of
       -- This leakage won't cause memory leak, because Lender will eventually free the whole block.
       (!res, !dic) -> unsafeLeak dic `lseq` Control.pure res
 
+{-# INLINE member #-}
 member ::
   forall k α.
   (Keyed k) =>
@@ -107,6 +112,7 @@ member ::
   BO α (Ur Bool)
 member key = askRaw (Raw.member key)
 
+{-# INLINE toList #-}
 toList :: Borrow bk α (Set k) %m -> BO α (Ur [k])
 toList = askRaw_ rawToList'
 
@@ -125,6 +131,7 @@ rawToList' = \(Raw.Set (RawHM.HashMap _ n !robinArr)) ->
         | otherwise = unsafeLeak arr `lseq` Ur (DL.toList acc)
    in go 0 robinArr P.mempty
 
+{-# INLINE toListUnborrowed #-}
 toListUnborrowed :: Set k %1 -> Ur [k]
 toListUnborrowed (Set ref) = rawToList' (Ref.free ref)
 
@@ -164,6 +171,7 @@ takeWithCapa_ :: forall k α. (Keyed k) => Int -> Mut α (Set k) %1 -> BO α (Se
 {-# INLINE takeWithCapa_ #-}
 takeWithCapa_ n = Control.fmap (uncurry $ flip lseq) . takeWithCapa n
 
+{-# INLINE swap #-}
 swap ::
   forall k α.
   Set k %1 ->

@@ -70,10 +70,12 @@ import Prelude qualified as P
 
 -- * Construction
 
+{-# INLINE empty #-}
 empty :: forall k v. Int -> Linearly %1 -> HashMapUr k v
 empty size l =
   dup l & \(l, l'') -> HM $ Ref.new (Raw.new size l) l''
 
+{-# INLINE fromList #-}
 fromList :: (Keyed k) => [(k, v)] -> Linearly %1 -> HashMapUr k v
 fromList dic l =
   dup l & \(l, l') ->
@@ -81,6 +83,7 @@ fromList dic l =
 
 -- * Mutation
 
+{-# INLINE insert #-}
 insert ::
   (Keyed k) =>
   k ->
@@ -94,6 +97,7 @@ insert key !v !dic = Control.do
       (coerceBor dic)
   Control.pure (Ur $ forceMay mval, recoerceBor dic)
 
+{-# INLINE delete #-}
 delete ::
   (Keyed k) => k -> Mut α (HashMapUr k v) %1 -> BO α (Ur (Maybe v), Mut α (HashMapUr k v))
 delete key dic = Control.do
@@ -108,6 +112,7 @@ forceMay = \case
   Nothing -> Nothing
   Just !x -> Just x
 
+{-# INLINE alter #-}
 alter ::
   (Keyed k) =>
   (Maybe v -> Maybe v) ->
@@ -119,6 +124,7 @@ alter f k =
     . Ref.modify (Raw.alter f k)
     . coerceBor
 
+{-# INLINE alterF #-}
 alterF ::
   (Keyed k) =>
   (Maybe v -> BO α (Ur (Maybe v))) ->
@@ -136,9 +142,11 @@ alterF f key dic = Control.do
 
 -- * Query
 
+{-# INLINE size #-}
 size :: Borrow bk α (HashMapUr k v) %m -> BO α (Ur Int)
 size = askRaw Raw.size
 
+{-# INLINE lookup #-}
 lookup ::
   (Keyed k) =>
   k ->
@@ -146,11 +154,13 @@ lookup ::
   BO α (Ur (Maybe v))
 lookup !key !dic = askRaw (Raw.lookup key) dic
 
+{-# INLINE member #-}
 member :: (Keyed k) => k -> Borrow bk α (HashMapUr k v) %m -> BO α (Ur Bool)
 member key = askRaw (Raw.member key)
 
 -- * Bulk operations
 
+{-# INLINE swap #-}
 swap ::
   forall k v α.
   HashMapUr k v %1 ->
@@ -174,11 +184,13 @@ take_ :: forall k v α. Mut α (HashMapUr k v) %1 -> BO α (HashMapUr k v)
 {-# INLINE take_ #-}
 take_ dic = Control.fmap (uncurry $ flip lseq) $ take dic
 
+{-# INLINE union #-}
 union :: (Keyed k) => HashMapUr k v %1 -> HashMapUr k v %1 -> HashMapUr k v
 union (HM ref1) (HM ref2) = DataFlow.do
   (l, ref1) <- withLinearly ref1
   HM $! Ref.new (Raw.union (Ref.free ref1) (Ref.free ref2)) l
 
+{-# INLINE extend #-}
 extend :: (Keyed k) => HashMapUr k v %1 -> Mut α (HashMapUr k v) %1 -> BO α (Mut α (HashMapUr k v))
 extend (HM dicRef') dic = Control.do
   let %1 !dic' = Ref.free dicRef'

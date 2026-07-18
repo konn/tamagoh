@@ -85,6 +85,7 @@ import GHC.Generics (Generic)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Prelude qualified as P
 
+{-# INLINEABLE getOriginalNode #-}
 getOriginalNode ::
   Borrow k α (EGraph d l) %m ->
   EClassId ->
@@ -93,6 +94,7 @@ getOriginalNode egraph eid =
   share egraph & \(Ur egraph) ->
     HMUr.lookup eid (egraph .# #nodes)
 
+{-# INLINEABLE addTerm #-}
 addTerm ::
   (Analysis l d, Hashable1 l) =>
   Term l ->
@@ -123,17 +125,20 @@ new = runReader Control.do
   analysisWorklist <- asks BUV.new
   Control.pure EGraph {..}
 
+{-# INLINEABLE find #-}
 find :: Borrow k α (EGraph d l) %m -> EClassId -> BO α (Ur (Maybe EClassId))
 find egraph (EClassId k) = Control.do
   let uf = egraph .# #unionFind
   coerceLin Data.<$> UFB.find k uf
 
+{-# INLINEABLE lookup #-}
 lookup :: (P.Traversable l, Hashable1 l) => ENode l -> Borrow bk α (EGraph d l) %m -> BO α (Ur (Maybe EClassId))
 lookup enode egraph =
   share egraph & \(Ur egraph) -> runUrT $ runMaybeT do
     !enode <- MaybeT $ UrT (canonicalize enode egraph)
     MaybeT $ UrT $ HMUr.lookup enode (egraph .# #hashcons)
 
+{-# INLINEABLE lookupTerm #-}
 lookupTerm ::
   (P.Traversable l, Hashable1 l) =>
   Term l ->
@@ -150,6 +155,7 @@ lookupTerm term egraph =
             term
     runUrT $ runMaybeT (go term)
 
+{-# INLINEABLE getAnalysis #-}
 getAnalysis ::
   EClassId ->
   Borrow k α (EGraph d l) %m ->
@@ -160,6 +166,7 @@ getAnalysis eid egraph =
     eid <- MaybeT $ UrT $ find egraph eid
     MaybeT $ UrT $ EC.lookupAnalysis clss eid
 
+{-# INLINEABLE lookupEClass #-}
 lookupEClass ::
   EClassId ->
   Borrow k α (EGraph d l) %m ->
@@ -207,6 +214,7 @@ refill shape vals =
       vals
       shape
 
+{-# INLINEABLE canonicalize #-}
 canonicalize ::
   forall l d k α m.
   (P.Traversable l) =>
@@ -229,6 +237,7 @@ canonicalize (ENode node) egraph =
     go (F.toList node) []
 
 -- | Canonicalize a node, without checking the existence of eclass ids.
+{-# INLINEABLE unsafeCanonicalize #-}
 unsafeCanonicalize ::
   (P.Traversable l) =>
   ENode l ->
@@ -238,6 +247,7 @@ unsafeCanonicalize enode egraph =
   unsafeCanonicalize' enode (egraph .# #unionFind)
 
 -- | A variant of 'unsafeCanonicalize' that uses underlying 'UnionFind'.
+{-# INLINEABLE unsafeCanonicalize' #-}
 unsafeCanonicalize' ::
   forall l bk α m.
   (P.Traversable l) =>
@@ -254,11 +264,13 @@ unsafeCanonicalize' (ENode node) uf =
           go rest (coerce k : acc)
     go (F.toList node) []
 
+{-# INLINEABLE unsafeFind #-}
 unsafeFind :: Borrow k α (EGraph d l) %m -> EClassId -> BO α (Ur EClassId)
 unsafeFind egraph (EClassId k) = Control.do
   let uf = egraph .# #unionFind
   coerceLin Data.<$> UFB.unsafeFind k uf
 
+{-# INLINEABLE unsafeMakeAnalyzeNode #-}
 unsafeMakeAnalyzeNode ::
   forall l d k α m.
   (Analysis l d) =>
@@ -279,6 +291,7 @@ unsafeMakeAnalyzeNode enode egraph =
           go rest ((eid, P.fromJust manal) : acc)
     go (children enode) []
 
+{-# INLINEABLE addNode #-}
 addNode ::
   (Analysis l d, Hashable1 l) =>
   Mut α (EGraph d l) %1 ->
@@ -291,6 +304,7 @@ addNode egraph node = Control.do
     Ur (Just enode) ->
       Bi.first (Ur.lift Just) Control.<$> addCanonicalNode enode egraph
 
+{-# INLINEABLE addCanonicalNode #-}
 addCanonicalNode ::
   (Hashable1 l, Analysis l d) =>
   ENode l ->
@@ -329,6 +343,7 @@ getMergedId :: MergeResult -> EClassId
 getMergedId (Merged eid) = eid
 getMergedId (AlreadyMerged eid) = eid
 
+{-# INLINEABLE merge #-}
 merge ::
   (Movable1 l, Hashable1 l, Analysis l d) =>
   EClassId ->
@@ -347,6 +362,7 @@ merge eid1 eid2 egraph = Control.do
       (Ur !resl, !egraph) <- unsafeMerge eid1 eid2 egraph
       Control.pure (Ur (Just resl), egraph)
 
+{-# INLINEABLE unsafeMerge #-}
 unsafeMerge ::
   (Movable1 l, Hashable1 l, Analysis l d) =>
   EClassId ->
@@ -394,6 +410,7 @@ unsafeMerge eid1 eid2 egraph = Control.do
 
       Control.pure (Ur (Merged eid), egraph)
 
+{-# INLINEABLE merges #-}
 merges ::
   (Foldable1 t, P.Functor t, Movable1 l, Hashable1 l, Analysis l d) =>
   t EClassId ->
@@ -404,6 +421,7 @@ merges eids egraph = flip runStateT egraph $
     runMaybeT do
       foldlM1 (\id1 id2 -> P.fmap (id1 P.<>) $ MaybeT $ UrT $ StateT $ merge (getMergedId id1) (getMergedId id2)) $ P.fmap AlreadyMerged eids
 
+{-# INLINEABLE rebuild #-}
 rebuild ::
   forall α d l.
   (Hashable1 l, Movable1 l, Analysis l d) =>
@@ -444,6 +462,7 @@ rebuild = loop
             move eid & \(Ur eid) -> repair egraph eid
           loop egraph
 
+{-# INLINEABLE repair #-}
 repair ::
   (Hashable1 l, Movable1 l, Analysis l d) =>
   Mut α (EGraph d l) %1 ->
@@ -520,6 +539,7 @@ whose analysis value changed. Runs the analysis-driven modification hook for
 the class itself, then recomputes the analyses of its parents, propagating
 further changes through the analysis worklist.
 -}
+{-# INLINEABLE repairAnal #-}
 repairAnal ::
   (Movable1 l, Analysis l d) =>
   Mut α (EGraph d l) %1 ->

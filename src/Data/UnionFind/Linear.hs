@@ -85,6 +85,7 @@ with path compression for efficiency.
 
 __Unsafe__: Does not check bounds. Will crash if key >= size.
 -}
+{-# INLINE unsafeFindMut #-}
 unsafeFindMut :: Key -> UnionFind %1 -> (Ur Key, UnionFind)
 unsafeFindMut x (UnionFind n parent rank) =
   findRoot x parent rank
@@ -104,6 +105,7 @@ unsafeFindMut x (UnionFind n parent rank) =
 with path compression for efficiency.
 Returns Nothing if the key is out of bounds.
 -}
+{-# INLINE findMut #-}
 findMut :: Key -> UnionFind %1 -> (Ur (Maybe Key), UnionFind)
 findMut (Key x) (UnionFind n parent rank)
   | x >= n = (Ur Nothing, UnionFind n parent rank)
@@ -116,6 +118,7 @@ Find the representative (root) of the set containing the given element.
 
 __Unsafe__: Does not check bounds. Will crash if key >= size.
 -}
+{-# INLINE unsafeFind #-}
 unsafeFind :: Key -> UnionFind %1 -> (Ur Key, UnionFind)
 unsafeFind x (UnionFind n parent rank) =
   findRoot x parent rank
@@ -130,6 +133,7 @@ unsafeFind x (UnionFind n parent rank) =
 {- | Find the representative (root) of the set containing the given element.
 Returns Nothing if the key is out of bounds.
 -}
+{-# INLINE find #-}
 find :: Key -> UnionFind %1 -> (Ur (Maybe Key), UnionFind)
 find (Key x) (UnionFind n parent rank)
   | x >= n = (Ur Nothing, UnionFind n parent rank)
@@ -143,6 +147,7 @@ Returns the representative (root) of the unified set.
 
 __Unsafe__: Does not check bounds. Will crash if keys >= size.
 -}
+{-# INLINE unsafeUnion #-}
 unsafeUnion :: Key -> Key -> UnionFind %1 -> (Ur Key, UnionFind)
 unsafeUnion x y uf =
   unsafeFind x uf & \(Ur rootX, uf) ->
@@ -168,6 +173,7 @@ unsafeUnion x y uf =
 {- | Unite the sets containing the two given elements using union-by-rank.
 Returns Nothing if either key is out of bounds, otherwise returns Just the representative key of the unified set.
 -}
+{-# INLINE union #-}
 union :: Key -> Key -> UnionFind %1 -> (Ur (Maybe Key), UnionFind)
 union (Key x) (Key y) (UnionFind n parent rank)
   | x >= n || y >= n = (Ur Nothing, UnionFind n parent rank)
@@ -194,6 +200,7 @@ equivalent (Key x) (Key y) (UnionFind n parent rank)
 {- | Extend the union-find structure with a new element and return its key.
 The new element starts in its own singleton set.
 -}
+{-# INLINE fresh #-}
 fresh :: UnionFind %1 -> (Ur Key, UnionFind)
 fresh (UnionFind n parent rank) =
   let newIdx = Key n

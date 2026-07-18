@@ -236,6 +236,7 @@ extractBestOf ::
   Maybe (Term l, cost)
 extractBestOf lens eid = withRaw (Raw.extractBestOf lens eid)
 
+{-# INLINEABLE saturate #-}
 saturate ::
   (Language l, Hashable v, Analysis l d) =>
   SaturationConfig ->
@@ -249,6 +250,7 @@ saturate cfg rules = do
       Right . (\(Ur x) -> x) . modify \egraph ->
         Control.void PL.$ Raw.saturate cfg rules egraph
 
+{-# INLINEABLE ematch #-}
 ematch ::
   (Language l, Hashable v) =>
   Pattern l v ->

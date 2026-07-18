@@ -74,6 +74,7 @@ deriving via Generically Wildcard instance Movable Wildcard
 
 deriving via AsCopyableShow Wildcard instance Display Wildcard
 
+{-# INLINEABLE buildDatabase #-}
 buildDatabase ::
   forall l d k α m.
   (HasDatabase l, Traversable l) =>
@@ -115,9 +116,11 @@ data Database l = Database
 
 deriving instance (Show1 l) => Show (Database l)
 
+{-# INLINE universe #-}
 universe :: Database l -> IntSet
 universe = (.universe)
 
+{-# INLINEABLE fromRelations #-}
 fromRelations :: (HasDatabase l) => [Relation l EClassId] -> Database l
 fromRelations rels =
   let (universe, database) =
@@ -134,9 +137,11 @@ fromRelations rels =
 newDatabase :: forall l. (HasDatabase l) => Database l
 newDatabase = Database mempty mempty
 
+{-# INLINE toOperator #-}
 toOperator :: forall l x. (Functor l) => l x -> Operator l
 toOperator = Operator . (fmap (const Wildcard))
 
+{-# INLINE getTrie #-}
 getTrie :: forall l. (HasDatabase l) => Operator l -> Database l -> Trie
 getTrie l (Database db _) = HM.lookupDefault Trie.empty l db
 

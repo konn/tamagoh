@@ -68,6 +68,7 @@ import Prelude.Linear
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
 
+{-# INLINEABLE analyses #-}
 analyses ::
   (Movable d, Copyable d, Movable1 l, Hashable1 l) =>
   Borrow bk α (EClasses d l) %m ->
@@ -86,6 +87,7 @@ analyses clss =
         )
         dic
 
+{-# INLINEABLE lookupParents #-}
 lookupParents ::
   forall bk α d l m.
   Borrow bk α (EClasses d l) %m ->
@@ -99,6 +101,7 @@ lookupParents classes eid =
       Nothing -> Control.pure Nothing
       Just eclass -> Control.pure (Just (eclass .# #parents))
 
+{-# INLINEABLE lookupAnalysis #-}
 lookupAnalysis ::
   forall bk α d l m.
   Borrow bk α (EClasses d l) %m ->
@@ -114,6 +117,7 @@ lookupAnalysis classes eid =
         Ur (UnsafeAlias !a) <- Ref.readShare (eclass .# #analysis)
         Control.pure (Ur (Just a))
 
+{-# INLINEABLE setAnalysis #-}
 setAnalysis ::
   forall α d l.
   (Consumable d) =>
@@ -130,6 +134,7 @@ setAnalysis eid d classes = Control.do
       ref <- Ref.modify (`lseq` d) $ eclass .# #analysis
       Control.pure $ ref `lseq` Ur True
 
+{-# INLINEABLE delete #-}
 delete ::
   forall α d l.
   Mut α (EClasses d l) %1 ->
@@ -139,6 +144,7 @@ delete clss eid = Control.do
   let %1 !clss' = coerceLin clss :: Mut _ (Raw d l)
   Bi.second coerceLin Control.<$> HMB.delete eid clss'
 
+{-# INLINEABLE nodes #-}
 nodes ::
   forall bk α d l m.
   Borrow bk α (EClasses d l) %m ->
@@ -153,6 +159,7 @@ nodes clss0 eid = Control.do
       Ur ns <- Set.toList (eclass .# #nodes)
       Control.pure $ Ur $ NonEmpty.nonEmpty ns
 
+{-# INLINEABLE setParents #-}
 setParents ::
   forall d l α.
   (Hashable1 l) =>
@@ -169,6 +176,7 @@ setParents eid ps clss = Control.do
       Just eclass -> Control.do
         void $ HMUr.swap ps (eclass .# #parents)
 
+{-# INLINEABLE addParent #-}
 addParent ::
   (Hashable1 l) =>
   EClassId ->
@@ -181,6 +189,7 @@ addParent pid enode eclass = Control.do
     void $ HMUr.insert enode pid parentsSet
   Control.pure eclass
 
+{-# INLINEABLE member #-}
 member ::
   forall d l bk α m.
   EClassId ->
@@ -195,6 +204,7 @@ member eid clss0 =
 Returns 'True' if the node was newly inserted;
 otherwise no change will be made and returns 'False'.
 -}
+{-# INLINEABLE insertIfNew #-}
 insertIfNew ::
   forall d l α.
   (Hashable1 l, Foldable l, Consumable d) =>
@@ -223,6 +233,7 @@ insertIfNew eid enode analysis clss = Control.do
 {- | @'unsafeMerge' eid1 eid2 class@ merges the e-classes identified by @eid1@ and @eid2@, returning 'False' if the classes were already merged and no change will be made..
   Your must pass the canonical id as @eid1@, and the non-canonical id as @eid2@.
 -}
+{-# INLINEABLE merge #-}
 merge ::
   (Hashable1 l, Movable1 l, Analysis l d) =>
   EClassId ->
@@ -244,6 +255,7 @@ merge eid1 eid2 clss = Control.do
   Returns whether the meet changed the analysis value of the surviving class
   (so the caller can schedule parent re-analysis).
 -}
+{-# INLINEABLE unsafeMerge #-}
 unsafeMerge ::
   forall α d l.
   ( Hashable1 l
@@ -286,5 +298,6 @@ unsafeMerge eid1 eid2 clss
 coerceLin :: (Coercible a b) => a %1 -> b
 coerceLin = Unsafe.toLinear \ !a -> coerce a
 
+{-# INLINEABLE size #-}
 size :: Borrow k α (EClasses d l) %m -> BO α (Ur Int)
 size = HMB.size . coerceLin
