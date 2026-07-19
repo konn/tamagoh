@@ -192,3 +192,4 @@ target/
 CLAUDE.local.md
 .claude/*.local.*
 /*.svg
+/workspace
