@@ -3372,4 +3372,4 @@ constraints:
 source-repository-package
   type: git
   location: https://github.com/SoftwareFoundationGroupAtKyotoU/pure-borrow.git
-  tag: 79a0d1878ccbce8895039c253cc9e462a788d3f3
+  tag: f3b06daf646114c031f6905ad17cd25ab1c00fda
