@@ -98,6 +98,7 @@ library
     Data.EGraph.Types.EClassId
     Data.EGraph.Types.EClasses
     Data.EGraph.Types.EGraph
+    Data.EGraph.Types.EGraph.Refill
     Data.EGraph.Types.ENode
     Data.EGraph.Types.Language
     Data.EGraph.Types.Pattern

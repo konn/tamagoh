@@ -34,6 +34,7 @@ module Data.EGraph.Types.EGraph (
   unsafeFind,
   canonicalize,
   unsafeCanonicalize,
+  refill,
   addNode,
   addCanonicalNode,
   merges,
@@ -62,6 +63,7 @@ import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.EClasses (setParents)
 import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.EGraph.Internal
+import Data.EGraph.Types.EGraph.Refill (refill)
 import Data.EGraph.Types.ENode
 import Data.EGraph.Types.Term
 import Data.Foldable qualified as F
@@ -200,19 +202,6 @@ instance (P.Traversable l, Hashable1 l) => Equatable l (Term l) where
     Ur meid1 <- lookupTerm term1 egraph
     Ur meid2 <- lookupTerm term2 egraph
     Control.pure $ Ur $ (P.==) P.<$> meid1 P.<*> meid2
-
--- | Rebuild a node shape from the list of its (transformed) children.
-refill :: (P.Traversable l) => l b -> [a] -> l a
-{-# INLINE refill #-}
-refill shape vals =
-  P.snd $
-    P.mapAccumL
-      ( \xs0 _ -> case xs0 of
-          x : xs -> (xs, x)
-          [] -> P.error "refill: impossible: child count mismatch"
-      )
-      vals
-      shape
 
 {-# INLINEABLE canonicalize #-}
 canonicalize ::

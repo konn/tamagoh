@@ -351,18 +351,6 @@ addNestedENode pat egraph = go pat egraph
       (Ur eid, egraph) <- go p egraph
       goChildren ps (eid : acc) egraph
 
-    -- Rebuild the node shape with each child pattern replaced by its id.
-    refill :: l (Pattern l EClassId) -> [EClassId] -> l EClassId
-    refill shape vals =
-      P.snd $
-        Traverse.mapAccumL
-          ( \xs0 _ -> case xs0 of
-              x : xs -> (xs, x)
-              [] -> P.error "addNestedENode: impossible: child count mismatch"
-          )
-          vals
-          shape
-
 {- | Canonicalize the keys in the analyses map.
 This is necessary because e-matching returns canonical e-class ids,
 but the analyses map from EC.analyses uses original ids.
