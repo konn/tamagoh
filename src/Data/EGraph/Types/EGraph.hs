@@ -60,7 +60,6 @@ import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Bifunctor.Linear qualified as Bi
 import Data.Coerce (coerce)
 import Data.EGraph.Types.EClassId
-import Data.EGraph.Types.EClasses (setParents)
 import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.EGraph.Internal
 import Data.EGraph.Types.EGraph.Refill (refill)
@@ -463,18 +462,23 @@ repair ::
   EClassId ->
   BO α ()
 repair egraph eid = Control.do
-  -- Single pass over a frozen snapshot of the parents (merging inside the
-  -- loop mutates the classes map, so the copy is required — hegg likewise
-  -- materialises its worklist up front). Per parent: canonicalise ONCE, let
-  -- the insert into the fresh parents map double as the congruence lookup
-  -- (its returned old value is the collision signal, cf. hegg's
-  -- insertLookupNM), and refresh the global hashcons with the same
-  -- canonical pair.
+  -- Congruence repair, faithful to egg/hegg's 'repair'. Iterate a frozen
+  -- snapshot of this class's parents (a merge inside the loop mutates the
+  -- classes map, so iterating the live map is unsafe) and, per parent,
+  -- re-canonicalise the node and re-establish the hashcons invariant. The
+  -- GLOBAL hashcons doubles as hegg's @insertLookupNM@: inserting the canonical
+  -- @(node -> owning class)@ returns the previous binding, and if that previous
+  -- class differs from the current one the two are congruent and get merged
+  -- (which re-queues the survivor, so 'rebuild' loops to a fixpoint).
   --
-  -- NOTE on the hashcons: stale (pre-canonical) keys are deliberately kept.
-  -- Removing outdated nodes significantly worsens performance on some cases;
-  -- as it doesn't affect soundness, we keep them at the cost of some memory
-  -- leakage.
+  -- We deliberately do NOT rebuild/overwrite this class's parent set. Parent
+  -- sets are maintained solely by 'merge' (it unions a subsumed class's parents
+  -- into the survivor); rebuilding them from the snapshot would silently drop
+  -- any parent added by a merge performed WHILE this repair runs, leaving the
+  -- same canonical node in two classes — a congruence violation that inflated
+  -- the e-graph. hegg maintains parents the same union-only way. Stale
+  -- (pre-canonical) hashcons and parent keys are kept: it is sound (reads always
+  -- 'find'/canonicalise) and pruning them measurably worsens performance.
   (Ur parents, egraph) <- sharing egraph \egraph -> Control.do
     -- FIXME: id MUST be present in classes - please review the invariant.
     !mps <- EC.lookupParents (egraph .# #classes) eid
@@ -482,33 +486,24 @@ repair egraph eid = Control.do
       (asksLinearly $ FHMUr.empty 16)
       (Control.fmap FHMUr.freeze . clone)
       mps
-  let !numParents = FHMUr.size parents
-  (newParents, egraph) <- reborrowing' egraph \egraph -> Control.do
-    (newPs, newPsLend) <- borrowLinearlyM $ HMUr.empty @(ENode _) @EClassId numParents
-    egPs <- iforReborrowingOf_ FHMUr.foldFrozen (egraph :- newPs :- BNil) parents $
-      \(egraph :- newPs :- BNil) p_node p_class ->
+  void $
+    iforReborrowingOf_ FHMUr.foldFrozen egraph parents $
+      \egraph p_node p_class ->
         move (p_node, p_class) & \(Ur (p_node, p_class)) -> Control.do
           (Ur p_node, egraph) <- {-# SCC "repair/unsafeCanon" #-} unsafeCanonicalize p_node <$~ egraph
           (Ur p_class, egraph) <- flip unsafeFind p_class <$~ egraph
-          (Ur prev, newPs) <- {-# SCC "upwardMerge/insert" #-} HMUr.insert p_node p_class newPs
-          (Ur newId, newPs, egraph) <- case prev of
-            Just class'
-              | class' P./= p_class -> Control.do
-                  (Ur res, egraph) <- unsafeMerge p_class class' egraph
-                  let !newId = getMergedId res
-                  (Ur _, newPs) <- HMUr.insert p_node newId newPs
-                  Control.pure (Ur newId, newPs, egraph)
-            _ -> Control.pure (Ur p_class, newPs, egraph)
-          egraph <- reborrowing_ egraph \egraph ->
-            void $ {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node newId (egraph .# #hashcons)
-          Control.pure (newPs `lseq` consume egraph)
-    case egPs of
-      egraph :- newPs :- BNil ->
-        -- Analysis propagation is handled separately via the analysis
-        -- worklist (see 'repairAnal'); congruence repair ends here.
-        newPs `lseq` egraph `lseq` Control.pure (upcast $ reclaim' newPsLend)
-
-  void $ setParents eid newParents (egraph .# #classes)
+          (Ur prev, egraph) <- reborrowing egraph \egraph -> Control.do
+            (Ur prev, hc) <- {-# SCC "update_hashcons/insert" #-} HMUr.insert p_node p_class (egraph .# #hashcons)
+            Control.pure (hc `lseq` Ur prev)
+          case prev of
+            Just other -> Control.do
+              (Ur oc, egraph) <- flip unsafeFind other <$~ egraph
+              if oc P.== p_class
+                then Control.pure (consume egraph)
+                else Control.do
+                  (Ur _res, egraph) <- {-# SCC "upwardMerge/merge" #-} unsafeMerge p_class other egraph
+                  Control.pure (consume egraph)
+            Nothing -> Control.pure (consume egraph)
 
 {- | Analysis counterpart of 'repair': called (from 'rebuild') for classes
 whose analysis value changed. Runs the analysis-driven modification hook for
