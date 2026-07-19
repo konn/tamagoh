@@ -312,9 +312,14 @@ addCanonicalNode enode egraph = Control.do
         void $ EC.insertIfNew eid enode d $ egraph .# #classes
       egraph <- reborrowing_ egraph \egraph -> Control.do
         let %1 !(!hashcons, !nodes) = egraph .@ (#hashcons, #nodes)
-        void $ HMUr.insert enode eid hashcons
-        !dic <- HMUr.insert eid enode nodes
-        Control.pure $! consume dic
+        -- Both keys are freshly absent (the 'lookup' above returned Nothing,
+        -- and 'eid' is a just-'fresh'ed union-find id) and neither insert's
+        -- old value is used, so route through the plain 'alter': it skips the
+        -- 'Swapper'/'Ur' old-value plumbing that 'insert' builds (a hot-path
+        -- cost — ~5% alloc in the flat profile).
+        hashcons <- HMUr.alter (\_ -> Just eid) enode hashcons
+        nodes <- HMUr.alter (\_ -> Just enode) eid nodes
+        Control.pure $ hashcons `lseq` consume nodes
       egraph <- modifyAnalysis id eid <%= egraph
 
       Control.pure (Ur eid, egraph)
