@@ -70,7 +70,6 @@ import Data.Hashable
 import Data.Hashable.Lifted (Hashable1)
 import Data.IntMap.Strict qualified as IM
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (isJust, mapMaybe)
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Ref.Linear qualified as Ref
 import Data.Ref.Linear.Borrow qualified as Ref
@@ -208,10 +207,13 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
         else Control.do
           (Ur (results, matchCounts), egraph) <- sharing egraph \egraph -> Control.do
             Ur db <- buildDatabase egraph
-            -- Match all non-banned rules against the database, then fetch
-            -- class data ON DEMAND: only for the e-classes referenced by
-            -- matches of rules that actually have side conditions (instead
-            -- of snapshotting every class's nodes and analysis up front).
+            -- Match all non-banned rules against one immutable database.
+            -- Side conditions are deliberately NOT checked here: hegg checks
+            -- each condition immediately before applying its match, against
+            -- the graph produced by all preceding applications in this
+            -- iteration.  Freezing condition data in the read phase delays
+            -- analysis-dependent rewrites by an iteration and materially
+            -- changes the backoff trajectory on expansive rule sets.
             let raws = flip map indexedRules \(ruleIdx, rule@CompiledRule {..}) ->
                   let banned = case config.scheduler of
                         Nothing -> False
@@ -228,17 +230,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                               -- #matches x #query-variables.
                               !nVars = V.length lhs.varNames
                            in (ruleIdx, rule, ms, length ms * nVars)
-                !neededIds =
-                  HashSet.toList $
-                    HashSet.fromList
-                      [ eid
-                      | (_, rule, ms, _) <- raws
-                      , isJust rule.condition
-                      , (_, subs) <- ms
-                      , eid <- PHM.elems subs.substitution
-                      ]
-            Ur anals <- lookupMatchInfos neededIds egraph
-            Control.pure (Ur $ collect anals raws)
+            Control.pure (Ur $ collect raws)
           if null results
             then
               -- Check if we're stuck due to banning - reset scheduler and try once more
@@ -267,31 +259,15 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                     else Control.pure egraph
                 else Control.pure egraph
 
-    -- Filter raw matches through their rules' side conditions and pair each
-    -- rule with its scheduler statistic.
+    -- Pair every raw match with its rule. Conditions are checked in the
+    -- write phase, just before application, matching hegg's semantics.
     collect ::
-      PHM.HashMap EClassId ([ENode l], d) ->
       [(Int, CompiledRule l d v, [(EClassId, Substitution v)], Int)] ->
       ([Ur (EClassId, Substitution v, CompiledRule l d v)], [(Int, Int)])
-    collect analyses raws =
+    collect raws =
       let (matchesList, countsList) = unzip $ flip map raws \(ruleIdx, rule, ms, stat) ->
-            (mapMaybe (check analyses rule) ms, (ruleIdx, stat))
+            (map (\(eid, subs) -> Ur (eid, subs, rule)) ms, (ruleIdx, stat))
        in (concat matchesList, countsList)
-
-    check analyses rule (eid, subs) =
-      case rule.condition of
-        Just (SideCondition cond)
-          | not $
-              cond
-                ( PHM.mapMaybe
-                    ( \eclassId -> do
-                        (nodes, analysis) <- PHM.lookup eclassId analyses
-                        Just MatchInfo {..}
-                    )
-                    subs.substitution
-                ) ->
-              Nothing
-        _ -> Just $ Ur (eid, subs, rule)
 
     substitute ::
       Mut α (EGraph d l) %1 ->
@@ -304,15 +280,32 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
           (var :- egraph :- BNil)
           results
           \(var :- egraph :- BNil) (Ur (eid, subs, CompiledRule {..})) ->
-            case substPattern subs rhs of
-              Failure _ -> var `lseq` egraph `lseq` error "Substitution produces invalid expression"
-              Success pat -> Control.do
-                (Ur newEid, egraph) <- addNestedENode pat egraph
-                (Ur resl, egraph) <- unsafeMerge eid newEid egraph
-                case resl of
-                  Merged {} -> Control.void PL.$ Ref.modify (`lseq` True) var
-                  AlreadyMerged {} -> Control.pure PL.$ consume var
-                Control.pure (consume egraph)
+            Control.do
+              (Ur shouldApply, egraph) <- sharing egraph \egraph ->
+                case condition of
+                  Nothing -> Control.pure (Ur True)
+                  Just (SideCondition cond) -> Control.do
+                    let !neededIds = HashSet.toList $ HashSet.fromList $ PHM.elems subs.substitution
+                    Ur infos <- lookupMatchInfos neededIds egraph
+                    let !matchInfos =
+                          PHM.mapMaybeWithKey
+                            ( \_ eclassId -> do
+                                (nodes, analysis) <- PHM.lookup eclassId infos
+                                Just MatchInfo {..}
+                            )
+                            subs.substitution
+                    Control.pure (Ur (cond matchInfos))
+              if shouldApply
+                then case substPattern subs rhs of
+                  Failure _ -> var `lseq` egraph `lseq` error "Substitution produces invalid expression"
+                  Success pat -> Control.do
+                    (Ur newEid, egraph) <- addNestedENode pat egraph
+                    (Ur resl, egraph) <- unsafeMerge eid newEid egraph
+                    case resl of
+                      Merged {} -> Control.void PL.$ Ref.modify (`lseq` True) var
+                      AlreadyMerged {} -> Control.pure PL.$ consume var
+                    Control.pure (consume egraph)
+                else Control.pure (consume var `lseq` consume egraph)
       case varEGraph of
         var :- egraph :- BNil ->
           Control.pure PL.$

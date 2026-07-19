@@ -37,8 +37,8 @@ import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
+import Data.Ref.Linear.Borrow (Ref)
 import Data.UnionFind.Linear.Borrowed (UnionFind)
-import Data.Vector.Unboxed.Mutable.Growable.Borrowed qualified as BUV
 import GHC.Generics (Generic, Generically (..))
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
@@ -69,11 +69,11 @@ data EGraph d l = EGraph
   A map from _canonical_ enodes to eclass-ids.
   Keys MUST BE canonical AFTER rebuilding.
   -}
-  , worklist :: !(BUV.Vector EClassId)
-  -- ^ A set of eclass-ids that need to be repaired.
-  , analysisWorklist :: !(BUV.Vector EClassId)
-  {- ^ E-class ids whose analysis value has changed; their parents'
-  analyses must be recomputed (cf. egg's @analysis_pending@).
+  , worklist :: !(Ref [Ur (EClassId, ENode l)])
+  -- ^ Ordered exact @(owner, parent node)@ entries needing congruence repair.
+  , analysisWorklist :: !(Ref [Ur (EClassId, ENode l)])
+  {- ^ Ordered exact parent entries whose analyses must be recomputed
+  (cf. hegg's @analysisWorklist@).
   -}
   }
   deriving (Generic)

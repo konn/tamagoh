@@ -252,8 +252,8 @@ merge eid1 eid2 clss = Control.do
 {- | @'unsafeMerge' eid1 eid2 class@ merges the e-classes identified by @eid1@ and @eid2@, without cheking the exitence of the eids.
   Your must pass the canonical id as @eid1@, and the non-canonical id as @eid2@.
 
-  Returns whether the meet changed the analysis value of the surviving class
-  (so the caller can schedule parent re-analysis).
+  Returns whether the meet differs from the leader's and subsumed class's
+  former analysis values, respectively.
 -}
 {-# INLINEABLE unsafeMerge #-}
 unsafeMerge ::
@@ -265,9 +265,9 @@ unsafeMerge ::
   EClassId ->
   EClassId ->
   Mut α (EClasses d l) %1 ->
-  BO α (Ur Bool, Mut α (EClasses d l))
+  BO α (Ur (Bool, Bool), Mut α (EClasses d l))
 unsafeMerge eid1 eid2 clss
-  | eid1 == eid2 = Control.pure (Ur False, clss)
+  | eid1 == eid2 = Control.pure (Ur (False, False), clss)
   | otherwise = Control.do
       (mr, clss) <- delete clss eid2
       let %1 !EClass {nodes = !rnodes, parents = !rparents, analysis = !ra} = case mr of
@@ -283,17 +283,17 @@ unsafeMerge eid1 eid2 clss
             l <- reborrowing_ l \l -> void $ Set.extend rnodes (l .# #nodes)
             l <- reborrowing_ l \l -> void $ HMUr.extend rparents (l .# #parents)
 
-            (changed, l) <- reborrowing l \l -> Control.do
-              (changed, ref) <-
+            (changes, l) <- reborrowing l \l -> Control.do
+              (changes, ref) <-
                 Ref.update
                   ( \la ->
                       move la & \(Ur la) ->
                         let !new = la /\ ranalysis
-                         in Control.pure (Ur (new P./= la), new)
+                         in Control.pure (Ur (new P./= la, new P./= ranalysis), new)
                   )
                   (l .# #analysis)
-              Control.pure $ ref `lseq` changed
-            Control.pure $ l `lseq` changed
+              Control.pure $ ref `lseq` changes
+            Control.pure $ l `lseq` changes
 
 coerceLin :: (Coercible a b) => a %1 -> b
 coerceLin = Unsafe.toLinear \ !a -> coerce a

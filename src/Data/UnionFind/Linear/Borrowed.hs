@@ -28,6 +28,7 @@ module Data.UnionFind.Linear.Borrowed (
   unsafeThaw,
   unsafeFind,
   unsafeUnion,
+  unsafeUnionTo,
   unsafeEquivalent,
 ) where
 
@@ -109,6 +110,16 @@ unsafeUnion ::
 unsafeUnion k1 k2 uf = Control.do
   let %1 borRef = coerceUF uf
   Bi.second recoerceUF Control.<$> Ref.update (Control.pure . Raw.unsafeUnion k1 k2) borRef
+
+{-# INLINE unsafeUnionTo #-}
+unsafeUnionTo ::
+  Key ->
+  Key ->
+  Mut α UnionFind %1 ->
+  BO α (Ur Key, Mut α UnionFind)
+unsafeUnionTo leader sub uf = Control.do
+  let %1 borRef = coerceUF uf
+  Bi.second recoerceUF Control.<$> Ref.update (Control.pure . Raw.unsafeUnionTo leader sub) borRef
 
 {-# INLINE equivalent #-}
 equivalent ::

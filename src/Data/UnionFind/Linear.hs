@@ -45,6 +45,7 @@ module Data.UnionFind.Linear (
   unsafeFind,
   unsafeFindMut,
   unsafeUnion,
+  unsafeUnionTo,
   unsafeEquivalent,
 
   -- * Queries
@@ -63,6 +64,7 @@ import Data.Vector.Mutable.Linear.Unboxed (Vector)
 import Data.Vector.Mutable.Linear.Unboxed qualified as Vector
 import Prelude.Linear hiding (Eq (..), Num (..), Ord (..), find, (+), (-))
 import Prelude (Eq (..), Num (..), Ord (..))
+import Prelude qualified as P
 
 -- Helper function to convert Key to Int for array indexing
 keyToInt :: Key -> Int
@@ -169,6 +171,19 @@ unsafeUnion x y uf =
               then Vector.modify_ (+ 1) (keyToInt pid) rank
               else rank
           (Ur pid, UnionFind n parent rank)
+
+{- | Unite two root sets, making the first root the representative.
+
+__Unsafe__: Both keys must be distinct roots in bounds.
+-}
+{-# INLINE unsafeUnionTo #-}
+unsafeUnionTo :: Key -> Key -> UnionFind %1 -> (Ur Key, UnionFind)
+unsafeUnionTo leader sub (UnionFind n parent rank) =
+  Vector.get (keyToInt leader) rank & \(Ur leaderRank, rank) ->
+    Vector.get (keyToInt sub) rank & \(Ur subRank, rank) -> DataFlow.do
+      parent <- Vector.set (keyToInt sub) leader parent
+      rank <- Vector.set (keyToInt leader) (P.max leaderRank (subRank + 1)) rank
+      (Ur leader, UnionFind n parent rank)
 
 {- | Unite the sets containing the two given elements using union-by-rank.
 Returns Nothing if either key is out of bounds, otherwise returns Just the representative key of the unified set.

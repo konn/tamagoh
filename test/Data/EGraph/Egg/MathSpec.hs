@@ -17,6 +17,7 @@ module Data.EGraph.Egg.MathSpec (module Data.EGraph.Egg.MathSpec) where
 
 import Control.Exception (throwIO)
 import Data.EGraph.Immutable
+import Data.EGraph.Immutable qualified as EGraph
 import Data.Maybe (isNothing)
 import Tamagoh.Bench.Math hiding (Rule, named, (==>), (@?))
 import Tamagoh.Bench.Math qualified as Bench (BenchCost)
@@ -57,6 +58,22 @@ test_Math =
           graph <- either throwIO pure $ saturate simple {maxIterations = Just 8, scheduler = Nothing} rules $ fromList [lhs]
           equivalent graph lhs rhs @?= Just True
           numEClasses graph @?= 127
+      , testCase "conditions observe preceding applications" do
+          let a = Metavar "a"
+              b = Metavar "b"
+              rules :: [Rule Math ConstantFold String]
+              rules =
+                [ named "make-constant" $ sin a ==> 2
+                , (named "use-constant" $ a ** b ==> 7) EGraph.@? isConstant "b"
+                ]
+              lhs = var "x" ** sin (var "y") :: Term Math
+          graph <-
+            either throwIO pure $
+              saturate simple {maxIterations = Just 1, scheduler = Nothing} rules $
+                fromList [lhs]
+          lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+          rid <- maybe (assertFailure "conditional rhs not found") pure $ lookupTerm 7 graph
+          equivalent graph lid rid @?= Just True
       , testCase "sub_canon_simple" do
           -- Test that sub-canon rule works: a - b ==> a + (-1 * b)
           let x = var "x"
