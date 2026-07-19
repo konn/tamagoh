@@ -37,7 +37,7 @@ import Data.Equality.Saturation qualified as Hegg
 import Data.Foldable1 (foldl1')
 import Data.Functor.Foldable
 import Data.HashMap.Strict qualified as HM
-import Data.Hashable (Hashable)
+import Data.Hashable (Hashable (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (fromJust, isJust)
 import Data.Semigroup qualified as Semi
@@ -63,6 +63,32 @@ data Math v
   | Var String
   deriving (Show, Eq, Ord, GHC.Generic, GHC.Generic1)
   deriving anyclass (NFData1, NFData)
+
+-- Hand-written hashing, avoiding the Generic default that 'deriveLanguage'
+-- would otherwise pick: generic 'hashWithSalt' rebuilds the 'Rep' on every
+-- hashcons probe (~4% of the tamagoh bench allocation). Declared before the
+-- 'deriveLanguage' splice so it detects @Hashable (Math v)@ as already present
+-- and derives only the remaining instances. This is the instance the hashcons
+-- calls: @ENode Math@ newtype-derives its 'Hashable' from @Hashable (Math EClassId)@.
+instance (Hashable v) => Hashable (Math v) where
+  hashWithSalt s = \case
+    Diff a b -> bin 0 a b
+    Integral a b -> bin 1 a b
+    a :+ b -> bin 2 a b
+    a :- b -> bin 3 a b
+    a :* b -> bin 4 a b
+    a :/ b -> bin 5 a b
+    a :^ b -> bin 6 a b
+    Ln a -> un 7 a
+    Sqrt a -> un 8 a
+    Sin a -> un 9 a
+    Cos a -> un 10 a
+    Const d -> s `hashWithSalt` (11 :: Int) `hashWithSalt` d
+    Var x -> s `hashWithSalt` (12 :: Int) `hashWithSalt` x
+    where
+      bin t a b = (s `hashWithSalt` (t :: Int) `hashWithSalt` a) `hashWithSalt` b
+      un t a = s `hashWithSalt` (t :: Int) `hashWithSalt` a
+  {-# INLINE hashWithSalt #-}
 
 deriveLanguage ''Math
 
