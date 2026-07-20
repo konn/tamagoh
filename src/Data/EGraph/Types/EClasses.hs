@@ -21,6 +21,7 @@ module Data.EGraph.Types.EClasses (
   EClasses (),
   EClass (),
   analyses,
+  nodeLists,
   new,
   lookupAnalysis,
   lookupParentHistory,
@@ -85,6 +86,24 @@ analyses clss =
               Control.pure (k, (PHS.toList nodes, anal))
         )
         dic
+
+{-# INLINEABLE nodeLists #-}
+
+-- | Snapshot each canonical e-class identifier and its owned e-nodes.
+nodeLists :: Borrow bk α (EClasses d l) %m -> BO α (Ur [(EClassId, [ENode l])])
+nodeLists clss =
+  share clss & \(Ur clss) -> Control.do
+    dic <- HMB.toBorrowList (coerceLin clss :: Share _ (Raw _ _))
+    Ur rows <-
+      move
+        Control.<$> Data.mapM
+          ( \(Ur k, bor) ->
+              move bor & \(Ur bor) -> Control.do
+                Ur (UnsafeAlias (Ur nodes)) <- Ref.readShare (bor .# #nodes)
+                Control.pure (Ur (k, PHS.toList nodes))
+          )
+          dic
+    Control.pure $ Ur $ P.map (\(Ur row) -> row) rows
 
 {-# INLINEABLE lookupParentHistory #-}
 lookupParentHistory ::

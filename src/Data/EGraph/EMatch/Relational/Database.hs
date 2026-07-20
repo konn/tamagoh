@@ -37,10 +37,10 @@ import Control.Lens hiding (universe)
 import Control.Monad.Borrow.Pure
 import Data.EGraph.EMatch.Relational.Query (Relation (..))
 import Data.EGraph.Types
+import Data.EGraph.Types.EClasses qualified as EC
 import Data.Foldable qualified as F
 import Data.Functor.Classes
 import Data.Generics.Labels ()
-import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
@@ -110,15 +110,18 @@ buildDatabaseWithIndexes ::
   BO α (Ur (Database l))
 buildDatabaseWithIndexes includeUniverse includeSelectAll egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
-    Ur nodes <- HMUr.toList (egraph .@ hashconsL)
-    let go :: [(ENode l, EClassId)] -> [Relation l EClassId] -> BO α (Ur (Database l))
-        go [] acc =
+    Ur classes <- EC.nodeLists (egraph .# #classes)
+    let goClasses :: [(EClassId, [ENode l])] -> [Relation l EClassId] -> BO α (Ur (Database l))
+        goClasses [] acc =
           Control.pure PL.$ Ur PL.$ fromRelationsWithIndexes includeUniverse includeSelectAll acc
-        go ((enode, eid) : rest) acc = Control.do
+        goClasses ((eid, nodes) : rest) acc = goNodes eid nodes rest acc
+
+        goNodes :: EClassId -> [ENode l] -> [(EClassId, [ENode l])] -> [Relation l EClassId] -> BO α (Ur (Database l))
+        goNodes _ [] rest acc = goClasses rest acc
+        goNodes eid (enode : nodes) rest acc = Control.do
           Ur (ENode args) <- unsafeCanonicalize enode egraph
-          Ur eid' <- unsafeFind egraph eid
-          go rest (MkRel {id = eid', args} : acc)
-    go nodes []
+          goNodes eid nodes rest (MkRel {id = eid, args} : acc)
+    goClasses classes []
 
 {- | An operator is a pattern with all metavariables replaced by unit.
 NOTE: We must preapare separate tries for each operators with the same
