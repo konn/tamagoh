@@ -33,7 +33,6 @@ import Data.FMList qualified as FML
 import Data.Foldable (foldMap')
 import Data.Foldable qualified as F
 import Data.Foldable1 (foldl1')
-import Data.Function (on)
 import Data.Functor qualified as Functor
 import Data.Generics.Labels ()
 import Data.HashMap.Strict qualified as HM
@@ -42,14 +41,16 @@ import Data.Hashable (Hashable)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
-import Data.List (sortBy, sortOn)
+import Data.List (sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (catMaybes, fromMaybe)
+import Data.Ord (Down (..))
+import Data.Semigroup (Min (..), Sum (..))
 import Data.Trie (project)
 import Data.Trie qualified as Trie
 import Data.Vector qualified as V
-import GHC.Generics (Generic)
+import GHC.Generics (Generic, Generically (..))
 import Prelude.Linear qualified as PL
 
 {- | Internal substitution over interned 'VarId's; translated back to the
@@ -72,38 +73,39 @@ ematch pat egraph =
 ematchDb ::
   (Hashable v, HasDatabase l) =>
   PatternQuery l v -> Database l -> [(EClassId, Substitution v)]
-ematchDb pat db = nubMatches HS.empty (fst $ ematchDbWithCount pat db)
-  where
-    nubMatches !_ [] = []
-    nubMatches !seen (match : rest)
-      | HS.member match seen = nubMatches seen rest
-      | otherwise = match : nubMatches (HS.insert match seen) rest
+ematchDb pat db = fst $ ematchDbWithCount pat db
 
 {-# INLINEABLE ematchDbWithCount #-}
 ematchDbWithCount ::
   (Hashable v, HasDatabase l) =>
   PatternQuery l v -> Database l -> ([(EClassId, Substitution v)], Int)
 ematchDbWithCount PatternQuery {..} db =
-  ( map
-      ( \sub ->
-          let !rootId = IM.findWithDefault (error "ematchDb: root variable unbound") root sub
-              !subs' =
-                Substitution $
-                  V.ifoldl'
-                    ( \acc i mname -> case mname of
-                        Just name | Just eid <- IM.lookup i sub -> HM.insert name eid acc
-                        _ -> acc
-                    )
-                    HM.empty
-                    varNames
-           in (rootId, subs')
-      )
-      subs
+  ( nubMatches HS.empty $
+      map
+        ( \sub ->
+            let !rootId = IM.findWithDefault (error "ematchDb: root variable unbound") root sub
+                !subs' =
+                  Substitution $
+                    V.ifoldl'
+                      ( \acc i mname -> case mname of
+                          Just name | Just eid <- IM.lookup i sub -> HM.insert name eid acc
+                          _ -> acc
+                      )
+                      HM.empty
+                      varNames
+             in (rootId, subs')
+        )
+        subs
   , rawSize
   )
   where
     subs = query patQuery db
     rawSize = sum (IM.size <$> subs)
+
+    nubMatches !_ [] = []
+    nubMatches !seen (match : rest)
+      | HS.member match seen = nubMatches seen rest
+      | otherwise = match : nubMatches (HS.insert match seen) rest
 
 {-# INLINEABLE query #-}
 query ::
@@ -122,18 +124,31 @@ data RelationState l = RelationState
   }
   deriving (Show, Generic)
 
+data VarWeight = VarWeight
+  { numRels :: !(Down (Sum Word))
+  , smallestDbSize :: !(Min Word)
+  }
+  deriving (Show, Eq, Ord, Generic)
+  deriving (Semigroup, Monoid) via Generically VarWeight
+
 buildQueryState ::
   (HasDatabase l) =>
   Database l ->
   Atom l VarId ->
-  Maybe (RelationState l)
+  Maybe (RelationState l, IntMap VarWeight)
 buildQueryState db atom@(Atom MkRel {args}) = do
   !database <- db ^. at (toOperator args)
   -- Column positions of each variable. At compile time every column is a
   -- 'QVar', so traversal order equals row-column order (id : children).
   let !positions =
         IM.fromListWith (flip (<>)) [(v, NE.singleton i) | (i, v) <- zip [0 ..] (F.toList atom)]
-  pure RelationState {..}
+      weight =
+        VarWeight
+          { numRels = Down (Sum 1)
+          , smallestDbSize = Min (Trie.size database)
+          }
+      !stats = IM.map (const weight) positions
+  pure (RelationState {..}, stats)
 
 {-# INLINEABLE genericJoin #-}
 genericJoin ::
@@ -142,31 +157,41 @@ genericJoin ::
   ConjunctiveQuery l VarId ->
   Database l ->
   [IntSubst]
-genericJoin (_hd ::- qs) db = fromMaybe [] do
-  rels <- mapM (buildQueryState db) qs
-  let
-    -- Keep hegg's variable ordering exactly.  In particular, its
-    -- @fromAscList@ is applied after sorting by cost rather than by id;
-    -- repeated variables can therefore survive and produce duplicate
-    -- substitutions.  Those multiplicities are observable because the
-    -- backoff scheduler sums substitution sizes.
-    occurrences =
-      foldl (\acc atm -> F.toList atm <> acc) [] qs
-    vars = occurrences
-    atomLength = F.length
-    varCost v =
-      foldl
-        (\acc atm -> if v `elem` F.toList atm then acc - 100 + atomLength atm else acc)
-        0
-        qs
-    order = IS.toList $ IS.fromAscList $ sortBy (compare `on` varCost) vars
+genericJoin (hd ::- (atm@(Atom rel@MkRel {args}) :| [])) db = fromMaybe [] do
+  let vars = IS.fromList (F.toList atm)
+      frees :: [IntSubst]
+      frees =
+        filter (not . IM.null) $
+          sequenceA $
+            IM.fromSet (const $ map Trie.fromKey $ IS.toList $ universe db) $
+              IS.fromList hd `IS.difference` vars
+  trie <- db ^. at (toOperator args)
+  let !matches = Trie.match (F.toList rel) trie
+  pure $
+    if null frees
+      then matches
+      else IM.union <$> matches <*> frees
+genericJoin (hd ::- qs) db = fromMaybe [] do
+  relsStats <- mapM (buildQueryState db) qs
+  let rels = fst <$> relsStats
+      varStat =
+        IM.unionWith
+          (<>)
+          (foldl1' (IM.unionWith (<>)) (snd <$> relsStats))
+          (IM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) hd))
+      -- Eliminate variables occurring in the most relations first, using
+      -- the smallest participating relation as the tie-break. This is the
+      -- same cost model intended by hegg, represented directly instead of
+      -- routing a cost-sorted list through IntSet.fromAscList (whose input
+      -- contract requires id order and is not satisfied by a cost order).
+      order = map fst $ sortOn snd $ IM.toList varStat
   -- NB: @go@ accumulates in 'FML.FMList', whose @(<>)@ is O(1); accumulating in a
   -- plain list here would be a left-nested @(++)@ (via @foldMap'@) and hence O(N^2)
   -- in the number of matches. Materialise to a list exactly once, at the boundary.
   pure $ FML.toList (go order rels IM.empty)
   where
     -- TODO: consider some selection strategy
-    go [] !qs sub = foldMap' (const (FML.singleton sub)) qs
+    go [] !_qs sub = FML.singleton sub
     go (v : vs) !qs sub =
       let (!doms, !qs') =
             Bi.first (sortOn IS.size . catMaybes . NE.toList) $
