@@ -87,8 +87,7 @@ buildDatabase egraph =
     Ur nodes <- HMUr.toList (egraph .@ hashconsL)
     let go :: [(ENode l, EClassId)] -> [Relation l EClassId] -> BO α (Ur (Database l))
         go [] acc = Control.pure PL.$ Ur PL.$ fromRelations acc
-        go ((enode, eid) : rest) acc = Control.do
-          Ur (ENode args) <- unsafeCanonicalize enode egraph
+        go ((ENode args, eid) : rest) acc = Control.do
           Ur eid' <- unsafeFind egraph eid
           go rest (MkRel {id = eid', args} : acc)
     go nodes []
