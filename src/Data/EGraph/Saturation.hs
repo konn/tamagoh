@@ -78,7 +78,6 @@ import Data.Strict qualified as St
 import Data.Traversable qualified as Traverse
 import Data.Unrestricted.Linear (UrT (..), runUrT)
 import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
-import Data.Vector qualified as V
 import GHC.Generics (Generic, Generic1)
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
@@ -221,15 +220,14 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                    in if banned
                         then (ruleIdx, rule, [], 0)
                         else
-                          let (ms, rawMatchCount) = ematchDbWithCount lhs db
-                              -- NB: apply ALL matches of a non-banned rule (as
+                          let (ms, rawSubstitutionSize) = ematchDbWithCount lhs db
+                           in -- NB: apply ALL matches of a non-banned rule (as
                               -- hegg and egg do); the scheduler statistic only
                               -- feeds the backoff, which bans over-productive
                               -- rules on LATER iterations. The statistic is
-                              -- hegg-compatible: total substitution size =
-                              -- #matches x #query-variables.
-                              !nVars = V.length lhs.varNames
-                           in (ruleIdx, rule, ms, rawMatchCount * nVars)
+                              -- hegg-compatible: the exact sum of the emitted
+                              -- internal substitution sizes.
+                              (ruleIdx, rule, ms, rawSubstitutionSize)
             Control.pure (Ur $ collect raws)
           if null results
             then

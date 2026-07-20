@@ -502,7 +502,10 @@ repair egraph p_class p_node = Control.do
       if oc P.== p_class
         then Control.pure (consume egraph)
         else Control.do
-          (Ur _res, egraph) <- {-# SCC "upwardMerge/merge" #-} unsafeMerge p_class other egraph
+          -- hegg's repair calls @merge existing_class repair_id@.  Argument
+          -- order is observable because equal parent counts retain the first
+          -- class as leader.
+          (Ur _res, egraph) <- {-# SCC "upwardMerge/merge" #-} unsafeMerge oc p_class egraph
           Control.pure (consume egraph)
     Nothing -> Control.pure (consume egraph)
 

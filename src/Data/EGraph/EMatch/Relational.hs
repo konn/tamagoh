@@ -99,11 +99,11 @@ ematchDbWithCount PatternQuery {..} db =
            in (rootId, subs')
       )
       subs
-  , rawCount
+  , rawSize
   )
   where
     subs = query patQuery db
-    rawCount = length subs
+    rawSize = sum (IM.size <$> subs)
 
 {-# INLINEABLE query #-}
 query ::
