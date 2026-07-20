@@ -68,7 +68,6 @@ import Data.HashMap.Strict qualified as PHM
 import Data.HashSet qualified as HashSet
 import Data.Hashable
 import Data.Hashable.Lifted (Hashable1)
-import Data.IntMap.Strict qualified as IM
 import Data.List.NonEmpty qualified as NE
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Ref.Linear qualified as Ref
@@ -230,11 +229,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                               (ruleIdx, rule, ms, rawSubstitutionSize)
             Control.pure (Ur $ collect raws)
           if null results
-            then
-              -- Check if we're stuck due to banning - reset scheduler and try once more
-              if IM.null schedState
-                then Control.pure egraph
-                else go iterNum initialState remaining egraph
+            then Control.pure egraph
             else Control.do
               (Ur _, egraph) <- substitute egraph results
               -- Update scheduler state based on match counts
@@ -292,7 +287,13 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                   Failure _ -> var `lseq` egraph `lseq` error "Substitution produces invalid expression"
                   Success pat -> Control.do
                     (Ur newEid, egraph) <- addNestedENode pat egraph
-                    (Ur resl, egraph) <- unsafeMerge eid newEid egraph
+                    -- Hegg applies a variable RHS as @merge variable lhs@,
+                    -- while a node RHS is applied as @merge lhs node@.  The
+                    -- distinction is observable: equal parent counts retain
+                    -- the first argument as the union-find representative.
+                    (Ur resl, egraph) <- case pat of
+                      Metavar {} -> unsafeMerge newEid eid egraph
+                      PNode {} -> unsafeMerge eid newEid egraph
                     case resl of
                       Merged {} -> Control.void PL.$ Ref.modify (`lseq` True) var
                       AlreadyMerged {} -> Control.pure PL.$ consume var
