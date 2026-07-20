@@ -25,6 +25,7 @@ module Data.EGraph.Types.EClasses (
   lookupAnalysis,
   lookupParents,
   lookupParentHistory,
+  lookupParentHistoryWithCount,
   setAnalysis,
   nodes,
   delete,
@@ -117,6 +118,24 @@ lookupParentHistory classes eid =
       Just eclass -> Control.do
         Ur (UnsafeAlias history) <- Ref.readShare (eclass .# #parentHistory)
         Control.pure (Ur history)
+
+{-# INLINEABLE lookupParentHistoryWithCount #-}
+lookupParentHistoryWithCount ::
+  forall bk α d l m.
+  Borrow bk α (EClasses d l) %m ->
+  EClassId ->
+  BO α (Ur (Int, [Ur (ENode l, EClassId)]))
+lookupParentHistoryWithCount classes eid =
+  share classes & \(Ur classes) -> Control.do
+    let %1 clss = coerceLin classes :: Share α (Raw d l)
+    mclass <- HMB.lookup eid clss
+    case mclass of
+      Nothing -> Control.pure (Ur (0, []))
+      Just eclass -> Control.do
+        let %1 !(!parentCount, !parentHistory) = eclass .@ (#parentCount, #parentHistory)
+        Ur (UnsafeAlias !count) <- Ref.readShare parentCount
+        Ur (UnsafeAlias history) <- Ref.readShare parentHistory
+        Control.pure (Ur (count, history))
 
 {-# INLINEABLE lookupAnalysis #-}
 lookupAnalysis ::
@@ -213,10 +232,17 @@ addParentN ::
   BO α (Mut α (EClass d l))
 addParentN multiplicity pid enode eclass = Control.do
   eclass <- reborrowing_ eclass \eclass -> Control.do
-    let %1 !(!parentsSet, !parentHistory) = eclass .@ (#parents, #parentHistory)
+    let %1 !(!parentsSet, !parentHistory, !parentCount) = eclass .@ (#parents, #parentHistory, #parentCount)
     void $ HMUr.insert enode pid parentsSet
     parentHistory <- Ref.modify (P.replicate multiplicity (Ur (enode, pid)) <>) parentHistory
-    Control.pure (consume parentHistory)
+    (Ur (), parentCount) <-
+      Ref.update
+        ( \count ->
+            move count & \(Ur count) ->
+              Control.pure (Ur (), multiplicity P.+ count)
+        )
+        parentCount
+    Control.pure (consume parentHistory `lseq` consume parentCount)
   Control.pure eclass
 
 {-# INLINEABLE member #-}
@@ -252,8 +278,9 @@ insertIfNew eid enode analysis clss = Control.do
       -- Most classes have few parents; start small (the map grows on demand).
       parents <- asksLinearly $ HMUr.empty 8
       parentHistory <- asksLinearly $ Ref.new []
+      parentCount <- asksLinearly $ Ref.new 0
       analysis <- asksLinearly $ Ref.new analysis
-      (mop, clss) <- HMB.insert eid EClass {parents, parentHistory, nodes, analysis} $ coerceLin clss
+      (mop, clss) <- HMB.insert eid EClass {parents, parentHistory, parentCount, nodes, analysis} $ coerceLin clss
       clss <- reborrowing_ clss \clss -> Control.do
         let !childCounts = PHM.fromListWith (P.+) [(child, 1 :: Int) | child <- children enode]
         chss <-
@@ -307,11 +334,12 @@ unsafeMerge eid1 eid2 clss
   | eid1 == eid2 = Control.pure (Ur (False, False), clss)
   | otherwise = Control.do
       (mr, clss) <- delete clss eid2
-      let %1 !EClass {nodes = !rnodes, parents = !rparents, parentHistory = !rparentHistory, analysis = !ra} = case mr of
+      let %1 !EClass {nodes = !rnodes, parents = !rparents, parentHistory = !rparentHistory, parentCount = !rparentCount, analysis = !ra} = case mr of
             Nothing -> error "EGraph.Types.EClasses.unsafeMerge: eid2 not found"
             Just eclass -> eclass
       let %1 !(Ur ranalysis) = move $ Ref.free ra
       let %1 !(Ur rparentsHistory) = move $ Ref.free rparentHistory
+      let %1 !(Ur rparentsCount) = move $ Ref.free rparentCount
       reborrowing clss \clss0 -> Control.do
         let clss = coerceLin clss0 :: Mut _ (Raw d l)
         l <- HMB.lookup eid1 clss
@@ -323,6 +351,15 @@ unsafeMerge eid1 eid2 clss
             l <- reborrowing_ l \l -> Control.do
               history <- Ref.modify (rparentsHistory <>) (l .# #parentHistory)
               Control.pure (consume history)
+            l <- reborrowing_ l \l -> Control.do
+              (Ur (), count) <-
+                Ref.update
+                  ( \count ->
+                      move count & \(Ur count) ->
+                        Control.pure (Ur (), rparentsCount P.+ count)
+                  )
+                  (l .# #parentCount)
+              Control.pure (consume count)
 
             (changes, l) <- reborrowing l \l -> Control.do
               (changes, ref) <-

@@ -52,6 +52,8 @@ data EClass d l
   , parents :: {-# UNPACK #-} !(HashMapUr (ENode l) EClassId)
   , parentHistory :: !(Ref [Ur (ENode l, EClassId)])
   -- ^ Newest-first, duplicate-preserving parent sequence, matching hegg.
+  , parentCount :: !(Ref Int)
+  -- ^ Cached length of 'parentHistory', matching hegg's SizedList counter.
   , analysis :: !(Ref d)
   }
   deriving (GHC.Generic)

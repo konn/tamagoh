@@ -364,12 +364,10 @@ unsafeMerge eid1 eid2 egraph = Control.do
       Control.pure (Ur (AlreadyMerged eid1), egraph)
     else Control.do
       (Ur (eid, outdatedId, leaderParents, subParents), egraph) <- sharing egraph \egraph -> Control.do
-        Ur history1 <- EC.lookupParentHistory (egraph .# #classes) eid1
-        Ur history2 <- EC.lookupParentHistory (egraph .# #classes) eid2
+        Ur (size1, history1) <- EC.lookupParentHistoryWithCount (egraph .# #classes) eid1
+        Ur (size2, history2) <- EC.lookupParentHistoryWithCount (egraph .# #classes) eid2
         let list1 = P.map (\(Ur parent) -> parent) history1
             list2 = P.map (\(Ur parent) -> parent) history2
-        let size1 = P.length list1
-            size2 = P.length list2
         -- hegg chooses the class with more parents, with ties going to
         -- the first argument. Representative choice affects canonical
         -- e-nodes, so union-by-rank is not trajectory-equivalent here.
