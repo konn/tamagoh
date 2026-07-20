@@ -213,6 +213,7 @@ benchmark tamagoh-bench-math
   -- cabal-gild: discover bench --exclude=bench/Main.hs
   other-modules:
   build-depends:
+    containers,
     deepseq,
     hegg,
     recursion-schemes,

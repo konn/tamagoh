@@ -148,6 +148,15 @@ test_saturate =
                 case rid of
                   Nothing -> assertFailure "RHS term not found after saturation"
                   Just r -> equivalent graph' l r @?= Just True
+    , testCase "saturateFromList constructs and saturates in one lifetime" do
+        let lhs = (a + b) * c
+            rhs = c * b + a * c
+            result :: Either (SaturationError Expr String) (EGraph () Expr, [EClassId])
+            result = saturateFromList defaultConfig ringRules [lhs, rhs]
+        case result of
+          Left err -> assertFailure $ "saturation failed: " <> show err
+          Right (graph, [lid, rid]) -> equivalent graph lid rid @?= Just True
+          Right (_, ids) -> assertFailure $ "expected two input class ids, got: " <> show ids
     ]
   where
     a = var "a"

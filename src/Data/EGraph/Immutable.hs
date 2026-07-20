@@ -37,6 +37,7 @@ module Data.EGraph.Immutable (
 
   -- * Equality saturation
   saturate,
+  saturateFromList,
   SaturationConfig (..),
   defaultConfig,
   SaturationError (..),
@@ -249,6 +250,42 @@ saturate cfg rules = do
     Right rules ->
       Right . (\(Ur x) -> x) . modify \egraph ->
         Control.void PL.$ Raw.saturate cfg rules egraph
+
+{- | Construct and saturate an e-graph within one mutable lifetime.
+
+This is equivalent to applying 'saturate' to 'fromList', but avoids freezing
+and immediately cloning the intermediate graph. The returned identifiers
+correspond to the input terms in order.
+-}
+{-# INLINEABLE saturateFromList #-}
+saturateFromList ::
+  forall l v d.
+  (Language l, Hashable v, Analysis l d) =>
+  SaturationConfig ->
+  [Rule l d v] ->
+  [Term l] ->
+  Either (SaturationError l v) (EGraph d l, [EClassId])
+saturateFromList cfg rules terms = case traverse compileRule rules of
+  Left err -> Left err
+  Right compiled -> Right $ unur PL.$ linearly \lin ->
+    let %1 !(Ur eids, egraph) =
+          modifyLinearOnlyBO (Raw.new lin) \egraph -> Control.do
+            (Ur eids, egraph) <- addTerms terms egraph
+            Control.fmap (\egraph -> PL.consume egraph `lseq` Ur eids) PL.$
+              Raw.saturate cfg compiled egraph
+        %1 !(Ur !frozen) = freeze egraph
+     in Ur (frozen, eids)
+  where
+    addTerms ::
+      forall α.
+      [Term l] ->
+      Mut α (Raw.EGraph d l) %1 ->
+      BO α (Ur [EClassId], Mut α (Raw.EGraph d l))
+    addTerms [] egraph = Control.pure (Ur [], egraph)
+    addTerms (term : rest) egraph = Control.do
+      (Ur _, Ur eid, egraph) <- Raw.addTerm term egraph
+      (Ur eids, egraph) <- addTerms rest egraph
+      Control.pure (Ur (eid : eids), egraph)
 
 {-# INLINEABLE ematch #-}
 ematch ::
