@@ -32,6 +32,7 @@ module Data.EGraph.Types.EClasses (
   find,
   member,
   insertIfNew,
+  unsafeInsertNew,
   merge,
   unsafeMerge,
   size,
@@ -237,17 +238,34 @@ insertIfNew eid enode analysis clss = Control.do
   if mem
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
-      nodes <- asksLinearly $ Ref.new (Ur (PHS.singleton enode))
-      parentHistory <- asksLinearly $ Ref.new []
-      parentCount <- asksLinearly $ Ref.new 0
-      analysis <- asksLinearly $ Ref.new analysis
-      (mop, clss) <- HMB.insert eid EClass {parentHistory, parentCount, nodes, analysis} $ coerceLin clss
-      clss <- reborrowing_ clss \clss -> Control.do
-        chss <-
-          mapMaybe (\(Ur child, e) -> consume child `lseq` e)
-            Control.<$> HMB.lookupsAll (children enode) clss
-        void $ Data.forM chss $ addParent eid enode
-      mop `lseq` Control.pure (Ur True, coerceLin clss)
+      clss <- unsafeInsertNew eid enode analysis clss
+      Control.pure (Ur True, clss)
+
+{- | Insert a class whose identifier is known to be absent.
+
+The caller must ensure that the identifier is fresh.
+-}
+{-# INLINEABLE unsafeInsertNew #-}
+unsafeInsertNew ::
+  forall d l α.
+  (Hashable1 l, Foldable l, Consumable d) =>
+  EClassId ->
+  ENode l ->
+  d ->
+  Mut α (EClasses d l) %1 ->
+  BO α (Mut α (EClasses d l))
+unsafeInsertNew eid enode analysis clss = Control.do
+  nodes <- asksLinearly $ Ref.new (Ur (PHS.singleton enode))
+  parentHistory <- asksLinearly $ Ref.new []
+  parentCount <- asksLinearly $ Ref.new 0
+  analysis <- asksLinearly $ Ref.new analysis
+  (mop, clss) <- HMB.insert eid EClass {parentHistory, parentCount, nodes, analysis} $ coerceLin clss
+  clss <- reborrowing_ clss \clss -> Control.do
+    chss <-
+      mapMaybe (\(Ur child, e) -> consume child `lseq` e)
+        Control.<$> HMB.lookupsAll (children enode) clss
+    void $ Data.forM chss $ addParent eid enode
+  mop `lseq` Control.pure (coerceLin clss)
 
 {- | @'unsafeMerge' eid1 eid2 class@ merges the e-classes identified by @eid1@ and @eid2@, returning 'False' if the classes were already merged and no change will be made..
   Your must pass the canonical id as @eid1@, and the non-canonical id as @eid2@.

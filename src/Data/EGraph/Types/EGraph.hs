@@ -296,7 +296,7 @@ addCanonicalNode enode egraph = Control.do
         Control.pure $ uf `lseq` Ur.lift EClassId eid
       egraph <- reborrowing_ egraph \egraph -> Control.do
         (Ur !d, egraph) <- sharing egraph $ unsafeMakeAnalyzeNode enode
-        void $ EC.insertIfNew eid enode d $ egraph .# #classes
+        void $ EC.unsafeInsertNew eid enode d $ egraph .# #classes
       egraph <- reborrowing_ egraph \egraph -> Control.do
         let %1 !(!hashcons, !nodes, !worklist) = egraph .@ (#hashcons, #nodes, #worklist)
         -- Both keys are freshly absent (the 'lookup' above returned Nothing,
