@@ -52,7 +52,7 @@ import Control.Monad.Borrow.Pure.Experimental.Loop
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Deriving (deriveShow1)
-import Data.EGraph.EMatch.Relational (ematchDb)
+import Data.EGraph.EMatch.Relational (ematchDbWithCount)
 import Data.EGraph.EMatch.Relational.Database (buildDatabase)
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types (Substitution (..), substPattern)
@@ -221,7 +221,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                    in if banned
                         then (ruleIdx, rule, [], 0)
                         else
-                          let ms = ematchDb lhs db
+                          let (ms, rawMatchCount) = ematchDbWithCount lhs db
                               -- NB: apply ALL matches of a non-banned rule (as
                               -- hegg and egg do); the scheduler statistic only
                               -- feeds the backoff, which bans over-productive
@@ -229,7 +229,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                               -- hegg-compatible: total substitution size =
                               -- #matches x #query-variables.
                               !nVars = V.length lhs.varNames
-                           in (ruleIdx, rule, ms, length ms * nVars)
+                           in (ruleIdx, rule, ms, rawMatchCount * nVars)
             Control.pure (Ur $ collect raws)
           if null results
             then
@@ -243,20 +243,14 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
               let !schedState' = case config.scheduler of
                     Nothing -> schedState
                     Just sched -> updateStats sched iterNum matchCounts schedState
-              -- Check if e-graph changed (size or class count) - like hegg
-              -- This is more robust than tracking only merges, because new nodes
-              -- may be added without immediately being merged (e.g., with stale hashcons)
-              (Ur sizeAfter, egraph) <- size <$~ egraph
-              (Ur classesAfter, egraph) <- numEClasses <$~ egraph
-              let !madeProgress = sizeAfter /= currentSize || classesAfter /= numClasses
-              if madeProgress
-                then Control.do
-                  egraph <- rebuild egraph
-                  (Ur currentSize', egraph) <- size <$~ egraph
-                  (Ur numClasses', egraph) <- numEClasses <$~ egraph
-                  if currentSize' /= currentSize || numClasses' /= numClasses
-                    then go (iterNum + 1) schedState' (subtract 1 <$> remaining) egraph
-                    else Control.pure egraph
+              -- hegg rebuilds every nonempty application batch before deciding
+              -- whether saturation was reached.  Counts can be unchanged while
+              -- congruence or analysis work is still pending.
+              egraph <- rebuild egraph
+              (Ur currentSize', egraph) <- size <$~ egraph
+              (Ur numClasses', egraph) <- numEClasses <$~ egraph
+              if currentSize' /= currentSize || numClasses' /= numClasses
+                then go (iterNum + 1) schedState' (subtract 1 <$> remaining) egraph
                 else Control.pure egraph
 
     -- Pair every raw match with its rule. Conditions are checked in the

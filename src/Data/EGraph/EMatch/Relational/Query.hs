@@ -35,7 +35,6 @@ import Data.Generics.Labels ()
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable
 import Data.Hashable.Lifted
-import Data.IntMap.Strict qualified as IM
 import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
@@ -141,12 +140,7 @@ runInternM :: InternM v a -> (a, VarId -> VarId, V.Vector (Maybe v))
 runInternM act =
   let (a, s) = runState act (InternState 0 HM.empty [])
       names0 = V.fromList (reverse s.names)
-      idx = zip [0 :: VarId ..] (V.toList names0)
-      order = [i | (i, Nothing) <- idx] <> [i | (i, Just _) <- idx]
-      tbl = IM.fromList (zip order [0 ..])
-      remap old = tbl IM.! old
-      names' = V.fromList (map (names0 V.!) order)
-   in (a, remap, names')
+   in (a, id, names0)
 
 data PatternQuery l v = PatternQuery
   { root :: !VarId

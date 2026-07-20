@@ -53,7 +53,6 @@ import Algebra.Semilattice
 import Control.Functor.Linear (StateT (..), asks, runReader, runStateT, void)
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.BO.Unsafe (Alias (UnsafeAlias))
 import Control.Monad.Borrow.Pure.Utils hiding ((:-))
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Bifunctor.Linear qualified as Bi
@@ -69,6 +68,7 @@ import Data.Foldable1 (Foldable1, foldlM1)
 import Data.Functor.Foldable (cataA)
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
+import Data.HashSet qualified as HS
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe qualified as P
@@ -364,10 +364,10 @@ unsafeMerge eid1 eid2 egraph = Control.do
       Control.pure (Ur (AlreadyMerged eid1), egraph)
     else Control.do
       (Ur (eid, outdatedId, leaderParents, subParents), egraph) <- sharing egraph \egraph -> Control.do
-        parents1 <- EC.lookupParents (egraph .# #classes) eid1
-        Ur list1 <- maybe (Control.pure (Ur [])) HMUr.toList parents1
-        parents2 <- EC.lookupParents (egraph .# #classes) eid2
-        Ur list2 <- maybe (Control.pure (Ur [])) HMUr.toList parents2
+        Ur history1 <- EC.lookupParentHistory (egraph .# #classes) eid1
+        Ur history2 <- EC.lookupParentHistory (egraph .# #classes) eid2
+        let list1 = P.map (\(Ur parent) -> parent) history1
+            list2 = P.map (\(Ur parent) -> parent) history2
         let size1 = P.length list1
             size2 = P.length list2
         -- hegg chooses the class with more parents, with ties going to
@@ -419,45 +419,54 @@ rebuild = loop
   where
     loop :: Mut α (EGraph d l) %1 -> BO α (Mut α (EGraph d l))
     loop egraph = Control.do
-      (Ur isNull, egraph) <- sharing egraph \e -> Control.do
-        Ur (UnsafeAlias todos) <- Ref.readShare (e .# #worklist)
-        Control.pure $ Ur (P.null todos)
-      if isNull
-        then Control.do
-          -- Congruence is restored; propagate pending analysis changes
-          -- to parents (egg's analysis_pending discipline).
-          (Ur isANull, egraph) <- sharing egraph \e -> Control.do
-            Ur (UnsafeAlias todos) <- Ref.readShare (e .# #analysisWorklist)
-            Control.pure $ Ur (P.null todos)
-          if isANull
-            then Control.pure egraph
-            else Control.do
-              (Ur todos, egraph) <- reborrowing egraph \egraph -> Control.do
-                (todos, worklist) <- Ref.update (\todos -> Control.pure (move todos, [])) (egraph .# #analysisWorklist)
-                Control.pure $ worklist `lseq` todos
-              (Ur todos, egraph) <- sharing egraph \egraph -> runUrT do
-                canonical <- P.mapM (canonicalTodo egraph) todos
-                UrT $ Control.pure $ Ur (P.reverse (nubHash canonical))
-
-              egraph <- forReborrowing_ egraph todos \egraph todo ->
-                move todo & \(Ur (pClass, pNode)) -> repairAnal egraph pClass pNode
-              loop egraph
+      (Ur (rawTodos, rawAnalysisTodos), egraph) <- reborrowing egraph \egraph -> Control.do
+        let %1 !(!worklist, !analysisWorklist) = egraph .@ (#worklist, #analysisWorklist)
+        (Ur todos, worklist) <- Ref.update (\todos -> Control.pure (move todos, [])) worklist
+        (Ur analysisTodos, analysisWorklist) <-
+          Ref.update (\todos -> Control.pure (move todos, [])) analysisWorklist
+        Control.pure $
+          consume worklist `lseq`
+            consume analysisWorklist `lseq`
+              Ur (todos, analysisTodos)
+      if P.null rawTodos && P.null rawAnalysisTodos
+        then Control.pure egraph
         else Control.do
-          (Ur rawTodos, egraph) <- reborrowing egraph \egraph -> Control.do
-            (todos, worklist) <- Ref.update (\todos -> Control.pure (move todos, [])) (egraph .# #worklist)
-            Control.pure $ worklist `lseq` todos
           (Ur todos, egraph) <- sharing egraph \egraph -> runUrT do
             canonical <- P.mapM (canonicalTodo egraph) rawTodos
             UrT $ Control.pure $ Ur (P.reverse (nubHash canonical))
 
           egraph <- forReborrowing_ egraph todos \egraph todo ->
             move todo & \(Ur (pClass, pNode)) -> repair egraph pClass pNode
+
+          -- Match hegg's rebuild cadence: the analysis batch is the one
+          -- snapshotted before congruence repair. Work enqueued by either
+          -- phase is handled by the next recursive batch.
+          (Ur analysisTodos, egraph) <- sharing egraph \egraph -> runUrT do
+            canonical <- P.mapM (canonicalAnalysisTodo egraph) rawAnalysisTodos
+            UrT $ Control.pure $ Ur (P.reverse (nubAnalysis canonical))
+
+          egraph <- forReborrowing_ egraph analysisTodos \egraph todo ->
+            move todo & \(Ur (pClass, pNode)) -> repairAnal egraph pClass pNode
           loop egraph
 
     canonicalTodo egraph (Ur (pClass, pNode)) = UrT $ Control.do
       Ur pClass <- unsafeFind egraph pClass
       Ur pNode <- unsafeCanonicalize pNode egraph
       Control.pure $ Ur (pClass, pNode)
+
+    canonicalAnalysisTodo egraph (Ur (pClass, pNode)) = UrT $ Control.do
+      Ur pClass <- unsafeFind egraph pClass
+      Control.pure $ Ur (pClass, pNode)
+
+    -- hegg's analysis worklist uses @nubIntOn fst@: retain the newest queued
+    -- entry for each canonical owner, then process retained entries oldest
+    -- first (the surrounding reverse corresponds to hegg's strict foldr).
+    nubAnalysis = go HS.empty
+      where
+        go !_ [] = []
+        go !seen (entry@(pClass, _) : rest)
+          | HS.member pClass seen = go seen rest
+          | otherwise = entry : go (HS.insert pClass seen) rest
 
 {-# INLINEABLE repair #-}
 repair ::
@@ -523,8 +532,8 @@ repairAnal egraph pClass pNode = Control.do
       egraph <- reborrowing_ egraph \egraph -> Control.do
         void $ EC.setAnalysis pClass d (egraph .# #classes)
       (Ur parents, egraph) <- sharing egraph \egraph -> Control.do
-        mps <- EC.lookupParents (egraph .# #classes) pClass
-        maybe (Control.pure (Ur [])) HMUr.toList mps
+        Ur history <- EC.lookupParentHistory (egraph .# #classes) pClass
+        Control.pure (Ur (P.map (\(Ur parent) -> parent) history))
       egraph <- reborrowing_ egraph \egraph -> Control.do
         awl <- Ref.modify (P.map (\(node, owner) -> Ur (owner, node)) parents <>) (egraph .# #analysisWorklist)
         Control.pure $ consume awl

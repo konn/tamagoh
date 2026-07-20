@@ -24,6 +24,7 @@ module Data.EGraph.Types.EClasses (
   new,
   lookupAnalysis,
   lookupParents,
+  lookupParentHistory,
   setAnalysis,
   nodes,
   delete,
@@ -100,6 +101,22 @@ lookupParents classes eid =
     case mclass of
       Nothing -> Control.pure Nothing
       Just eclass -> Control.pure (Just (eclass .# #parents))
+
+{-# INLINEABLE lookupParentHistory #-}
+lookupParentHistory ::
+  forall bk α d l m.
+  Borrow bk α (EClasses d l) %m ->
+  EClassId ->
+  BO α (Ur [Ur (ENode l, EClassId)])
+lookupParentHistory classes eid =
+  share classes & \(Ur classes) -> Control.do
+    let %1 clss = coerceLin classes :: Share α (Raw d l)
+    mclass <- HMB.lookup eid clss
+    case mclass of
+      Nothing -> Control.pure (Ur [])
+      Just eclass -> Control.do
+        Ur (UnsafeAlias history) <- Ref.readShare (eclass .# #parentHistory)
+        Control.pure (Ur history)
 
 {-# INLINEABLE lookupAnalysis #-}
 lookupAnalysis ::
@@ -184,9 +201,22 @@ addParent ::
   Mut α (EClass d l) %1 ->
   BO α (Mut α (EClass d l))
 addParent pid enode eclass = Control.do
+  addParentN 1 pid enode eclass
+
+{-# INLINEABLE addParentN #-}
+addParentN ::
+  (Hashable1 l) =>
+  Int ->
+  EClassId ->
+  ENode l ->
+  Mut α (EClass d l) %1 ->
+  BO α (Mut α (EClass d l))
+addParentN multiplicity pid enode eclass = Control.do
   eclass <- reborrowing_ eclass \eclass -> Control.do
-    let %1 !parentsSet = eclass .# #parents
+    let %1 !(!parentsSet, !parentHistory) = eclass .@ (#parents, #parentHistory)
     void $ HMUr.insert enode pid parentsSet
+    parentHistory <- Ref.modify (P.replicate multiplicity (Ur (enode, pid)) <>) parentHistory
+    Control.pure (consume parentHistory)
   Control.pure eclass
 
 {-# INLINEABLE member #-}
@@ -221,13 +251,20 @@ insertIfNew eid enode analysis clss = Control.do
       nodes <- asksLinearly $ Set.singleton enode
       -- Most classes have few parents; start small (the map grows on demand).
       parents <- asksLinearly $ HMUr.empty 8
+      parentHistory <- asksLinearly $ Ref.new []
       analysis <- asksLinearly $ Ref.new analysis
-      (mop, clss) <- HMB.insert eid EClass {parents, nodes, analysis} $ coerceLin clss
+      (mop, clss) <- HMB.insert eid EClass {parents, parentHistory, nodes, analysis} $ coerceLin clss
       clss <- reborrowing_ clss \clss -> Control.do
+        let !childCounts = PHM.fromListWith (P.+) [(child, 1 :: Int) | child <- children enode]
         chss <-
-          mapMaybe (\(Ur _, e) -> e)
-            Control.<$> HMB.lookups (children enode) clss
-        void $ Data.forM chss \ch -> addParent eid enode ch
+          mapMaybe (\(Ur child, e) -> Data.fmap (\ch -> (Ur child, ch)) e)
+            Control.<$> HMB.lookups (PHM.keys childCounts) clss
+        void $ Data.forM chss \(Ur child, ch) ->
+          addParentN
+            (PHM.findWithDefault (error "EClasses.insertIfNew: missing child count") child childCounts)
+            eid
+            enode
+            ch
       mop `lseq` Control.pure (Ur True, coerceLin clss)
 
 {- | @'unsafeMerge' eid1 eid2 class@ merges the e-classes identified by @eid1@ and @eid2@, returning 'False' if the classes were already merged and no change will be made..
@@ -270,10 +307,11 @@ unsafeMerge eid1 eid2 clss
   | eid1 == eid2 = Control.pure (Ur (False, False), clss)
   | otherwise = Control.do
       (mr, clss) <- delete clss eid2
-      let %1 !EClass {nodes = !rnodes, parents = !rparents, analysis = !ra} = case mr of
+      let %1 !EClass {nodes = !rnodes, parents = !rparents, parentHistory = !rparentHistory, analysis = !ra} = case mr of
             Nothing -> error "EGraph.Types.EClasses.unsafeMerge: eid2 not found"
             Just eclass -> eclass
       let %1 !(Ur ranalysis) = move $ Ref.free ra
+      let %1 !(Ur rparentsHistory) = move $ Ref.free rparentHistory
       reborrowing clss \clss0 -> Control.do
         let clss = coerceLin clss0 :: Mut _ (Raw d l)
         l <- HMB.lookup eid1 clss
@@ -282,6 +320,9 @@ unsafeMerge eid1 eid2 clss
           Just l -> Control.do
             l <- reborrowing_ l \l -> void $ Set.extend rnodes (l .# #nodes)
             l <- reborrowing_ l \l -> void $ HMUr.extend rparents (l .# #parents)
+            l <- reborrowing_ l \l -> Control.do
+              history <- Ref.modify (rparentsHistory <>) (l .# #parentHistory)
+              Control.pure (consume history)
 
             (changes, l) <- reborrowing l \l -> Control.do
               (changes, ref) <-

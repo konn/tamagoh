@@ -50,6 +50,8 @@ data EClass d l
   = EClass
   { nodes :: {-# UNPACK #-} !(Set (ENode l))
   , parents :: {-# UNPACK #-} !(HashMapUr (ENode l) EClassId)
+  , parentHistory :: !(Ref [Ur (ENode l, EClassId)])
+  -- ^ Newest-first, duplicate-preserving parent sequence, matching hegg.
   , analysis :: !(Ref d)
   }
   deriving (GHC.Generic)

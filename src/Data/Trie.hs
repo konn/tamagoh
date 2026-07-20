@@ -4,6 +4,7 @@
 module Data.Trie (
   Trie (),
   size,
+  rootKeys,
   empty,
   toRows,
   fromRows,
@@ -60,6 +61,10 @@ data Trie = Trie
 
 size :: Trie -> Word
 size = (.size)
+
+{-# INLINE rootKeys #-}
+rootKeys :: Trie -> IntSet
+rootKeys = (.keys)
 
 instance Show Trie where
   showsPrec d trie =

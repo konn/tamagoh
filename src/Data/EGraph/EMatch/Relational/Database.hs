@@ -22,6 +22,7 @@ module Data.EGraph.EMatch.Relational.Database (
   fromRelations,
   Database,
   universe,
+  selectAll,
   HasDatabase,
   Operator (..),
   newDatabase,
@@ -45,6 +46,7 @@ import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
+import Data.List (sortOn)
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Trie (Trie)
 import Data.Trie qualified as Trie
@@ -83,9 +85,6 @@ buildDatabase ::
 buildDatabase egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
     Ur nodes <- HMUr.toList (egraph .@ hashconsL)
-    -- Direct recursion: canonicalise each (node, id) pair into a relation
-    -- row without deep-copying the node ('unsafeCanonicalize' already
-    -- produces a fresh node) or any per-node transformer plumbing.
     let go :: [(ENode l, EClassId)] -> [Relation l EClassId] -> BO α (Ur (Database l))
         go [] acc = Control.pure PL.$ Ur PL.$ fromRelations acc
         go ((enode, eid) : rest) acc = Control.do
@@ -111,6 +110,7 @@ deriving newtype instance (Hashable1 l) => Hashable (Operator l)
 data Database l = Database
   { database :: !(HashMap (Operator l) Trie)
   , universe :: !IntSet
+  , selectAll :: ![EClassId]
   }
   deriving (Generic)
 
@@ -119,6 +119,13 @@ deriving instance (Show1 l) => Show (Database l)
 {-# INLINE universe #-}
 universe :: Database l -> IntSet
 universe = (.universe)
+
+{- | Every relation root, retaining cross-relation multiplicity as hegg's
+@SelectAllQuery@ does.
+-}
+{-# INLINE selectAll #-}
+selectAll :: Database l -> [EClassId]
+selectAll = (.selectAll)
 
 {-# INLINEABLE fromRelations #-}
 fromRelations :: (HasDatabase l) => [Relation l EClassId] -> Database l
@@ -132,10 +139,14 @@ fromRelations rels =
                 (L.foldByKeyHashMap (Trie.fromRows <$> L.list))
           )
           rels
+      selectAll =
+        concatMap
+          (fmap Trie.fromKey . IS.toList . Trie.rootKeys . snd)
+          (sortOn fst $ HM.toList database)
    in Database {..}
 
 newDatabase :: forall l. (HasDatabase l) => Database l
-newDatabase = Database mempty mempty
+newDatabase = Database mempty mempty mempty
 
 {-# INLINE toOperator #-}
 toOperator :: forall l x. (Functor l) => l x -> Operator l
@@ -143,7 +154,7 @@ toOperator = Operator . (fmap (const Wildcard))
 
 {-# INLINE getTrie #-}
 getTrie :: forall l. (HasDatabase l) => Operator l -> Database l -> Trie
-getTrie l (Database db _) = HM.lookupDefault Trie.empty l db
+getTrie l Database {database = db} = HM.lookupDefault Trie.empty l db
 
 type instance Index (Database l) = Operator l
 
@@ -155,4 +166,4 @@ instance (HasDatabase l) => At (Database l) where
   at op = #database . at op
   {-# INLINE at #-}
 
-type HasDatabase l = (Hashable1 l, Functor l, Foldable l)
+type HasDatabase l = (Hashable1 l, Ord1 l, Functor l, Foldable l)
