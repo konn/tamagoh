@@ -23,13 +23,11 @@ module Data.EGraph.Types.EClasses (
   analyses,
   new,
   lookupAnalysis,
-  lookupParents,
   lookupParentHistory,
   lookupParentHistoryWithCount,
   setAnalysis,
   nodes,
   delete,
-  setParents,
   addParent,
   find,
   member,
@@ -53,8 +51,6 @@ import Data.EGraph.Types.ENode
 import Data.Foldable (Foldable)
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
-import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
-import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
 import Data.HashMap.Strict qualified as PHM
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
@@ -88,20 +84,6 @@ analyses clss =
               Control.pure (k, (nodes, anal))
         )
         dic
-
-{-# INLINEABLE lookupParents #-}
-lookupParents ::
-  forall bk α d l m.
-  Borrow bk α (EClasses d l) %m ->
-  EClassId ->
-  BO α (Maybe (Borrow bk α (HashMapUr (ENode l) EClassId)))
-lookupParents classes eid =
-  share classes & \(Ur classes) -> Control.do
-    let %1 clss = coerceLin classes :: Borrow bk α (Raw d l)
-    mclass <- HMB.lookup eid clss
-    case mclass of
-      Nothing -> Control.pure Nothing
-      Just eclass -> Control.pure (Just (eclass .# #parents))
 
 {-# INLINEABLE lookupParentHistory #-}
 lookupParentHistory ::
@@ -195,26 +177,8 @@ nodes clss0 eid = Control.do
       Ur ns <- Set.toList (eclass .# #nodes)
       Control.pure $ Ur $ NonEmpty.nonEmpty ns
 
-{-# INLINEABLE setParents #-}
-setParents ::
-  forall d l α.
-  (Hashable1 l) =>
-  EClassId ->
-  HashMapUr (ENode l) EClassId %1 ->
-  Mut α (EClasses d l) %1 ->
-  BO α (Mut α (EClasses d l))
-setParents eid ps clss = Control.do
-  reborrowing_ clss \clss0 -> Control.do
-    let %1 !clss = coerceLin clss0 :: Mut _ (Raw d l)
-    mclass <- HMB.lookup eid clss
-    case mclass of
-      Nothing -> Control.pure $ consume ps
-      Just eclass -> Control.do
-        void $ HMUr.swap ps (eclass .# #parents)
-
 {-# INLINEABLE addParent #-}
 addParent ::
-  (Hashable1 l) =>
   EClassId ->
   ENode l ->
   Mut α (EClass d l) %1 ->
@@ -224,7 +188,6 @@ addParent pid enode eclass = Control.do
 
 {-# INLINEABLE addParentN #-}
 addParentN ::
-  (Hashable1 l) =>
   Int ->
   EClassId ->
   ENode l ->
@@ -232,8 +195,7 @@ addParentN ::
   BO α (Mut α (EClass d l))
 addParentN multiplicity pid enode eclass = Control.do
   eclass <- reborrowing_ eclass \eclass -> Control.do
-    let %1 !(!parentsSet, !parentHistory, !parentCount) = eclass .@ (#parents, #parentHistory, #parentCount)
-    void $ HMUr.insert enode pid parentsSet
+    let %1 !(!parentHistory, !parentCount) = eclass .@ (#parentHistory, #parentCount)
     parentHistory <- Ref.modify (P.replicate multiplicity (Ur (enode, pid)) <>) parentHistory
     (Ur (), parentCount) <-
       Ref.update
@@ -275,12 +237,10 @@ insertIfNew eid enode analysis clss = Control.do
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
       nodes <- asksLinearly $ Set.singleton enode
-      -- Most classes have few parents; start small (the map grows on demand).
-      parents <- asksLinearly $ HMUr.empty 8
       parentHistory <- asksLinearly $ Ref.new []
       parentCount <- asksLinearly $ Ref.new 0
       analysis <- asksLinearly $ Ref.new analysis
-      (mop, clss) <- HMB.insert eid EClass {parents, parentHistory, parentCount, nodes, analysis} $ coerceLin clss
+      (mop, clss) <- HMB.insert eid EClass {parentHistory, parentCount, nodes, analysis} $ coerceLin clss
       clss <- reborrowing_ clss \clss -> Control.do
         let !childCounts = PHM.fromListWith (P.+) [(child, 1 :: Int) | child <- children enode]
         chss <-
@@ -334,7 +294,7 @@ unsafeMerge eid1 eid2 clss
   | eid1 == eid2 = Control.pure (Ur (False, False), clss)
   | otherwise = Control.do
       (mr, clss) <- delete clss eid2
-      let %1 !EClass {nodes = !rnodes, parents = !rparents, parentHistory = !rparentHistory, parentCount = !rparentCount, analysis = !ra} = case mr of
+      let %1 !EClass {nodes = !rnodes, parentHistory = !rparentHistory, parentCount = !rparentCount, analysis = !ra} = case mr of
             Nothing -> error "EGraph.Types.EClasses.unsafeMerge: eid2 not found"
             Just eclass -> eclass
       let %1 !(Ur ranalysis) = move $ Ref.free ra
@@ -344,10 +304,9 @@ unsafeMerge eid1 eid2 clss
         let clss = coerceLin clss0 :: Mut _ (Raw d l)
         l <- HMB.lookup eid1 clss
         case l of
-          Nothing -> error ("EClasses.unsafeMerge: canonical id not found: " <> show eid1) rnodes rparents
+          Nothing -> error ("EClasses.unsafeMerge: canonical id not found: " <> show eid1) rnodes
           Just l -> Control.do
             l <- reborrowing_ l \l -> void $ Set.extend rnodes (l .# #nodes)
-            l <- reborrowing_ l \l -> void $ HMUr.extend rparents (l .# #parents)
             l <- reborrowing_ l \l -> Control.do
               history <- Ref.modify (rparentsHistory <>) (l .# #parentHistory)
               Control.pure (consume history)

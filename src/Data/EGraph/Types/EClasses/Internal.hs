@@ -28,7 +28,6 @@ import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
-import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr)
 import Data.Ref.Linear.Borrow (Ref)
 import Data.Set.Mutable.Linear.Borrowed (Set)
 import GHC.Generics qualified as GHC
@@ -49,7 +48,6 @@ new = EClasses . HMB.empty 2048
 data EClass d l
   = EClass
   { nodes :: {-# UNPACK #-} !(Set (ENode l))
-  , parents :: {-# UNPACK #-} !(HashMapUr (ENode l) EClassId)
   , parentHistory :: !(Ref [Ur (ENode l, EClassId)])
   -- ^ Newest-first, duplicate-preserving parent sequence, matching hegg.
   , parentCount :: !(Ref Int)
