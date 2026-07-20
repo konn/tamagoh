@@ -92,18 +92,16 @@ addTerm ::
   Mut α (EGraph d l) %1 ->
   BO α (Ur (ENode l), Ur EClassId, Mut α (EGraph d l))
 addTerm term egraph = Control.do
-  (Ur node, egraph) <-
+  (Ur (node, eid), egraph) <-
     flip runStateT egraph $
       runUrT $
         cataA
           ( \nodes ->
-              P.fmap ENode
-                P.. P.traverse
-                  (\node -> UrT $ StateT $ addCanonicalNode node)
-                P.=<< P.sequenceA nodes
+              P.sequenceA nodes P.>>= \children ->
+                let node = ENode (P.fmap P.snd children)
+                 in P.fmap (\eid -> (node, eid)) $ UrT $ StateT $ addCanonicalNode node
           )
           term
-  (Ur eid, egraph) <- addCanonicalNode node egraph
   Control.pure (Ur node, Ur eid, egraph)
 
 new :: forall d l. Linearly %1 -> EGraph d l
