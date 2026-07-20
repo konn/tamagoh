@@ -17,6 +17,7 @@ import Data.HashMap.RobinHood.Mutable.Linear qualified as LHM
 import Data.HashMap.RobinHood.Mutable.LinearSpec.Cases
 import Data.HashMap.Strict qualified as HMS
 import Data.HashSet qualified as HashSet
+import Data.Hashable (Hashable (..))
 import Data.List (sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
@@ -87,6 +88,43 @@ test_case5 = testCase "HashMap case 5" do
               Ur (valCc, lst)
   sortOn fst lst @?= sortOn fst input
   abcbaVal @?= lookup "abcba" input
+
+test_preparedInsertion :: TestTree
+test_preparedInsertion = testCase "prepared insertion preserves lookup and growth" do
+  let expected = Map.fromList [(show i, i) | i <- [1 .. 256 :: Int]]
+      Ur (found, actual) = withNewEmptyHashMap (go 1)
+  found @?= Just 128
+  Map.fromList actual @?= expected
+  where
+    go :: Int -> LHM.HashMap String Int %1 -> Ur (Maybe Int, [(String, Int)])
+    go i hm
+      | i <= 256 = case LHM.lookupForInsert (show i) hm of
+          (Ur (Left old), hm) -> go (i + 1) (LHM.alter (const (Just old)) (show i) hm)
+          (Ur (Right plan), hm) -> go (i + 1) (LHM.unsafeInsertPrepared plan i hm)
+      | otherwise = case LHM.lookupForInsert "128" hm of
+          (Ur (Left value), hm) -> case LHM.toList hm of
+            Ur entries -> Ur (Just value, entries)
+          (Ur (Right plan), hm) -> case LHM.toList (LHM.unsafeInsertPrepared plan 0 hm) of
+            Ur entries -> Ur (Nothing, entries)
+
+newtype Colliding = Colliding Int
+  deriving (Show, Eq, Ord)
+
+instance Hashable Colliding where
+  hashWithSalt _ _ = 0
+
+test_preparedInsertionCollisions :: TestTree
+test_preparedInsertionCollisions = testCase "prepared insertion preserves Robin Hood collisions" do
+  let expected = Map.fromList [(Colliding i, i) | i <- [1 .. 64]]
+      Ur actual = linearly \lin -> go 1 (LHM.new 1 lin)
+  Map.fromList actual @?= expected
+  where
+    go :: Int -> LHM.HashMap Colliding Int %1 -> Ur [(Colliding, Int)]
+    go i hm
+      | i <= 64 = case LHM.lookupForInsert (Colliding i) hm of
+          (Ur (Left old), hm) -> go (i + 1) (LHM.alter (const (Just old)) (Colliding i) hm)
+          (Ur (Right plan), hm) -> go (i + 1) (LHM.unsafeInsertPrepared plan i hm)
+      | otherwise = LHM.toList hm
 
 data Instruction
   = Inserts (NonEmpty (String, Int))

@@ -287,10 +287,11 @@ addCanonicalNode ::
   Mut α (EGraph d l) %1 ->
   BO α (Ur EClassId, Mut α (EGraph d l))
 addCanonicalNode enode egraph = Control.do
-  (Ur mid, egraph) <- lookup enode <$~ egraph
-  case mid of
-    Just eid -> Control.pure (Ur eid, egraph)
-    Nothing -> Control.do
+  (Ur prepared, egraph) <- sharing egraph \egraph ->
+    HMUr.lookupForInsert enode (egraph .# #hashcons)
+  case prepared of
+    Left eid -> Control.pure (Ur eid, egraph)
+    Right insertPlan -> Control.do
       (Ur eid, egraph) <- reborrowing egraph \egraph -> Control.do
         (eid, uf) <- UFB.fresh (egraph .# #unionFind)
         Control.pure $ uf `lseq` Ur.lift EClassId eid
@@ -299,12 +300,10 @@ addCanonicalNode enode egraph = Control.do
         void $ EC.unsafeInsertNew eid enode d $ egraph .# #classes
       egraph <- reborrowing_ egraph \egraph -> Control.do
         let %1 !(!hashcons, !nodes, !worklist) = egraph .@ (#hashcons, #nodes, #worklist)
-        -- Both keys are freshly absent (the 'lookup' above returned Nothing,
-        -- and 'eid' is a just-'fresh'ed union-find id) and neither insert's
-        -- old value is used, so route through the plain 'alter': it skips the
-        -- 'Swapper'/'Ur' old-value plumbing that 'insert' builds (a hot-path
-        -- cost — ~5% alloc in the flat profile).
-        hashcons <- HMUr.alter (\_ -> Just eid) enode hashcons
+        -- The hashcons table has not changed since 'lookupForInsert', so resume
+        -- that probe at its recorded miss instead of hashing and probing the
+        -- structured node a second time.
+        hashcons <- HMUr.unsafeInsertPrepared insertPlan eid hashcons
         nodes <- HMUr.alter (\_ -> Just enode) eid nodes
         worklist <- Ref.modify (Ur (eid, enode) :) worklist
         Control.pure $ hashcons `lseq` consume nodes `lseq` consume worklist

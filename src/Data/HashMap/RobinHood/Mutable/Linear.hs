@@ -33,6 +33,9 @@ module Data.HashMap.RobinHood.Mutable.Linear (
   foldMapWithKey,
   toList,
   lookup,
+  InsertPlan,
+  lookupForInsert,
+  unsafeInsertPrepared,
   member,
   union,
   delete,
@@ -134,6 +137,19 @@ data HashMap k v where
     -- | Slots (unified DIB + key-value)
     !(Slots k v) %1 ->
     HashMap k v
+
+{- | A suspended unsuccessful lookup that can be resumed as an insertion.
+The table must not be mutated between 'lookupForInsert' and
+'unsafeInsertPrepared'.
+-}
+data InsertPlan k
+  = InsertPlan
+      !k
+      {-# UNPACK #-} !Fingerprint
+      {-# UNPACK #-} !Int
+      !P.Bool
+      {-# UNPACK #-} !DIB
+      !(Maybe DIB)
 
 instance Consumable (HashMap k v) where
   consume (HashMap _ _ _ slots) = consume slots
@@ -293,6 +309,48 @@ alterF f k hm =
           hm & \(HashMap size capa maxDIB slots) -> DataFlow.do
             slots <- LV.unsafeSet loc.foundAt (Occupied loc.slotFp loc.slotDIB k v) slots
             HashMap size capa maxDIB slots
+
+{-# INLINE lookupForInsert #-}
+lookupForInsert ::
+  (Hashable k) =>
+  k ->
+  HashMap k v %1 ->
+  (Ur (Either v (InsertPlan k)), HashMap k v)
+lookupForInsert k hm = case probeKeyForAlter k hm of
+  (# Found loc, hm #) -> (Ur (Left loc.val), hm)
+  (# NotFound ProbeSuspended {..}, hm #) ->
+    ( Ur
+        ( Right
+            ( InsertPlan
+                k
+                searchFp
+                offset
+                (case endType of Vacant -> P.True; Paused -> P.False)
+                dibAtMiss
+                cachedDIB
+            )
+        )
+    , hm
+    )
+
+{- | Insert using a plan returned by 'lookupForInsert'.
+
+The map must be the same map, with no intervening mutation. Violating this
+precondition can corrupt the Robin Hood table.
+-}
+{-# INLINE unsafeInsertPrepared #-}
+unsafeInsertPrepared :: InsertPlan k -> v -> HashMap k v %1 -> HashMap k v
+unsafeInsertPrepared (InsertPlan k searchFp offset vacant dibAtMiss cachedDIB) v =
+  probeForInsert
+    k
+    v
+    ProbeSuspended
+      { searchFp
+      , offset
+      , endType = if vacant then Vacant else Paused
+      , dibAtMiss
+      , cachedDIB
+      }
 
 data Swapper v a where
   Swapper :: a %1 -> Maybe v -> Swapper v a
@@ -515,7 +573,6 @@ type ProbeSuspended :: UnliftedType
 data ProbeSuspended = ProbeSuspended
   { searchFp :: {-# UNPACK #-} !Fingerprint
   -- ^ Fingerprint of the key being searched/inserted
-  , initialBucket :: {-# UNPACK #-} !Int
   , offset :: {-# UNPACK #-} !Int
   , endType :: !EndType
   , dibAtMiss :: {-# UNPACK #-} !DIB
@@ -548,7 +605,6 @@ probeKeyForAlter k (HashMap size capa maxDIB slots) =
             NotFound
               ProbeSuspended
                 { searchFp
-                , initialBucket = start
                 , offset = idx
                 , endType = Paused
                 , dibAtMiss = dib
@@ -565,7 +621,6 @@ probeKeyForAlter k (HashMap size capa maxDIB slots) =
                   NotFound
                     ProbeSuspended
                       { searchFp
-                      , initialBucket = start
                       , offset = idx
                       , endType
                       , dibAtMiss = dib
@@ -580,7 +635,6 @@ probeKeyForAlter k (HashMap size capa maxDIB slots) =
                 NotFound
                   ProbeSuspended
                     { searchFp
-                    , initialBucket = start
                     , offset = idx
                     , endType = Vacant
                     , dibAtMiss = dib
@@ -596,7 +650,6 @@ probeKeyForAlter k (HashMap size capa maxDIB slots) =
                       NotFound
                         ProbeSuspended
                           { searchFp
-                          , initialBucket = start
                           , offset = idx
                           , endType = Paused
                           , dibAtMiss = dib

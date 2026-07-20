@@ -48,6 +48,8 @@ The constructor is not exported to maintain invariants.
 newtype HashMapUr k v = HM (Ref (Raw.HashMap k v))
   deriving newtype (LinearOnly)
 
+newtype InsertPlan k = InsertPlan (Raw.InsertPlan k)
+
 instance Consumable (HashMapUr k v) where
   consume = \(HM ref) -> consume $ Ref.free ref
   {-# INLINE consume #-}

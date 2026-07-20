@@ -31,6 +31,9 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (
 
   -- * Mutation
   insert,
+  InsertPlan,
+  lookupForInsert,
+  unsafeInsertPrepared,
   delete,
   alter,
   alterF,
@@ -96,6 +99,34 @@ insert key !v !dic = Control.do
       (\dic -> Control.pure $ Raw.insert key v dic)
       (coerceBor dic)
   Control.pure (Ur $ forceMay mval, recoerceBor dic)
+
+{-# INLINE lookupForInsert #-}
+lookupForInsert ::
+  forall k v bk α m.
+  (Keyed k) =>
+  k ->
+  Borrow bk α (HashMapUr k v) %m ->
+  BO α (Ur (Either v (InsertPlan k)))
+lookupForInsert key = askRaw go
+  where
+    go :: Raw.HashMap k v %1 -> (Ur (Either v (InsertPlan k)), Raw.HashMap k v)
+    go hm = case Raw.lookupForInsert key hm of
+      (Ur result, hm) -> (Ur (P.fmap InsertPlan result), hm)
+
+{- | Resume an unsuccessful 'lookupForInsert' as an insertion.
+
+The map must not have been mutated since the plan was produced.
+-}
+{-# INLINE unsafeInsertPrepared #-}
+unsafeInsertPrepared ::
+  InsertPlan k ->
+  v ->
+  Mut α (HashMapUr k v) %1 ->
+  BO α (Mut α (HashMapUr k v))
+unsafeInsertPrepared (InsertPlan plan) !v =
+  Control.fmap recoerceBor
+    . Ref.modify (Raw.unsafeInsertPrepared plan v)
+    . coerceBor
 
 {-# INLINE delete #-}
 delete ::
