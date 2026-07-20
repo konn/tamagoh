@@ -80,10 +80,12 @@ member key bor =
 
 {-# INLINE unsafeFind #-}
 unsafeFind :: forall k α m. Key -> Borrow k α UnionFind %m -> BO α (Ur Key)
-unsafeFind key (UnsafeAlias bor) = Control.do
-  let %1 borRef = coerceUF (UnsafeAlias bor :: Mut α _)
-  (!key, UnsafeAlias !a) <- Ref.update (Control.pure . Raw.unsafeFind key) borRef
-  Control.pure $ unsafeLeak a `lseq` key
+unsafeFind key bor =
+  share bor & \(Ur bor) -> Control.do
+    let %1 borRef = coerceUF bor
+    Ur (UnsafeAlias !uf) <- Ref.readShare borRef
+    case Raw.unsafeFind key uf of
+      (!key, !uf) -> Control.pure $ unsafeLeak uf `lseq` key
 
 {-# INLINE fresh #-}
 fresh :: Mut α UnionFind %1 -> BO α (Ur Key, Mut α UnionFind)
