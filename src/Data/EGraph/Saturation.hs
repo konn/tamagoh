@@ -53,7 +53,7 @@ import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Deriving (deriveShow1)
 import Data.EGraph.EMatch.Relational (ematchDbWithCount)
-import Data.EGraph.EMatch.Relational.Database (buildDatabase)
+import Data.EGraph.EMatch.Relational.Database (buildDatabaseForPatterns)
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types (Substitution (..), substPattern)
 import Data.EGraph.Saturation.Scheduler
@@ -190,6 +190,12 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
     indexedRules :: [(Int, CompiledRule l d v)]
     indexedRules = zip [0 ..] rules
 
+    needsSelectAll :: Bool
+    needsSelectAll = any isSelectAllRule rules
+
+    isSelectAllRule CompiledRule {lhs = PatternQuery {patQuery = SelectAll {}}} = True
+    isSelectAllRule _ = False
+
     go ::
       Int ->
       SchedulerState ->
@@ -204,7 +210,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
         then Control.pure egraph
         else Control.do
           (Ur (results, matchCounts), egraph) <- sharing egraph \egraph -> Control.do
-            Ur db <- buildDatabase egraph
+            Ur db <- buildDatabaseForPatterns needsSelectAll egraph
             -- Match all non-banned rules against one immutable database.
             -- Side conditions are deliberately NOT checked here: hegg checks
             -- each condition immediately before applying its match, against

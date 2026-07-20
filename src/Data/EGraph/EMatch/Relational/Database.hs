@@ -19,6 +19,7 @@
 
 module Data.EGraph.EMatch.Relational.Database (
   buildDatabase,
+  buildDatabaseForPatterns,
   fromRelations,
   Database,
   universe,
@@ -82,11 +83,37 @@ buildDatabase ::
   (HasDatabase l, Traversable l) =>
   Borrow k α (EGraph d l) %m ->
   BO α (Ur (Database l))
-buildDatabase egraph =
+buildDatabase = buildDatabaseWithIndexes True True
+
+{- | Build the indexes required by queries produced from e-matching patterns.
+
+Compiled patterns bind every query-head variable in the query body, so they
+never use the database-wide 'universe' fallback. The 'Bool' indicates whether
+the rule set contains a variable-only pattern and therefore needs 'selectAll'.
+-}
+{-# INLINEABLE buildDatabaseForPatterns #-}
+buildDatabaseForPatterns ::
+  forall l d k α m.
+  (HasDatabase l, Traversable l) =>
+  Bool ->
+  Borrow k α (EGraph d l) %m ->
+  BO α (Ur (Database l))
+buildDatabaseForPatterns includeSelectAll = buildDatabaseWithIndexes False includeSelectAll
+
+{-# INLINEABLE buildDatabaseWithIndexes #-}
+buildDatabaseWithIndexes ::
+  forall l d k α m.
+  (HasDatabase l, Traversable l) =>
+  Bool ->
+  Bool ->
+  Borrow k α (EGraph d l) %m ->
+  BO α (Ur (Database l))
+buildDatabaseWithIndexes includeUniverse includeSelectAll egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
     Ur nodes <- HMUr.toList (egraph .@ hashconsL)
     let go :: [(ENode l, EClassId)] -> [Relation l EClassId] -> BO α (Ur (Database l))
-        go [] acc = Control.pure PL.$ Ur PL.$ fromRelations acc
+        go [] acc =
+          Control.pure PL.$ Ur PL.$ fromRelationsWithIndexes includeUniverse includeSelectAll acc
         go ((enode, eid) : rest) acc = Control.do
           Ur (ENode args) <- unsafeCanonicalize enode egraph
           Ur eid' <- unsafeFind egraph eid
@@ -129,20 +156,33 @@ selectAll = (.selectAll)
 
 {-# INLINEABLE fromRelations #-}
 fromRelations :: (HasDatabase l) => [Relation l EClassId] -> Database l
-fromRelations rels =
-  let (universe, database) =
-        L.fold
-          ( (,)
-              <$> L.handles folded (L.Fold (\s e -> IS.insert (Trie.toKey e) s) IS.empty id)
-              <*> L.premap
-                (\rel@MkRel {args} -> (toOperator args, F.toList rel))
-                (L.foldByKeyHashMap (Trie.fromRows <$> L.list))
-          )
-          rels
+fromRelations = fromRelationsWithIndexes True True
+
+{-# INLINEABLE fromRelationsWithIndexes #-}
+fromRelationsWithIndexes ::
+  (HasDatabase l) => Bool -> Bool -> [Relation l EClassId] -> Database l
+fromRelationsWithIndexes includeUniverse includeSelectAll rels =
+  let databaseFold =
+        L.premap
+          (\rel@MkRel {args} -> (toOperator args, F.toList rel))
+          (L.foldByKeyHashMap (Trie.fromRows <$> L.list))
+      (universe, database) =
+        if includeUniverse
+          then
+            L.fold
+              ( (,)
+                  <$> L.handles folded (L.Fold (\s e -> IS.insert (Trie.toKey e) s) IS.empty id)
+                  <*> databaseFold
+              )
+              rels
+          else (IS.empty, L.fold databaseFold rels)
       selectAll =
-        concatMap
-          (fmap Trie.fromKey . IS.toList . Trie.rootKeys . snd)
-          (sortOn fst $ HM.toList database)
+        if includeSelectAll
+          then
+            concatMap
+              (fmap Trie.fromKey . IS.toList . Trie.rootKeys . snd)
+              (sortOn fst $ HM.toList database)
+          else []
    in Database {..}
 
 newDatabase :: forall l. (HasDatabase l) => Database l
