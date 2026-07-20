@@ -21,6 +21,7 @@ module Data.HashMap.Mutable.Linear.Borrowed (
   size,
   lookup,
   lookups,
+  lookupsAll,
   member,
   toList,
   toBorrowList,
@@ -161,6 +162,15 @@ lookups ::
 lookups keys0 = Unsafe.toLinear \ !dic -> Control.do
   let keys = P.map Ur $ IHS.toList $ IHS.fromList keys0
   Data.forM keys (\(Ur !key) -> lookup key dic Control.<&> \ !v -> (Ur key, v))
+
+-- | Look up every key in input order, including duplicate keys.
+lookupsAll ::
+  (Keyed k) =>
+  [k] ->
+  Borrow bk α (HashMap k v) %m ->
+  BO α [(Ur k, (Maybe (Borrow bk α v)))]
+lookupsAll keys0 = Unsafe.toLinear \ !dic ->
+  Data.forM (P.map Ur keys0) (\(Ur !key) -> lookup key dic Control.<&> \ !v -> (Ur key, v))
 
 member :: (Keyed k) => k -> Borrow bk α (HashMap k v) %m -> BO α (Ur Bool)
 member key = askRaw (Raw.member key)

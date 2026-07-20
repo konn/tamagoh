@@ -243,16 +243,10 @@ insertIfNew eid enode analysis clss = Control.do
       analysis <- asksLinearly $ Ref.new analysis
       (mop, clss) <- HMB.insert eid EClass {parentHistory, parentCount, nodes, analysis} $ coerceLin clss
       clss <- reborrowing_ clss \clss -> Control.do
-        let !childCounts = PHM.fromListWith (P.+) [(child, 1 :: Int) | child <- children enode]
         chss <-
-          mapMaybe (\(Ur child, e) -> Data.fmap (\ch -> (Ur child, ch)) e)
-            Control.<$> HMB.lookups (PHM.keys childCounts) clss
-        void $ Data.forM chss \(Ur child, ch) ->
-          addParentN
-            (PHM.findWithDefault (error "EClasses.insertIfNew: missing child count") child childCounts)
-            eid
-            enode
-            ch
+          mapMaybe (\(Ur child, e) -> consume child `lseq` e)
+            Control.<$> HMB.lookupsAll (children enode) clss
+        void $ Data.forM chss $ addParent eid enode
       mop `lseq` Control.pure (Ur True, coerceLin clss)
 
 {- | @'unsafeMerge' eid1 eid2 class@ merges the e-classes identified by @eid1@ and @eid2@, returning 'False' if the classes were already merged and no change will be made..
