@@ -52,6 +52,7 @@ import Data.Foldable (Foldable)
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.HashMap.Strict qualified as PHM
+import Data.HashSet qualified as PHS
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NonEmpty
@@ -59,7 +60,6 @@ import Data.Maybe.Linear
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Ref.Linear qualified as Ref
 import Data.Ref.Linear.Borrow qualified as Ref
-import Data.Set.Mutable.Linear.Borrowed qualified as Set
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear
@@ -79,9 +79,9 @@ analyses clss =
       Control.<$> Data.mapM
         ( \(Ur k, bor) ->
             move bor & \(Ur bor) -> Control.do
-              Ur nodes <- Set.toList (bor .# #nodes)
+              Ur (UnsafeAlias (Ur nodes)) <- Ref.readShare (bor .# #nodes)
               Ur anal <- Data.fmap copy Control.<$> Ref.readShare (bor .# #analysis)
-              Control.pure (k, (nodes, anal))
+              Control.pure (k, (PHS.toList nodes, anal))
         )
         dic
 
@@ -173,9 +173,10 @@ nodes clss0 eid = Control.do
   mclass <- HMB.lookup eid clss
   case mclass of
     Nothing -> Control.pure (Ur Nothing)
-    Just eclass -> Control.do
-      Ur ns <- Set.toList (eclass .# #nodes)
-      Control.pure $ Ur $ NonEmpty.nonEmpty ns
+    Just eclass ->
+      share eclass & \(Ur eclass) -> Control.do
+        Ur (UnsafeAlias (Ur ns)) <- Ref.readShare (eclass .# #nodes)
+        Control.pure $ Ur $ NonEmpty.nonEmpty $ PHS.toList ns
 
 {-# INLINEABLE addParent #-}
 addParent ::
@@ -236,7 +237,7 @@ insertIfNew eid enode analysis clss = Control.do
   if mem
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
-      nodes <- asksLinearly $ Set.singleton enode
+      nodes <- asksLinearly $ Ref.new (Ur (PHS.singleton enode))
       parentHistory <- asksLinearly $ Ref.new []
       parentCount <- asksLinearly $ Ref.new 0
       analysis <- asksLinearly $ Ref.new analysis
@@ -306,7 +307,15 @@ unsafeMerge eid1 eid2 clss
         case l of
           Nothing -> error ("EClasses.unsafeMerge: canonical id not found: " <> show eid1) rnodes
           Just l -> Control.do
-            l <- reborrowing_ l \l -> void $ Set.extend rnodes (l .# #nodes)
+            let %1 !(Ur rnodes') = Ref.free rnodes
+            l <- reborrowing_ l \l -> Control.do
+              (Ur (), nodes) <-
+                Ref.update
+                  ( \(Ur lnodes) ->
+                      Control.pure (Ur (), Ur (PHS.union lnodes rnodes'))
+                  )
+                  (l .# #nodes)
+              Control.pure (consume nodes)
             l <- reborrowing_ l \l -> Control.do
               history <- Ref.modify (rparentsHistory <>) (l .# #parentHistory)
               Control.pure (consume history)

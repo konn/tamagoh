@@ -22,14 +22,13 @@ module Data.EGraph.Types.EClasses.Internal (
 ) where
 
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Copyable
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
 import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
 import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
+import Data.HashSet (HashSet)
 import Data.Ref.Linear.Borrow (Ref)
-import Data.Set.Mutable.Linear.Borrowed (Set)
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear
@@ -44,10 +43,9 @@ type Raw d l = HashMap EClassId (EClass d l)
 new :: Linearly %1 -> EClasses d l
 new = EClasses . HMB.empty 2048
 
--- TODO: use (unsafe) indirection around Sets to reduce copying cost
 data EClass d l
   = EClass
-  { nodes :: {-# UNPACK #-} !(Set (ENode l))
+  { nodes :: !(Ref (Ur (HashSet (ENode l))))
   , parentHistory :: !(Ref [Ur (ENode l, EClassId)])
   -- ^ Newest-first, duplicate-preserving parent sequence, matching hegg.
   , parentCount :: !(Ref Int)
@@ -73,12 +71,12 @@ deriving via
 deriving via
   Generically (EClass d l)
   instance
-    (Copyable1 l, Show1 l, Display d) => Display (EClass d l)
+    (Show1 l, Display d) => Display (EClass d l)
 
 deriving newtype instance (Dupable d) => Dupable (EClasses d l)
 
 deriving via
   Raw d l
   instance
-    (Copyable1 l, Show1 l, Display d) =>
+    (Show1 l, Display d) =>
     Display (EClasses d l)
