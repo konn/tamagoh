@@ -30,11 +30,11 @@ module Data.UnionFind.Linear.Internal (
 import Control.Monad.Borrow.Pure (Copyable)
 import Control.Monad.Borrow.Pure.Clone (Clone)
 import Control.Monad.Borrow.Pure.Lifetime.Token.Internal
+import Data.Array.Mutable.Linear.Unboxed (UArray)
 import Data.Hashable (Hashable)
 import Data.Ord.Linear qualified as Linear
 import Data.Vector.Generic qualified as VG
 import Data.Vector.Generic.Mutable qualified as VGM
-import Data.Vector.Mutable.Linear.Unboxed (Vector)
 import Data.Vector.Unboxed qualified as U
 import Prelude.Linear hiding (Eq (..), Num (..), Ord (..), find, (+), (-))
 import Unsafe.Linear qualified as Unsafe
@@ -89,23 +89,28 @@ instance Linear.Ord Key where
 {- | A union-find (disjoint-set) data structure specialized for 'Key' elements.
 Elements are represented by indices 0..n-1.
 
-The structure maintains two unboxed vectors:
+The structure maintains a size, the shared physical capacity of, and two raw
+unboxed arrays:
 * Parent pointers for the tree structure
 * Ranks for the union-by-rank heuristic
+
+The arrays are raw 'UArray's (not the 'Vector' wrapper): the find hop loop
+and 'fresh' run directly on the backing buffer, avoiding a boxed
+@(Ur, wrapper)@ allocation per element access.
 
 All fields are strict to prevent space leaks.
 -}
 data UnionFind where
-  UnionFind :: !Word -> !(Vector Key) %1 -> !(Vector Word) %1 -> UnionFind
+  UnionFind :: !Word -> !Int -> !(UArray Key) %1 -> !(UArray Word) %1 -> UnionFind
 
 instance Consumable UnionFind where
-  consume (UnionFind _ p r) = consume p `lseq` consume r
+  consume (UnionFind _ _ p r) = consume p `lseq` consume r
 
 instance Dupable UnionFind where
-  dup2 (UnionFind n p r) =
+  dup2 (UnionFind n cap p r) =
     let %1 !(p1, p2) = dup p
         %1 !(r1, r2) = dup r
-     in (UnionFind n p1 r1, UnionFind n p2 r2)
+     in (UnionFind n cap p1 r1, UnionFind n cap p2 r2)
 
 instance LinearOnly UnionFind where
   linearOnly :: LinearOnlyWitness UnionFind

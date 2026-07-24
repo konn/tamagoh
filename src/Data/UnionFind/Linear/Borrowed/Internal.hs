@@ -15,14 +15,12 @@ module Data.UnionFind.Linear.Borrowed.Internal (
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.BO.Unsafe
-import Control.Monad.Borrow.Pure.Utils (coerceLin)
+import Control.Monad.Borrow.Pure.Utils (coerceLin, unsafeLeak)
 import Control.Syntax.DataFlow qualified as DataFlow
 import Data.Ref.Linear (Ref)
 import Data.Ref.Linear qualified as Ref
 import Data.Ref.Linear.Borrow qualified as Ref
 import Data.UnionFind.Linear qualified as Raw
-import Data.UnionFind.Linear.Internal qualified as Raw
-import Data.Vector.Mutable.Linear.Unboxed qualified as Vector
 import Prelude.Linear hiding (find)
 import Text.Show.Borrowed
 import Unsafe.Linear qualified as Unsafe
@@ -42,19 +40,21 @@ instance Dupable UnionFind where
 instance Display UnionFind where
   displayPrec _ ref = Control.do
     let %1 borRef = coerceUF ref
-    Ur (UnsafeAlias (Raw.UnionFind !n !parent !rank)) <- Ref.readShare borRef
-    let Ur ps = Vector.toList parent
-        Ur rs = Vector.toList rank
-    Control.pure $
-      Ur $
-        showString "UnionFind "
-          P.. showString "{ size = "
-          P.. shows n
-          P.. showString ", parents = "
-          P.. shows ps
-          P.. showString ", ranks = "
-          P.. shows rs
-          P.. showString " }"
+    Ur (UnsafeAlias !uf) <- Ref.readShare borRef
+    case Raw.unsafeToLists uf of
+      (Ur (n, ps, rs), uf) ->
+        Control.pure $
+          unsafeLeak uf `lseq`
+            Ur
+              ( showString "UnionFind "
+                  P.. showString "{ size = "
+                  P.. shows n
+                  P.. showString ", parents = "
+                  P.. shows ps
+                  P.. showString ", ranks = "
+                  P.. shows rs
+                  P.. showString " }"
+              )
 
 instance Consumable UnionFind where
   consume (UF ref) = consume $ Ref.free ref

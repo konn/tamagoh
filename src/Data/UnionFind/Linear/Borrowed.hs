@@ -55,18 +55,21 @@ empty = runReader Control.do
 
 {- | Find the representative key of the set containing the given key.
 
-NOTE: This function uses path compression, which mutates the internal state;
-but this SHOULD NOT affect the external behavior of the union-find structure,
-so we provide it in for _any_ 'Borrow's (in particular, for 'Share's)  unrestrictedly.
+Read-only: the raw lookup performs no path compression (the compressing
+variants are 'Raw.findMut'\/'Raw.unsafeFindMut', rejected for borrowed
+lookups in TUNE-PLAN P9.14), so this reads through a shared alias without
+writing the union-find back (P9.20 discipline).
 -}
 {-# INLINE find #-}
 find ::
   forall k α m.
   Key -> Borrow k α UnionFind %m -> BO α (Ur (Maybe Key))
-find key (UnsafeAlias bor) = Control.do
-  let %1 borRef = coerceUF (UnsafeAlias bor :: Mut α _)
-  (!key, UnsafeAlias !a) <- Ref.update (Control.pure . Raw.find key) borRef
-  Control.pure $ unsafeLeak a `lseq` key
+find key bor =
+  share bor & \(Ur bor) -> Control.do
+    let %1 borRef = coerceUF bor
+    Ur (UnsafeAlias !uf) <- Ref.readShare borRef
+    case Raw.find key uf of
+      (!key, !uf) -> Control.pure $ unsafeLeak uf `lseq` key
 
 {-# INLINE member #-}
 member ::
@@ -75,7 +78,7 @@ member ::
 member key bor =
   share bor & \(Ur bor) -> Control.do
     let %1 borRef = coerceUF bor
-    Ur (UnsafeAlias (Raw.UnionFind n _ _)) <- Ref.readShare borRef
+    Ur (UnsafeAlias (Raw.UnionFind n _ _ _)) <- Ref.readShare borRef
     Control.pure $ Ur (Raw.getKey key P.< n)
 
 {-# INLINE unsafeFind #-}
@@ -123,25 +126,26 @@ unsafeUnionTo leader sub uf = Control.do
   let %1 borRef = coerceUF uf
   Bi.second recoerceUF Control.<$> Ref.update (Control.pure . Raw.unsafeUnionTo leader sub) borRef
 
+-- | Read-only equivalence check (no path compression; P9.20 discipline).
 {-# INLINE equivalent #-}
 equivalent ::
   forall k α m.
   Key -> Key -> Borrow k α UnionFind %m -> BO α (Ur (Maybe Bool))
-equivalent k1 k2 (UnsafeAlias uf) = Control.do
-  let %1 borRef = coerceUF (UnsafeAlias uf :: Mut α _)
-  (r, uf) <- Ref.update (Control.pure . Raw.equivalent k1 k2) borRef
-  Control.pure $ uf `lseq` r
+equivalent k1 k2 bor =
+  share bor & \(Ur bor) -> Control.do
+    let %1 borRef = coerceUF bor
+    Ur (UnsafeAlias !uf) <- Ref.readShare borRef
+    case Raw.equivalent k1 k2 uf of
+      (!r, !uf) -> Control.pure $ unsafeLeak uf `lseq` r
 
-{- |
-NOTE: This function uses path compression, which mutates the internal state;
-but this SHOULD NOT affect the external behavior of the union-find structure,
-so we provide it in for _any_ 'Borrow's (in particular, for 'Share's)  unrestrictedly.
--}
+-- | Read-only equivalence check (no path compression; P9.20 discipline).
 {-# INLINE unsafeEquivalent #-}
 unsafeEquivalent ::
   forall k α m.
   Key -> Key -> Borrow k α UnionFind %m -> BO α (Ur Bool)
-unsafeEquivalent k1 k2 (UnsafeAlias uf) = Control.do
-  let %1 borRef = coerceUF (UnsafeAlias uf :: Mut α _)
-  (r, uf) <- Ref.update (Control.pure . Raw.unsafeEquivalent k1 k2) borRef
-  Control.pure $ uf `lseq` r
+unsafeEquivalent k1 k2 bor =
+  share bor & \(Ur bor) -> Control.do
+    let %1 borRef = coerceUF bor
+    Ur (UnsafeAlias !uf) <- Ref.readShare borRef
+    case Raw.unsafeEquivalent k1 k2 uf of
+      (!r, !uf) -> Control.pure $ unsafeLeak uf `lseq` r
