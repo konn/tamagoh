@@ -108,7 +108,6 @@ new :: forall d l. Linearly %1 -> EGraph d l
 new = runReader Control.do
   unionFind <- asks UFB.empty
   classes <- asks $ EC.new
-  nodes <- asks $ HMUr.empty 2048
   hashcons <- asks $ HMUr.empty 2048
   worklist <- asks $ LRef.new []
   analysisWorklist <- asks $ LRef.new []
@@ -299,14 +298,13 @@ addCanonicalNode enode egraph = Control.do
         (Ur !d, egraph) <- sharing egraph $ unsafeMakeAnalyzeNode enode
         void $ EC.unsafeInsertNew eid enode d $ egraph .# #classes
       egraph <- reborrowing_ egraph \egraph -> Control.do
-        let %1 !(!hashcons, !nodes, !worklist) = egraph .@ (#hashcons, #nodes, #worklist)
+        let %1 !(!hashcons, !worklist) = egraph .@ (#hashcons, #worklist)
         -- The hashcons table has not changed since 'lookupForInsert', so resume
         -- that probe at its recorded miss instead of hashing and probing the
         -- structured node a second time.
         hashcons <- HMUr.unsafeInsertPrepared insertPlan eid hashcons
-        nodes <- HMUr.alter (\_ -> Just enode) eid nodes
         worklist <- Ref.modify (Ur (eid, enode) :) worklist
-        Control.pure $ hashcons `lseq` consume nodes `lseq` consume worklist
+        Control.pure $ hashcons `lseq` consume worklist
       egraph <- modifyAnalysis id eid <%= egraph
 
       Control.pure (Ur eid, egraph)

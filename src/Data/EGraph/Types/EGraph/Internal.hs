@@ -55,14 +55,6 @@ data EGraph d l = EGraph
 
   Invariant: only the canonical EClassIds resides in the e-class.
   -}
-  , nodes :: !(HashMapUr EClassId (ENode l))
-  {- ^ A map from eclass-id to the _original_ enode.
-  Associated e-node MUST BE canonical AFTER rebuilding.
-
-  NOTE: this field is not mentioned in the original egg paper,
-  but it is needed to recover the hashcons invariant on the nodes
-  that are being unioned.
-  -}
   , hashcons :: !(HashMapUr (ENode l) EClassId)
   {- ^
   A map from _canonical_ enodes to eclass-ids.
