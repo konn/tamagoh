@@ -17,9 +17,11 @@ module Data.EGraph.EMatch.Relational.Query (
   ConjunctiveQuery (..),
   EClassIdOrVar (..),
   VarId,
+  IntSubst,
   PatternQuery (..),
   compile,
   findVars,
+  userVars,
   substAtom,
   substRelation,
 ) where
@@ -35,6 +37,7 @@ import Data.Generics.Labels ()
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable
 import Data.Hashable.Lifted
+import Data.IntMap.Strict qualified as IM
 import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
@@ -194,6 +197,12 @@ compile = \case
 -- | Ids of the user metavariables, in ascending order.
 userVars :: V.Vector (Maybe v) -> [VarId]
 userVars = V.ifoldr (\i mv acc -> maybe acc (const (i : acc)) mv) []
+
+{- | Interned substitution over dense 'VarId's — the saturation loop's
+native currency. Named 'Data.EGraph.EMatch.Types.Substitution's exist only
+at the public ematch\/ematchDb boundary.
+-}
+type IntSubst = IM.IntMap EClassId
 
 substAtom :: forall l v. (Functor l, Eq v) => v -> EClassId -> Atom l v -> Atom l v
 substAtom = coerce $ substRelation @l @v

@@ -8,6 +8,7 @@ module Data.EGraph.EMatch.Types (
   insertVar,
   singletonVar,
   substPattern,
+  substPatternInt,
 ) where
 
 import Data.Bifunctor qualified as Bi
@@ -18,6 +19,8 @@ import Data.EGraph.Types.Pattern
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable)
+import Data.IntMap.Strict (IntMap)
+import Data.IntMap.Strict qualified as IM
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe (mapMaybe)
 import GHC.Generics (Generic)
@@ -59,6 +62,23 @@ substPattern ::
 substPattern sub = Bi.first DLNE.toNonEmpty . go
   where
     go (Metavar v) = case lookupVar v sub of
+      Just eclassId -> pure $ Metavar eclassId
+      Nothing -> Failure $ DLNE.singleton v
+    go (PNode p) = PNode <$> traverse go p
+
+{- | 'substPattern' over an interned substitution (dense-@Int@ var ids, the
+saturation loop's native currency) and a pre-interned pattern. The
+signature is written over the raw synonyms (@IntMap EClassId@, @Int@) so
+this module needs no import of the query layer.
+-}
+substPatternInt ::
+  (Traversable l) =>
+  IntMap EClassId ->
+  Pattern l Int ->
+  Validation (NonEmpty Int) (Pattern l EClassId)
+substPatternInt sub = Bi.first DLNE.toNonEmpty . go
+  where
+    go (Metavar v) = case IM.lookup v sub of
       Just eclassId -> pure $ Metavar eclassId
       Nothing -> Failure $ DLNE.singleton v
     go (PNode p) = PNode <$> traverse go p

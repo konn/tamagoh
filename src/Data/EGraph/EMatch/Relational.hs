@@ -53,11 +53,6 @@ import Data.Vector qualified as V
 import GHC.Generics (Generic, Generically (..))
 import Prelude.Linear qualified as PL
 
-{- | Internal substitution over interned 'VarId's; translated back to the
-user-facing 'Substitution' only at the 'ematchDb' boundary.
--}
-type IntSubst = IntMap EClassId
-
 {-# INLINEABLE ematch #-}
 ematch ::
   (Hashable v, Traversable l, HasDatabase l) =>
