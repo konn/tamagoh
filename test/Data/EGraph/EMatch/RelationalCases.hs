@@ -72,3 +72,27 @@ mkCase1 n egraph = Control.do
   egraph <- rebuild egraph
   uncurry (flip lseq) Control.<$> sharing egraph do
     ematch (PNode $ F (Metavar "a") $ PNode $ G (Metavar "a"))
+
+{- | B12 pinning: nested two-atom pattern @G (G x)@ — exactly one match per
+congruence-distinct chain; the internal PNode variable never multiplies
+matches on a canonical database.
+-}
+mkNestedPin :: Mut α (EGraph () Lang1) %1 -> BO α (Ur [(EClassId, Substitution String)])
+mkNestedPin egraph = Control.do
+  (Ur _, Ur _aid, egraph) <- addTerm (wrapTerm (G (wrapTerm (G (intT 1))))) egraph
+  egraph <- rebuild egraph
+  uncurry (flip lseq) Control.<$> sharing egraph do
+    ematch (PNode $ G $ PNode $ G (Metavar "x"))
+
+{- | B12 pinning: SelectAll (bare metavar) yields one match per CLASS even
+when a class spans multiple operators (selectAll keeps cross-operator
+multiplicity; the match dedup collapses it).
+-}
+mkSelectAllPin :: Mut α (EGraph () Lang1) %1 -> BO α (Ur [(EClassId, Substitution String)])
+mkSelectAllPin egraph = Control.do
+  (Ur _, Ur iid, egraph) <- addTerm (intT 1) egraph
+  (Ur mgid, egraph) <- addNode egraph (ENode (G iid))
+  (Ur _, egraph) <- merge (fromJust mgid) iid egraph
+  egraph <- rebuild egraph
+  uncurry (flip lseq) Control.<$> sharing egraph do
+    ematch (Metavar "a")

@@ -21,3 +21,15 @@ test_case1 = testCase "simple relational ematch" do
   let n = 5
       Ur subss = withNewEGraph (mkCase1 n)
   length subss @?= n
+
+test_nestedPin :: TestTree
+test_nestedPin = testCase "B12 pin: nested two-atom pattern matches exactly once" do
+  let Ur subss = withNewEGraph mkNestedPin
+  length subss @?= 1
+
+test_selectAllPin :: TestTree
+test_selectAllPin = testCase "B12 pin: SelectAll dedups cross-operator multiplicity" do
+  let Ur subss = withNewEGraph mkSelectAllPin
+  -- classes after merging the I-class into the G-class: {I1,G} and the inner? —
+  -- assert one match per class, no operator-multiplied duplicates
+  length subss @?= length (foldr (\(cid, _) acc -> if cid `elem` acc then acc else cid : acc) [] subss)
