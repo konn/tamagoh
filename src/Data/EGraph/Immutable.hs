@@ -92,7 +92,6 @@ import Data.Functor.Linear qualified as PL
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.IntMap.Strict qualified as IntMap
-import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty)
 import Data.Record.Linear.Borrow.Experimental.PatternMatch ((.#))
 import Data.Unrestricted.Linear (Ur (..), dup, lseq, move, unur)
@@ -258,7 +257,7 @@ differ on exact-cost ties.
 -}
 extractBestWith ::
   forall cost d l.
-  (Language l, P.Ord (ENode l), CostModel cost l) =>
+  (Language l, CostModel cost l) =>
   EClassId ->
   EGraph d l ->
   Maybe (Term l, cost)
@@ -275,7 +274,7 @@ extractBestWith eid = withRaw \egraph ->
               P.<$> P.traverse
                 ( \(cid, nodes) -> do
                     canon <- P.traverse (canonicalizeNode egraph) nodes
-                    P.pure (Extraction.classKey cid, List.sort canon)
+                    P.pure (Extraction.classKey cid, canon)
                 )
                 rows
           P.pure P.$ Extraction.reconstruct (Extraction.findCosts classes) root

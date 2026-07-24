@@ -26,6 +26,7 @@ module Data.EGraph.Extraction (
 
 import Data.EGraph.Saturation (CostModel (..))
 import Data.EGraph.Types (EClassId (..), ENode (..), Term, wrapTerm)
+import Data.Functor.Classes (Ord1)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Data.Semigroup (Min (..))
@@ -50,7 +51,7 @@ monotone in each child cost (egg's documented @CostFunction@ contract).
 -}
 findCosts ::
   forall cost l.
-  (Traversable l, CostModel cost l) =>
+  (Traversable l, Ord1 l, CostModel cost l) =>
   ClassNodes l ->
   IntMap (cost, ENode l)
 findCosts classes = go IntMap.empty
@@ -69,15 +70,19 @@ findCosts classes = go IntMap.empty
           | otherwise -> (changed, acc)
         Nothing -> (True, IntMap.insert k best acc)
 
-    -- First minimal costable node in list order; @<=@ keeps the earlier
-    -- witness on ties (hegg's Set fold with 'min').
+    -- The Ord-least node among the minimal-cost costable ones — identical to
+    -- picking the first minimum of an Ord-sorted list (hegg's Set fold with
+    -- 'min'), but without materializing and sorting the list: node
+    -- comparisons happen only on exact cost ties.
     classBest :: IntMap (cost, ENode l) -> [ENode l] -> Maybe (cost, ENode l)
     classBest acc = foldl' pick Nothing
       where
         pick best node = case nodeCost acc node of
           Nothing -> best
           Just c -> case best of
-            Just (cb, _) | cb <= c -> best
+            Just (cb, nb)
+              | cb < c -> best
+              | cb == c, nb <= node -> best
             _ -> Just (c, node)
 
     nodeCost :: IntMap (cost, ENode l) -> ENode l -> Maybe cost
