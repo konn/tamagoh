@@ -70,9 +70,9 @@ data BackoffScheduler = BackoffScheduler
   deriving anyclass (NFData)
 
 {- | Default scheduler configuration.
-Match limit is 5000, ban length is 2.
-These values are calibrated to allow rules to explore sufficiently
-while still preventing exponential explosion.
+Match limit is 1000 and ban length is 10, matching hegg's
+@defaultBackoffScheduler@ (and egg's defaults); 'deferOverLimitMatches'
+is off, i.e. the measured-better hegg ban-later semantics.
 -}
 defaultScheduler :: BackoffScheduler
 defaultScheduler =

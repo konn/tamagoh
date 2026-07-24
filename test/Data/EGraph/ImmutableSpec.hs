@@ -27,11 +27,18 @@ import Data.EGraph.Types.EGraph qualified as Raw
 import Data.EGraph.Types.Language (deriveLanguage)
 import Data.Foldable (for_)
 import Data.Hashable (Hashable)
+import Data.Maybe (mapMaybe)
 import GHC.Generics hiding ((:*:))
 import Generics.Linear.TH qualified as LG
 import Prelude.Linear (Consumable (..), Dupable, Movable, Ur (..))
 import Prelude.Linear qualified as PL
+import Test.Falsify.Generator qualified as F
+import Test.Falsify.Predicate ((.$))
+import Test.Falsify.Predicate qualified as Pred
+import Test.Falsify.Range qualified as F
 import Test.Tasty
+import Test.Tasty.Falsify (Property, testProperty)
+import Test.Tasty.Falsify qualified as F
 import Test.Tasty.HUnit
 import Text.Show.Borrowed (AsCopyableShow (..), Display)
 import Prelude hiding (lookup)
@@ -338,3 +345,55 @@ test_extractBest =
           for_ ns \n ->
             canonicalize n graph' @?= Just n
     ]
+
+-- | Random-graph property: post-hoc extraction ("Data.EGraph.Extraction",
+-- the egg\/hegg reference pipeline) and the incrementally maintained
+-- ExtractBest analysis must agree on the winning COST for every root
+-- (witness terms may differ on exact-cost ties by construction).
+-- Post-hoc is ground truth: a failure here is an ExtractBest-staleness
+-- finding, not grounds to adjust the post-hoc extractor.
+test_extractEquivalenceProperty :: TestTree
+test_extractEquivalenceProperty =
+  testProperty "post-hoc extraction cost == maintained (random graphs)" do
+    terms <- F.gen $ F.list (F.between (1, 5)) exprG
+    i <- F.gen $ F.inRange (F.between (0, 31))
+    j <- F.gen $ F.inRange (F.between (0, 31))
+    checkExtractEquiv terms (i, j)
+
+exprG :: F.Gen (Term Expr)
+exprG = go (3 :: Int)
+  where
+    leaves = [var "a", var "b", var "c", 0, 1, 2]
+    leafG = do
+      i <- F.inRange (F.between (0, length leaves - 1))
+      pure (leaves !! i)
+    go n
+      | n <= 0 = leafG
+      | otherwise = do
+          k <- F.inRange (F.between (0 :: Int, 3))
+          case k of
+            0 -> (+) <$> go (n - 1) <*> go (n - 1)
+            1 -> (*) <$> go (n - 1) <*> go (n - 1)
+            _ -> leafG
+
+checkExtractEquiv :: [Term Expr] -> (Int, Int) -> Property ()
+checkExtractEquiv terms (i, j) = do
+  let graph0 = fromList @(ExtractBest Expr NodeCount, ConstantFolding) terms
+      roots0 = mapMaybe (`lookupTerm` graph0) terms
+      n = length roots0
+      graph1
+        | n == 0 = graph0
+        | otherwise =
+            let a = roots0 !! (i `mod` n)
+                b = roots0 !! (j `mod` n)
+             in PL.unur PL.$ modify (Control.void PL.. Raw.merge a b) graph0
+  case saturate defaultConfig ringRules graph1 of
+    Left err -> F.testFailed ("saturation failed: " <> show err)
+    Right g ->
+      mapM_
+        ( \r -> do
+            let mc = fmap snd (extractBest r g)
+                pc = fmap snd (extractBestWith @NodeCount r g)
+            F.assert (Pred.eq .$ ("maintained", mc) .$ ("post-hoc", pc))
+        )
+        roots0

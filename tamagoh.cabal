@@ -164,6 +164,8 @@ test-suite tamagoh-test
     Data.HashMap.RobinHood.Mutable.LinearSpec.Cases
     Data.Set.Linear.BorrowedCases
     Data.Set.Linear.BorrowedSpec
+    Data.SlotMap.Linear.BorrowedCases
+    Data.SlotMap.Linear.BorrowedSpec
     Data.UnionFind.Linear.BorrowedSpec
 
   build-depends:
