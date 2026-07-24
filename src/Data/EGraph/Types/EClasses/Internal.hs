@@ -43,18 +43,48 @@ type Raw d l = HashMap EClassId (EClass d l)
 new :: Linearly %1 -> EClasses d l
 new = EClasses . HMB.empty 2048
 
+{- | Hegg's SizedList: cached length plus the newest-first,
+duplicate-preserving parent sequence. Entries are stored in worklist
+orientation @(owner class, parent node)@ so merge and analysis repair can
+enqueue them without any per-element rewrapping. The strict constructor
+(not a lazy pair) is essential: 'Data.Ref.Linear.Borrow.Ref' updates force
+only to WHNF, and 'Parents'' strict count field keeps the length from
+accumulating a thunk chain across merge storms.
+-}
+data Parents l = Parents {-# UNPACK #-} !Int ![Ur (EClassId, ENode l)]
+
 data EClass d l
   = EClass
   { nodes :: !(Ref (Ur (HashSet (ENode l))))
-  , parentHistory :: !(Ref [Ur (ENode l, EClassId)])
-  -- ^ Newest-first, duplicate-preserving parent sequence, matching hegg.
-  , parentCount :: !(Ref Int)
-  -- ^ Cached length of 'parentHistory', matching hegg's SizedList counter.
+  , parents :: !(Ref (Parents l))
+  -- ^ Sized parent history in worklist orientation; see 'Parents'.
   , analysis :: !(Ref d)
   }
   deriving (GHC.Generic)
 
+deriveGeneric ''Parents
+
 deriveGeneric ''EClass
+
+deriving via
+  Generically (Parents l)
+  instance
+    Consumable (Parents l)
+
+deriving via
+  Generically (Parents l)
+  instance
+    Dupable (Parents l)
+
+deriving via
+  Generically (Parents l)
+  instance
+    Movable (Parents l)
+
+deriving via
+  Generically (Parents l)
+  instance
+    (Show1 l) => Display (Parents l)
 
 deriving anyclass instance (Dupable d) => Clone (EClass d l)
 

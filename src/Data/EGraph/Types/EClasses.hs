@@ -110,7 +110,7 @@ lookupParentHistory ::
   forall bk α d l m.
   Borrow bk α (EClasses d l) %m ->
   EClassId ->
-  BO α (Ur [Ur (ENode l, EClassId)])
+  BO α (Ur [Ur (EClassId, ENode l)])
 lookupParentHistory classes eid =
   share classes & \(Ur classes) -> Control.do
     let %1 clss = coerceLin classes :: Share α (Raw d l)
@@ -118,7 +118,7 @@ lookupParentHistory classes eid =
     case mclass of
       Nothing -> Control.pure (Ur [])
       Just eclass -> Control.do
-        Ur (UnsafeAlias history) <- Ref.readShare (eclass .# #parentHistory)
+        Ur (UnsafeAlias (Parents _ history)) <- Ref.readShare (eclass .# #parents)
         Control.pure (Ur history)
 
 {-# INLINEABLE lookupParentHistoryWithCount #-}
@@ -126,7 +126,7 @@ lookupParentHistoryWithCount ::
   forall bk α d l m.
   Borrow bk α (EClasses d l) %m ->
   EClassId ->
-  BO α (Ur (Int, [Ur (ENode l, EClassId)]))
+  BO α (Ur (Int, [Ur (EClassId, ENode l)]))
 lookupParentHistoryWithCount classes eid =
   share classes & \(Ur classes) -> Control.do
     let %1 clss = coerceLin classes :: Share α (Raw d l)
@@ -134,9 +134,7 @@ lookupParentHistoryWithCount classes eid =
     case mclass of
       Nothing -> Control.pure (Ur (0, []))
       Just eclass -> Control.do
-        let %1 !(!parentCount, !parentHistory) = eclass .@ (#parentCount, #parentHistory)
-        Ur (UnsafeAlias !count) <- Ref.readShare parentCount
-        Ur (UnsafeAlias history) <- Ref.readShare parentHistory
+        Ur (UnsafeAlias (Parents !count history)) <- Ref.readShare (eclass .# #parents)
         Control.pure (Ur (count, history))
 
 {-# INLINEABLE lookupAnalysis #-}
@@ -216,16 +214,15 @@ addParentN ::
   BO α (Mut α (EClass d l))
 addParentN multiplicity pid enode eclass = Control.do
   eclass <- reborrowing_ eclass \eclass -> Control.do
-    let %1 !(!parentHistory, !parentCount) = eclass .@ (#parentHistory, #parentCount)
-    parentHistory <- Ref.modify (P.replicate multiplicity (Ur (enode, pid)) <>) parentHistory
-    (Ur (), parentCount) <-
+    (Ur (), parents) <-
       Ref.update
-        ( \count ->
+        ( \(Parents count history) ->
             move count & \(Ur count) ->
-              Control.pure (Ur (), multiplicity P.+ count)
+              Control.pure
+                (Ur (), Parents (multiplicity P.+ count) (P.replicate multiplicity (Ur (pid, enode)) <> history))
         )
-        parentCount
-    Control.pure (consume parentHistory `lseq` consume parentCount)
+        (eclass .# #parents)
+    Control.pure (consume parents)
   Control.pure eclass
 
 {-# INLINEABLE member #-}
@@ -275,10 +272,9 @@ unsafeInsertNew ::
   BO α (Mut α (EClasses d l))
 unsafeInsertNew eid enode analysis clss = Control.do
   nodes <- asksLinearly $ Ref.new (Ur (PHS.singleton enode))
-  parentHistory <- asksLinearly $ Ref.new []
-  parentCount <- asksLinearly $ Ref.new 0
+  parents <- asksLinearly $ Ref.new (Parents 0 [])
   analysis <- asksLinearly $ Ref.new analysis
-  (mop, clss) <- HMB.insert eid EClass {parentHistory, parentCount, nodes, analysis} $ coerceLin clss
+  (mop, clss) <- HMB.insert eid EClass {parents, nodes, analysis} $ coerceLin clss
   clss <- reborrowing_ clss \clss -> Control.do
     chss <-
       mapMaybe (\(Ur child, e) -> consume child `lseq` e)
@@ -326,12 +322,11 @@ unsafeMerge eid1 eid2 clss
   | eid1 == eid2 = Control.pure (Ur (False, False), clss)
   | otherwise = Control.do
       (mr, clss) <- delete clss eid2
-      let %1 !EClass {nodes = !rnodes, parentHistory = !rparentHistory, parentCount = !rparentCount, analysis = !ra} = case mr of
+      let %1 !EClass {nodes = !rnodes, parents = !rparents, analysis = !ra} = case mr of
             Nothing -> error "EGraph.Types.EClasses.unsafeMerge: eid2 not found"
             Just eclass -> eclass
       let %1 !(Ur ranalysis) = move $ Ref.free ra
-      let %1 !(Ur rparentsHistory) = move $ Ref.free rparentHistory
-      let %1 !(Ur rparentsCount) = move $ Ref.free rparentCount
+      let %1 !(Ur (Parents rparentsCount rparentsHistory)) = move $ Ref.free rparents
       reborrowing clss \clss0 -> Control.do
         let clss = coerceLin clss0 :: Mut _ (Raw d l)
         l <- HMB.lookup eid1 clss
@@ -348,17 +343,15 @@ unsafeMerge eid1 eid2 clss
                   (l .# #nodes)
               Control.pure (consume nodes)
             l <- reborrowing_ l \l -> Control.do
-              history <- Ref.modify (rparentsHistory <>) (l .# #parentHistory)
-              Control.pure (consume history)
-            l <- reborrowing_ l \l -> Control.do
-              (Ur (), count) <-
+              (Ur (), parents) <-
                 Ref.update
-                  ( \count ->
+                  ( \(Parents count history) ->
                       move count & \(Ur count) ->
-                        Control.pure (Ur (), rparentsCount P.+ count)
+                        Control.pure
+                          (Ur (), Parents (rparentsCount P.+ count) (rparentsHistory <> history))
                   )
-                  (l .# #parentCount)
-              Control.pure (consume count)
+                  (l .# #parents)
+              Control.pure (consume parents)
 
             (changes, l) <- reborrowing l \l -> Control.do
               (changes, ref) <-

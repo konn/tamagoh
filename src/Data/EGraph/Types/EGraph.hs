@@ -358,15 +358,16 @@ unsafeMerge eid1 eid2 egraph = Control.do
     then Control.do
       Control.pure (Ur (AlreadyMerged eid1), egraph)
     else Control.do
+      -- Histories must be snapshotted here, BEFORE EC.unsafeMerge: after the
+      -- merge the leader's ref holds the concatenation, and a post-merge read
+      -- would enqueue the loser's parents twice.
       (Ur (eid, outdatedId, leaderParents, subParents), egraph) <- sharing egraph \egraph -> Control.do
         Ur (size1, history1) <- EC.lookupParentHistoryWithCount (egraph .# #classes) eid1
         Ur (size2, history2) <- EC.lookupParentHistoryWithCount (egraph .# #classes) eid2
-        let list1 = P.map (\(Ur parent) -> parent) history1
-            list2 = P.map (\(Ur parent) -> parent) history2
         -- hegg chooses the class with more parents, with ties going to
         -- the first argument. Representative choice affects canonical
         -- e-nodes, so union-by-rank is not trajectory-equivalent here.
-        Control.pure $ Ur $ if size1 < size2 then (eid2, eid1, list2, list1) else (eid1, eid2, list1, list2)
+        Control.pure $ Ur $ if size1 < size2 then (eid2, eid1, history2, history1) else (eid1, eid2, history1, history2)
       egraph <- reborrowing_ egraph \egraph -> Control.do
         (Ur actualLeader, uf) <- UFB.unsafeUnionTo (coerce eid) (coerce outdatedId) (egraph .# #unionFind)
         Control.pure $ case actualLeader of
@@ -378,12 +379,13 @@ unsafeMerge eid1 eid2 egraph = Control.do
 
       egraph <- reborrowing_ egraph \egraph -> Control.do
         let %1 !(!wl, !awl) = egraph .@ (#worklist, #analysisWorklist)
-        let toEntries = P.map (\(parentNode, parentId) -> Ur (parentId, parentNode))
-        wl <- Ref.modify (toEntries subParents <>) wl
+        -- Parent histories are already in worklist orientation: the spines
+        -- flow through unchanged (egg's pending.extend(parents)).
+        wl <- Ref.modify (subParents <>) wl
         let (leaderChanged, subChanged) = analChanges
             pending =
-              (if subChanged then toEntries subParents else [])
-                <> (if leaderChanged then toEntries leaderParents else [])
+              (if subChanged then subParents else [])
+                <> (if leaderChanged then leaderParents else [])
         awl <- Ref.modify (pending <>) awl
         Control.pure (consume wl `lseq` consume awl)
 
@@ -529,9 +531,9 @@ repairAnal egraph pClass pNode = Control.do
         void $ EC.setAnalysis pClass d (egraph .# #classes)
       (Ur parents, egraph) <- sharing egraph \egraph -> Control.do
         Ur history <- EC.lookupParentHistory (egraph .# #classes) pClass
-        Control.pure (Ur (P.map (\(Ur parent) -> parent) history))
+        Control.pure (Ur history)
       egraph <- reborrowing_ egraph \egraph -> Control.do
-        awl <- Ref.modify (P.map (\(node, owner) -> Ur (owner, node)) parents <>) (egraph .# #analysisWorklist)
+        awl <- Ref.modify (parents <>) (egraph .# #analysisWorklist)
         Control.pure $ consume awl
       modifyAnalysis id pClass egraph
 
