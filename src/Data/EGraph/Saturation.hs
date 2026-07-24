@@ -209,7 +209,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
       if maybe False (currentSize >) config.nodeLimit
         then Control.pure egraph
         else Control.do
-          (Ur (results, matchCounts), egraph) <- sharing egraph \egraph -> Control.do
+          (Ur (results, matchCounts, schedSearched), egraph) <- sharing egraph \egraph -> Control.do
             Ur db <- buildDatabaseForPatterns needsSelectAll egraph
             -- Match all non-banned rules against one immutable database.
             -- Side conditions are deliberately NOT checked here: hegg checks
@@ -218,30 +218,53 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
             -- iteration.  Freezing condition data in the read phase delays
             -- analysis-dependent rewrites by an iteration and materially
             -- changes the backoff trajectory on expansive rule sets.
-            let raws = flip map indexedRules \(ruleIdx, rule@CompiledRule {..}) ->
-                  let banned = case config.scheduler of
-                        Nothing -> False
-                        Just _ -> isBanned iterNum ruleIdx schedState
-                   in if banned
-                        then (ruleIdx, rule, [], 0)
-                        else
+            let searchOne (accRaws, st) (ruleIdx, rule@CompiledRule {..}) =
+                  case config.scheduler of
+                    Nothing ->
+                      let (ms, stat) = ematchDbWithCount lhs db
+                       in ((ruleIdx, rule, ms, stat) : accRaws, st)
+                    Just sched
+                      | isBanned iterNum ruleIdx st ->
+                          ((ruleIdx, rule, [], 0) : accRaws, st)
+                      | sched.deferOverLimitMatches ->
+                          -- egg's search_rewrite: an over-threshold rule is
+                          -- banned NOW and its matches are dropped for this
+                          -- iteration (deferred to a later re-match). The
+                          -- statistic is egg's: the number of substitutions.
+                          let (ms, _stat) = ematchDbWithCount lhs db
+                           in case banAtSearch sched iterNum ruleIdx (P.length ms) st of
+                                Just st' -> ((ruleIdx, rule, [], 0) : accRaws, st')
+                                Nothing -> ((ruleIdx, rule, ms, 0) : accRaws, st)
+                      | otherwise ->
                           let (ms, rawSubstitutionSize) = ematchDbWithCount lhs db
                            in -- NB: apply ALL matches of a non-banned rule (as
-                              -- hegg and egg do); the scheduler statistic only
+                              -- hegg does); the scheduler statistic only
                               -- feeds the backoff, which bans over-productive
                               -- rules on LATER iterations. The statistic is
                               -- hegg-compatible: the exact sum of the emitted
                               -- internal substitution sizes.
-                              (ruleIdx, rule, ms, rawSubstitutionSize)
-            Control.pure (Ur $ collect raws)
+                              ((ruleIdx, rule, ms, rawSubstitutionSize) : accRaws, st)
+                (rawsRev, stSearched) = F.foldl' searchOne ([], schedState) indexedRules
+                (resultsL, countsL) = collect (P.reverse rawsRev)
+            Control.pure (Ur (resultsL, countsL, stSearched))
           if null results
-            then Control.pure egraph
+            then -- A stall with rules still banned is not saturation under
+            -- egg semantics: shift the bans and keep iterating.
+              case config.scheduler of
+                Just sched
+                  | sched.deferOverLimitMatches
+                  , Just schedState'' <- canStop iterNum schedSearched ->
+                      go (iterNum + 1) schedState'' (subtract 1 <$> remaining) egraph
+                _ -> Control.pure egraph
             else Control.do
               (Ur _, egraph) <- substitute egraph results
-              -- Update scheduler state based on match counts
+              -- Update scheduler state based on match counts. In deferring
+              -- (egg) mode the bans were already applied during the search.
               let !schedState' = case config.scheduler of
                     Nothing -> schedState
-                    Just sched -> updateStats sched iterNum matchCounts schedState
+                    Just sched
+                      | sched.deferOverLimitMatches -> schedSearched
+                      | otherwise -> updateStats sched iterNum matchCounts schedState
               -- hegg rebuilds every nonempty application batch before deciding
               -- whether saturation was reached.  Counts can be unchanged while
               -- congruence or analysis work is still pending.
@@ -250,7 +273,12 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
               (Ur numClasses', egraph) <- numEClasses <$~ egraph
               if currentSize' /= currentSize || numClasses' /= numClasses
                 then go (iterNum + 1) schedState' (subtract 1 <$> remaining) egraph
-                else Control.pure egraph
+                else case config.scheduler of
+                  Just sched
+                    | sched.deferOverLimitMatches
+                    , Just schedState'' <- canStop iterNum schedState' ->
+                        go (iterNum + 1) schedState'' (subtract 1 <$> remaining) egraph
+                  _ -> Control.pure egraph
 
     -- Pair every raw match with its rule. Conditions are checked in the
     -- write phase, just before application, matching hegg's semantics.
