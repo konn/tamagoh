@@ -37,7 +37,7 @@ import Data.Functor qualified as Functor
 import Data.Generics.Labels ()
 import Data.HashMap.Strict qualified as HM
 import Data.HashSet qualified as HS
-import Data.Hashable (Hashable)
+import Data.Hashable (Hashable (..))
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
@@ -68,39 +68,72 @@ ematch pat egraph =
 ematchDb ::
   (Hashable v, HasDatabase l) =>
   PatternQuery l v -> Database l -> [(EClassId, Substitution v)]
-ematchDb pat db = fst $ ematchDbWithCount pat db
+ematchDb pq@PatternQuery {..} db =
+  map (fmap (materializeSubst varNames)) (fst (ematchDbWithCount pq db))
+
+{- | Materialize the user-facing named substitution from an interned one —
+byte-for-byte the former per-match build, now applied to dedup survivors
+only, at the public boundary.
+-}
+materializeSubst :: (Hashable v) => V.Vector (Maybe v) -> IntSubst -> Substitution v
+materializeSubst varNames sub =
+  let !subs' =
+        Substitution $
+          V.ifoldl'
+            ( \acc i mname -> case mname of
+                Just name | Just eid <- IM.lookup i sub -> HM.insert name eid acc
+                _ -> acc
+            )
+            HM.empty
+            varNames
+   in subs'
 
 {-# INLINEABLE ematchDbWithCount #-}
 ematchDbWithCount ::
-  (Hashable v, HasDatabase l) =>
-  PatternQuery l v -> Database l -> ([(EClassId, Substitution v)], Int)
+  (HasDatabase l) =>
+  PatternQuery l v -> Database l -> ([(EClassId, IntSubst)], Int)
 ematchDbWithCount PatternQuery {..} db =
-  ( nubMatches HS.empty $
-      map
-        ( \sub ->
-            let !rootId = IM.findWithDefault (error "ematchDb: root variable unbound") root sub
-                !subs' =
-                  Substitution $
-                    V.ifoldl'
-                      ( \acc i mname -> case mname of
-                          Just name | Just eid <- IM.lookup i sub -> HM.insert name eid acc
-                          _ -> acc
-                      )
-                      HM.empty
-                      varNames
-             in (rootId, subs')
-        )
-        subs
-  , rawSize
-  )
+  (nubMatches HS.empty matches, rawSize)
   where
     subs = query patQuery db
     rawSize = sum (IM.size <$> subs)
+    !vs = userVars varNames
+    matches =
+      map
+        ( \sub ->
+            let !rootId = IM.findWithDefault (error "ematchDb: root variable unbound") root sub
+             in (rootId, sub)
+        )
+        subs
 
     nubMatches !_ [] = []
-    nubMatches !seen (match : rest)
-      | HS.member match seen = nubMatches seen rest
-      | otherwise = match : nubMatches (HS.insert match seen) rest
+    nubMatches !seen (m@(rootId, sub) : rest)
+      | HS.member key seen = nubMatches seen rest
+      | otherwise = m : nubMatches (HS.insert key seen) rest
+      where
+        !key = MatchKey rootId vs sub
+
+{- | Dedup key: (root, interned substitution viewed at the named positions) —
+the exact association content of the former (rootId, named 'Substitution')
+key, with no projected map materialized (node compares happen inside the
+'HashSet' probes only). INVARIANTS: (1) sound only for 'varNames' with at
+most one id per name — all 'compile' output; hand-built or fmap'd
+'PatternQuery's with duplicate names are out of spec; (2) 'Eq' walks the
+LEFT key's position list, so the instances are lawful only among keys of a
+single 'ematchDbWithCount' call — the seen-set is call-local and this type
+is module-private, so keys never cross calls.
+-}
+data MatchKey = MatchKey !EClassId [VarId] !IntSubst
+
+instance Eq MatchKey where
+  MatchKey r1 vs s1 == MatchKey r2 _ s2 =
+    r1 == r2 && all (\v -> IM.lookup v s1 == IM.lookup v s2) vs
+  {-# INLINE (==) #-}
+
+instance Hashable MatchKey where
+  hashWithSalt salt (MatchKey r vs s) =
+    F.foldl' (\ !acc v -> hashWithSalt acc (IM.lookup v s)) (hashWithSalt salt r) vs
+  {-# INLINE hashWithSalt #-}
 
 {-# INLINEABLE query #-}
 query ::

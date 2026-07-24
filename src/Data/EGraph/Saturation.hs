@@ -56,7 +56,7 @@ import Data.Deriving (deriveShow1)
 import Data.EGraph.EMatch.Relational (ematchDbWithCount)
 import Data.EGraph.EMatch.Relational.Database (buildDatabaseForPatterns)
 import Data.EGraph.EMatch.Relational.Query
-import Data.EGraph.EMatch.Types (Substitution (..), substPattern)
+import Data.EGraph.EMatch.Types (substPatternInt)
 import Data.EGraph.Saturation.Scheduler
 import Data.EGraph.Types
 import Data.EGraph.Types.EClasses qualified as EC
@@ -69,6 +69,7 @@ import Data.HashMap.Strict qualified as PHM
 import Data.HashSet qualified as HashSet
 import Data.Hashable
 import Data.Hashable.Lifted (Hashable1)
+import Data.IntMap.Strict qualified as IM
 import Data.List.NonEmpty qualified as NE
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Ref.Linear qualified as Ref
@@ -137,7 +138,12 @@ r @? cond = r & #condition ?~ SideCondition cond
 data CompiledRule l d v = CompiledRule
   { name :: !String
   , lhs :: !(PatternQuery l v)
-  , rhs :: !(Pattern l v)
+  , rhs :: !(Pattern l VarId)
+  -- ^ RHS pre-interned through the LHS variable table.
+  , namedVars :: ![(VarId, v)]
+  {- ^ User metavariables (ascending 'VarId') with their names — the
+  Just-entries of @lhs.varNames@.
+  -}
   , condition :: !(Maybe (SideCondition l d v))
   }
   deriving (Show, GHC.Generic)
@@ -150,14 +156,24 @@ compileRule ::
   (Traversable l, Hashable v) =>
   Rule l d v ->
   Either (SaturationError l v) (CompiledRule l d v)
-compileRule Rule {..} = do
-  let danglings =
-        HashSet.fromList (F.toList rhs)
-          `HashSet.difference` HashSet.fromList (F.toList lhs)
-
-  if HashSet.null danglings
-    then pure CompiledRule {lhs = compile lhs, ..}
-    else Left $ DanglingVariables danglings
+compileRule Rule {..} =
+  let !lhsQ = compile lhs
+      !nameToId = PHM.fromList [(v, i) | (i, Just v) <- zip [0 ..] (F.toList lhsQ.varNames)]
+   in -- One total, miss-collecting traversal: interning the RHS through the
+      -- LHS variable table IS the dangling check (varNames' Just-entries are
+      -- exactly the LHS metavars), and the collected misses reproduce the
+      -- full DanglingVariables payload at once.
+      case traverse (\v -> maybe (Failure [v]) Success (PHM.lookup v nameToId)) rhs of
+        Failure misses -> Left $ DanglingVariables $ HashSet.fromList misses
+        Success rhsInterned ->
+          Right
+            CompiledRule
+              { name
+              , lhs = lhsQ
+              , rhs = rhsInterned
+              , namedVars = [(i, v) | (i, Just v) <- zip [0 ..] (F.toList lhsQ.varNames)]
+              , condition
+              }
 
 data SaturationConfig = SaturationConfig
   { maxIterations :: {-# UNPACK #-} !(Maybe Word)
@@ -290,8 +306,8 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
     -- Pair every raw match with its rule. Conditions are checked in the
     -- write phase, just before application, matching hegg's semantics.
     collect ::
-      [(Int, CompiledRule l d v, [(EClassId, Substitution v)], Int)] ->
-      ([Ur (EClassId, Substitution v, CompiledRule l d v)], [(Int, Int)])
+      [(Int, CompiledRule l d v, [(EClassId, IntSubst)], Int)] ->
+      ([Ur (EClassId, IntSubst, CompiledRule l d v)], [(Int, Int)])
     collect raws =
       let (matchesList, countsList) = unzip $ flip map raws \(ruleIdx, rule, ms, stat) ->
             (map (\(eid, subs) -> Ur (eid, subs, rule)) ms, (ruleIdx, stat))
@@ -299,7 +315,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
 
     substitute ::
       Mut α (EGraph d l) %1 ->
-      [Ur (EClassId, Substitution v, CompiledRule l d v)] %1 ->
+      [Ur (EClassId, IntSubst, CompiledRule l d v)] %1 ->
       BO α (Ur Bool, Mut α (EGraph d l))
     substitute egraph results = reborrowing' egraph \egraph -> Control.do
       !(var, lend) <- borrowLinearlyM (Ref.new False)
@@ -313,18 +329,25 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                 case condition of
                   Nothing -> Control.pure (Ur True)
                   Just (SideCondition cond) -> Control.do
-                    let !neededIds = HashSet.toList $ HashSet.fromList $ PHM.elems subs.substitution
+                    -- The user-facing named map is materialized only here, at
+                    -- apply time, for conditioned rules: namedVars is walked
+                    -- in ascending VarId order (mirroring the former
+                    -- ifoldl' build), neededIds comes from the NAMED
+                    -- projection only, and names whose class has no info are
+                    -- dropped exactly as the former mapMaybeWithKey did.
+                    let !namedBindings =
+                          [(nm, eid) | (vid, nm) <- namedVars, Just eid <- [IM.lookup vid subs]]
+                        !neededIds = HashSet.toList $ HashSet.fromList $ map snd namedBindings
                     Ur infos <- lookupMatchInfos neededIds egraph
                     let !matchInfos =
-                          PHM.mapMaybeWithKey
-                            ( \_ eclassId -> do
-                                (nodes, analysis) <- PHM.lookup eclassId infos
-                                Just MatchInfo {..}
-                            )
-                            subs.substitution
+                          PHM.fromList
+                            [ (nm, MatchInfo {eclassId = eid, nodes = nodes, analysis = analysis})
+                            | (nm, eid) <- namedBindings
+                            , Just (nodes, analysis) <- [PHM.lookup eid infos]
+                            ]
                     Control.pure (Ur (cond matchInfos))
               if shouldApply
-                then case substPattern subs rhs of
+                then case substPatternInt subs rhs of
                   Failure _ -> var `lseq` egraph `lseq` error "Substitution produces invalid expression"
                   Success pat -> Control.do
                     (Ur newEid, egraph) <- addNestedENode pat egraph
