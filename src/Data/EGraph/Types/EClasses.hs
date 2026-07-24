@@ -53,7 +53,6 @@ import Data.EGraph.Types.EGraph.Internal (Analysis (..))
 import Data.EGraph.Types.ENode
 import Data.Foldable (Foldable)
 import Data.Functor.Linear qualified as Data
-import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.HashMap.Strict qualified as PHM
 import Data.HashSet qualified as PHS
 import Data.Hashable.Lifted (Hashable1)
@@ -63,6 +62,7 @@ import Data.Maybe.Linear
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
 import Data.Ref.Linear qualified as Ref
 import Data.Ref.Linear.Borrow qualified as Ref
+import Data.SlotMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.Unrestricted.Linear qualified as Ur
 import Data.Unrestricted.Linear.Lifted (Movable1)
 import Prelude.Linear
@@ -84,7 +84,7 @@ analyses clss =
             move bor & \(Ur bor) -> Control.do
               Ur (UnsafeAlias (Ur nodes)) <- Ref.readShare (bor .# #nodes)
               Ur anal <- Data.fmap copy Control.<$> Ref.readShare (bor .# #analysis)
-              Control.pure (k, (PHS.toList nodes, anal))
+              Control.pure (ixId k, (PHS.toList nodes, anal))
         )
         dic
 
@@ -101,10 +101,19 @@ nodeLists clss =
           ( \(Ur k, bor) ->
               move bor & \(Ur bor) -> Control.do
                 Ur (UnsafeAlias (Ur nodes)) <- Ref.readShare (bor .# #nodes)
-                Control.pure (Ur (k, PHS.toList nodes))
+                Control.pure (Ur (ixId k, PHS.toList nodes))
           )
           dic
     Control.pure $ Ur $ P.map (\(Ur row) -> row) rows
+
+-- | Dense slot index of an id (same Word->Int assumption as UnionFind's keyToInt).
+slotIx :: EClassId -> Int
+{-# INLINE slotIx #-}
+slotIx = P.fromIntegral P.. idToWord
+
+ixId :: Int -> EClassId
+{-# INLINE ixId #-}
+ixId = P.fromIntegral
 
 {-# INLINEABLE lookupParentHistory #-}
 lookupParentHistory ::
@@ -115,7 +124,7 @@ lookupParentHistory ::
 lookupParentHistory classes eid =
   share classes & \(Ur classes) -> Control.do
     let %1 clss = coerceLin classes :: Share α (Raw d l)
-    mclass <- HMB.lookup eid clss
+    mclass <- HMB.lookup (slotIx eid) clss
     case mclass of
       Nothing -> Control.pure (Ur [])
       Just eclass -> Control.do
@@ -131,7 +140,7 @@ lookupParentHistoryWithCount ::
 lookupParentHistoryWithCount classes eid =
   share classes & \(Ur classes) -> Control.do
     let %1 clss = coerceLin classes :: Share α (Raw d l)
-    mclass <- HMB.lookup eid clss
+    mclass <- HMB.lookup (slotIx eid) clss
     case mclass of
       Nothing -> Control.pure (Ur (0, []))
       Just eclass -> Control.do
@@ -147,7 +156,7 @@ lookupAnalysis ::
 lookupAnalysis classes eid =
   share classes & \(Ur classes) -> Control.do
     let %1 clss = coerceLin classes :: Share α (Raw d l)
-    mclass <- HMB.lookup eid clss
+    mclass <- HMB.lookup (slotIx eid) clss
     case mclass of
       Nothing -> Control.pure (Ur Nothing)
       Just eclass -> Control.do
@@ -164,7 +173,7 @@ setAnalysis ::
   BO α (Ur Bool)
 setAnalysis eid d classes = Control.do
   let %1 clss = coerceLin classes :: Mut α (Raw d l)
-  mclass <- HMB.lookup eid clss
+  mclass <- HMB.lookup (slotIx eid) clss
   case mclass of
     Nothing -> Control.pure $ Ur False
     Just eclass -> Control.do
@@ -184,7 +193,7 @@ setNodes ::
   BO α (Ur Bool)
 setNodes eid ns classes = Control.do
   let %1 clss = coerceLin classes :: Mut α (Raw d l)
-  mclass <- HMB.lookup eid clss
+  mclass <- HMB.lookup (slotIx eid) clss
   case mclass of
     Nothing -> Control.pure $ Ur False
     Just eclass -> Control.do
@@ -199,7 +208,7 @@ delete ::
   BO α (Maybe (EClass d l), Mut α (EClasses d l))
 delete clss eid = Control.do
   let %1 !clss' = coerceLin clss :: Mut _ (Raw d l)
-  Bi.second coerceLin Control.<$> HMB.delete eid clss'
+  Bi.second coerceLin Control.<$> HMB.delete (slotIx eid) clss'
 
 {-# INLINEABLE nodes #-}
 nodes ::
@@ -209,7 +218,7 @@ nodes ::
   BO α (Ur (Maybe (NonEmpty (ENode l))))
 nodes clss0 eid = Control.do
   let %1 clss = coerceLin clss0 :: Borrow bk α (Raw d l)
-  mclass <- HMB.lookup eid clss
+  mclass <- HMB.lookup (slotIx eid) clss
   case mclass of
     Nothing -> Control.pure (Ur Nothing)
     Just eclass ->
@@ -255,7 +264,7 @@ member ::
 member eid clss0 =
   share clss0 & \(Ur clss0) -> Control.do
     let clss = coerceLin clss0 :: Share _ (Raw d l)
-    HMB.member eid clss
+    HMB.member (slotIx eid) clss
 
 {- |
 Returns 'True' if the node was newly inserted;
@@ -301,11 +310,11 @@ unsafeInsertNew eid enode childIds analysis clss = Control.do
   nodes <- asksLinearly $ Ref.new (Ur (PHS.singleton enode))
   parents <- asksLinearly $ Ref.new (Parents 0 [])
   analysis <- asksLinearly $ Ref.new analysis
-  (mop, clss) <- HMB.insert eid EClass {parents, nodes, analysis} $ coerceLin clss
+  (mop, clss) <- HMB.insert (slotIx eid) EClass {parents, nodes, analysis} $ coerceLin clss
   clss <- reborrowing_ clss \clss -> Control.do
     chss <-
       mapMaybe (\(Ur child, e) -> consume child `lseq` e)
-        Control.<$> HMB.lookupsAll childIds clss
+        Control.<$> HMB.lookupsAll (P.map slotIx childIds) clss
     void $ Data.forM chss $ addParent eid enode
   mop `lseq` Control.pure (coerceLin clss)
 
@@ -356,7 +365,7 @@ unsafeMerge eid1 eid2 clss
       let %1 !(Ur (Parents rparentsCount rparentsHistory)) = move $ Ref.free rparents
       reborrowing clss \clss0 -> Control.do
         let clss = coerceLin clss0 :: Mut _ (Raw d l)
-        l <- HMB.lookup eid1 clss
+        l <- HMB.lookup (slotIx eid1) clss
         case l of
           Nothing -> error ("EClasses.unsafeMerge: canonical id not found: " <> show eid1) rnodes
           Just l -> Control.do

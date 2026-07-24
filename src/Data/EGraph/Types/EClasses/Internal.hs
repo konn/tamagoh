@@ -25,10 +25,10 @@ import Control.Monad.Borrow.Pure
 import Data.EGraph.Types.EClassId
 import Data.EGraph.Types.ENode
 import Data.Functor.Classes (Show1)
-import Data.HashMap.Mutable.Linear.Borrowed (HashMap)
-import Data.HashMap.Mutable.Linear.Borrowed qualified as HMB
 import Data.HashSet (HashSet)
 import Data.Ref.Linear.Borrow (Ref)
+import Data.SlotMap.Mutable.Linear.Borrowed (SlotMap)
+import Data.SlotMap.Mutable.Linear.Borrowed qualified as SM
 import GHC.Generics qualified as GHC
 import Generics.Linear.TH (deriveGeneric)
 import Prelude.Linear
@@ -38,10 +38,13 @@ import Text.Show.Borrowed
 newtype EClasses d l = EClasses (Raw d l)
   deriving newtype (Consumable)
 
-type Raw d l = HashMap EClassId (EClass d l)
+{- | Dense-id slot table: class data addressed directly by the raw
+(dense, never-reused) 'EClassId' index — no hashing, no probing.
+-}
+type Raw d l = SlotMap (EClass d l)
 
 new :: Linearly %1 -> EClasses d l
-new = EClasses . HMB.empty 2048
+new = EClasses . SM.empty 2048
 
 {- | Hegg's SizedList: cached length plus the newest-first,
 duplicate-preserving parent sequence. Entries are stored in worklist

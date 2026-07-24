@@ -110,6 +110,7 @@ library
     Data.HashMap.RobinHood.Mutable.Linear
     Data.Linear.Witness.Compat
     Data.Set.Mutable.Linear.Borrowed
+    Data.SlotMap.Mutable.Linear.Borrowed
     Data.Trie
     Data.UnionFind.Linear
     Data.UnionFind.Linear.Borrowed
@@ -126,6 +127,7 @@ library
     Data.HashMap.Mutable.Linear.Borrowed.Internal
     Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal
     Data.Set.Mutable.Linear.Borrowed.Internal
+    Data.SlotMap.Mutable.Linear.Borrowed.Internal
     Data.UnionFind.Linear.Borrowed.Internal
     Data.UnionFind.Linear.Internal
 
