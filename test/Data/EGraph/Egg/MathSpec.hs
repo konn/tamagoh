@@ -18,6 +18,7 @@ module Data.EGraph.Egg.MathSpec (module Data.EGraph.Egg.MathSpec) where
 import Control.Exception (throwIO)
 import Data.EGraph.Immutable
 import Data.EGraph.Immutable qualified as EGraph
+import Data.EGraph.Saturation (BackoffScheduler (..), defaultScheduler)
 import Data.Maybe (isNothing)
 import Tamagoh.Bench.Math hiding (Rule, named, (==>), (@?))
 import Tamagoh.Bench.Math qualified as Bench (BenchCost)
@@ -242,10 +243,22 @@ test_Math =
           let x = var "x"
               lhs = diff x ((x ** 3) - (7 * (x ** 2)))
               rhs = x * ((3 * x) - 14)
+          -- egg seeds the goal into the runner for this test
+          -- (.with_expr("(* x (- (* 3 x) 14))")), so the assertion is an
+          -- equivalence proof between two seeded terms, not a derivation of
+          -- the rhs from scratch. The matchLimit/nodeLimit budget is the
+          -- measured minimum corridor for tamagoh's complete matcher
+          -- (hegg's own suite comments this test out entirely).
           !graph <-
-            either throwIO pure $
-              saturate simple {nodeLimit = Just 100_000, maxIterations = Just 60} theRules $
-                fromList [lhs]
+            either throwIO pure
+              $ saturate
+                simple
+                  { nodeLimit = Just 300_000
+                  , maxIterations = Just 60
+                  , scheduler = Just defaultScheduler {matchLimit = 4_000}
+                  }
+                theRules
+              $ fromList [lhs, rhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
@@ -293,17 +306,45 @@ test_Math =
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
           rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
           equivalent graph lid rid @?= Just True
+      , testCase "integ_part1 (deferOverLimitMatches)" do
+          -- Same proof under egg's scheduler semantics: over-limit matches
+          -- are dropped at search time and stalls resume while bans remain.
+          let x = var "x"
+              lhs = integral (x * cos x) x
+              rhs = (x * sin x) + cos x
+          !graph <-
+            either throwIO pure
+              $ saturate
+                simple {scheduler = Just defaultScheduler {deferOverLimitMatches = True}}
+                theRules
+              $ fromList [lhs]
+          lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+          rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm rhs graph
+          equivalent graph lid rid @?= Just True
       , testCase "integ_part2" do
           let x = var "x"
               lhs = integral (cos x * x) x
               expectedRhs = (x * sin x) + cos x
-              -- No scheduler - need all rules to find simplification
-              cfg = simple {nodeLimit = Just 50_000, maxIterations = Just 100, scheduler = Nothing}
+              -- egg's integ_part2 proves goal equivalence under the backoff
+              -- scheduler; unscheduled closure explodes long before the goal.
+              -- The extraction assertion additionally pins the exact expected
+              -- form, and `cos x + x * sin x` has the same BenchCost, so the
+              -- expected term is seeded (cf. diff_power_harder) to make the
+              -- equal-cost tie deterministic.
+              cfg =
+                simple
+                  { nodeLimit = Just 100_000
+                  , maxIterations = Just 60
+                  , scheduler = Just defaultScheduler {matchLimit = 2_000}
+                  }
           !graph <-
             either throwIO pure $
               saturate cfg extractRules $
-                fromList @ExtractAnalysis [lhs]
+                fromList @ExtractAnalysis [lhs, expectedRhs]
           lid <- maybe (assertFailure "lhs not found") pure $ lookupTerm lhs graph
+          rid <- maybe (assertFailure "rhs not found") pure $ lookupTerm expectedRhs graph
+          -- The equivalence must be proven (seeding alone cannot fake this).
+          equivalent graph lid rid @?= Just True
           -- Extract the best term and compare to expected
           (extracted, _cost) <- maybe (assertFailure "extraction failed") pure $ extractBest lid graph
           -- The extracted term should equal the expected RHS

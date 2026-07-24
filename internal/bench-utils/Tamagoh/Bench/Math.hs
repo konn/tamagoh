@@ -2,6 +2,15 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE LambdaCase #-}
+-- NegativeLiterals is semantically significant for 'rules': without it,
+-- @-1 * b@ elaborates via the default 'negate' to @0 - (1 * b)@, so the five
+-- rules mentioning -1 (sub-canon, div-canon, pow-recip, d-cos, i-sin) build
+-- that three-node term instead of egg's literal @Const (-1)@. The desugared
+-- forms lengthen every proof tail and inject junk classes per application,
+-- which is what kept the four hard MathSpec cases (math_simplify_root,
+-- diff_power_harder, integ_part1, integ_part2) unprovable on egg-scale
+-- budgets.
+{-# LANGUAGE NegativeLiterals #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
@@ -550,5 +559,10 @@ symCost = \case
   Var {} -> 1
   Const {} -> 1
 
+-- The tamagoh cost model must agree with the 'symCost' function handed to
+-- hegg's extraction: with a plain size-based cost, the raw
+-- @Integral (cos x * x) x@ (size 6) is "cheaper" than the simplified
+-- @(x * sin x) + cos x@ (size 7) and extraction correctly refuses to
+-- simplify.
 instance Tamagoh.CostModel BenchCost Math where
-  costFunction = (+ 1) . sum
+  costFunction = coerce symCost
