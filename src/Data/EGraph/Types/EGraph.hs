@@ -87,22 +87,37 @@ import Prelude qualified as P
 
 {-# INLINEABLE addTerm #-}
 addTerm ::
+  forall d l α.
   (Analysis l d, Hashable1 l) =>
   Term l ->
   Mut α (EGraph d l) %1 ->
   BO α (Ur (ENode l), Ur EClassId, Mut α (EGraph d l))
-addTerm term egraph = Control.do
-  (Ur (node, eid), egraph) <-
-    flip runStateT egraph $
-      runUrT $
-        cataA
-          ( \nodes ->
-              P.sequenceA nodes P.>>= \children ->
-                let node = ENode (P.fmap P.snd children)
-                 in P.fmap (\eid -> (node, eid)) $ UrT $ StateT $ addCanonicalNode node
-          )
-          term
-  Control.pure (Ur node, Ur eid, egraph)
+addTerm term0 egraph = Control.do
+  let !shape0 = unwrapTerm term0
+  (Ur eids0, egraph) <- goChildren (F.toList shape0) [] egraph
+  let !node0 = ENode (refill shape0 eids0)
+  (Ur eid0, egraph) <- addCanonicalNode node0 egraph
+  Control.pure (Ur node0, Ur eid0, egraph)
+  where
+    -- Direct BO-level recursion threading the e-graph explicitly instead of
+    -- an UrT-over-StateT tower (cf. addNestedENode): no per-node transformer
+    -- plumbing around the addCanonicalNode calls. Same post-order,
+    -- left-to-right insertion sequence as the previous cataA fold.
+    go :: Term l -> Mut α (EGraph d l) %1 -> BO α (Ur EClassId, Mut α (EGraph d l))
+    go term egraph = Control.do
+      let !shape = unwrapTerm term
+      (Ur eids, egraph) <- goChildren (F.toList shape) [] egraph
+      addCanonicalNode (ENode (refill shape eids)) egraph
+
+    goChildren ::
+      [Term l] ->
+      [EClassId] ->
+      Mut α (EGraph d l) %1 ->
+      BO α (Ur [EClassId], Mut α (EGraph d l))
+    goChildren [] acc egraph = Control.pure (Ur (P.reverse acc), egraph)
+    goChildren (t : ts) acc egraph = Control.do
+      (Ur eid, egraph) <- go t egraph
+      goChildren ts (eid : acc) egraph
 
 new :: forall d l. Linearly %1 -> EGraph d l
 new = runReader Control.do
