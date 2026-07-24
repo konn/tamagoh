@@ -6,6 +6,7 @@
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -21,15 +22,22 @@ import Control.Functor.Linear qualified as Control
 import Control.Lens (view)
 import Control.Monad.Borrow.Pure (Copyable, (<$~))
 import Control.Monad.Borrow.Pure.Clone
+import Data.EGraph.EMatch.Relational qualified as Rel
+import Data.EGraph.EMatch.Relational.Database (Database)
+import Data.EGraph.EMatch.Relational.Query qualified as Q
+import Data.EGraph.EMatch.Types (Substitution (..))
 import Data.EGraph.Immutable
 import Data.EGraph.Saturation qualified as Sat
 import Data.EGraph.Types.EGraph qualified as MEG
 import Data.EGraph.Types.EGraph qualified as Raw
 import Data.EGraph.Types.Language (deriveLanguage)
 import Data.Foldable (for_)
+import Data.Foldable qualified as Fold
 import Data.HashMap.Strict qualified as HMS
 import Data.HashSet qualified as HSet
 import Data.Hashable (Hashable)
+import Data.IntMap.Strict qualified as IM
+import Data.List (foldl')
 import Data.Maybe (mapMaybe)
 import GHC.Generics hiding ((:*:))
 import Generics.Linear.TH qualified as LG
@@ -441,3 +449,78 @@ test_sideConditionPin = testCase "B12 pin: side-condition map content and gating
          Either (SaturationError Expr String) (EGraph () Expr, [EClassId]) of
     Left err -> assertFailure (show err)
     Right (g, _) -> lookupTerm (var "a" * var "b") g @?= Nothing
+
+{- | Verbatim pre-B12 reference: named-key ematch pipeline — per-match named
+'Substitution' build (ascending-index insertion, vector-free fold) and dedup
+hashing the (rootId, named) pair. Ground truth for the differential property.
+-}
+oldEmatchRef ::
+  Q.PatternQuery Expr String ->
+  Database Expr ->
+  ([(EClassId, Substitution String)], Int)
+oldEmatchRef Q.PatternQuery {..} db =
+  ( nubRef HSet.empty $
+      map
+        ( \sub ->
+            let !rootId = IM.findWithDefault (error "oldEmatchRef: root unbound") root sub
+                !subs' =
+                  Substitution $
+                    foldl'
+                      ( \acc (i, mname) -> case mname of
+                          Just name | Just eid <- IM.lookup i sub -> HMS.insert name eid acc
+                          _ -> acc
+                      )
+                      HMS.empty
+                      (zip [0 ..] (Fold.toList varNames))
+             in (rootId, subs')
+        )
+        subs
+  , sum (IM.size <$> subs)
+  )
+  where
+    subs = Rel.query patQuery db
+    nubRef !_ [] = []
+    nubRef !seen (m : rest)
+      | HSet.member m seen = nubRef seen rest
+      | otherwise = m : nubRef (HSet.insert m seen) rest
+
+{- | B12 differential: the interned pipeline is observationally identical to
+the pre-B12 named-key implementation — match list (order included), named
+materialization, and the raw scheduler statistic — on random graphs with
+merges and a rebuilt (canonical) database.
+-}
+test_ematchDifferential :: TestTree
+test_ematchDifferential = testProperty "B12 differential: interned ematch == named reference" do
+  terms <- F.gen $ F.list (F.between (1, 4)) exprG
+  i <- F.gen $ F.inRange (F.between (0, 15))
+  j <- F.gen $ F.inRange (F.between (0, 15))
+  patIx <- F.gen $ F.inRange (F.between (0 :: Int, 3))
+  let pat = case patIx of
+        0 -> Metavar "x" + 0
+        1 -> Metavar "x" + Metavar "x"
+        2 -> Metavar "x"
+        _ -> Metavar "x" + Metavar "y"
+      graph0 = fromList @() terms
+      roots0 = mapMaybe (`lookupTerm` graph0) terms
+      n = length roots0
+      graph1
+        | n == 0 = graph0
+        | otherwise =
+            let a = roots0 !! (i `mod` n)
+                b = roots0 !! (j `mod` n)
+             in PL.unur PL.$
+                  modify
+                    ( \eg -> Control.do
+                        (Ur _, eg) <- Raw.merge a b eg
+                        eg <- Raw.rebuild eg
+                        Control.pure (consume eg)
+                    )
+                    graph0
+      db = buildDatabase graph1
+      pq = Rel.compile pat :: Q.PatternQuery Expr String
+      (refMatches, refRaw) = oldEmatchRef pq db
+      (newInterned, newRaw) = Rel.ematchDbWithCount pq db
+      newNamed = Rel.ematchDb pq db
+  F.assert (Pred.eq .$ ("reference matches", refMatches) .$ ("interned pipeline", newNamed))
+  F.assert (Pred.eq .$ ("reference rawSize", refRaw) .$ ("interned rawSize", newRaw))
+  F.assert (Pred.eq .$ ("survivor count", length refMatches) .$ ("interned survivors", length newInterned))
