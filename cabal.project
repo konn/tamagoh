@@ -18,5 +18,9 @@ allow-newer:
   optparse-applicative,
   text,
 
+-- falsify >=0.4 moved Test.Tasty.Falsify into the separate tasty-falsify
+-- package; the test suite imports it from falsify.
+constraints: falsify <0.4
+
 package hashable
   flags: +arch-native
