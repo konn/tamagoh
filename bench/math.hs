@@ -96,7 +96,10 @@ annotateControlled (name, tamagoh, hegg) = do
     then pure (name <> "-nodes-" <> show (fst tamagohStats) <> "-classes-" <> show (snd tamagohStats), tamagoh, hegg)
     else error $ "controlled benchmark graph-size mismatch: " <> show (name, tamagohStats, heggGraphStats)
 
-type TamagohAnalysis = (Tamagoh.ExtractBest Math BenchCost, ConstantFold)
+-- Mirror hegg/egg exactly: saturate with ConstantFold only and extract
+-- post-hoc ('extractBestWith'), instead of maintaining ExtractBest as a
+-- per-merge analysis during saturation.
+type TamagohAnalysis = ConstantFold
 
 extractHegg ::
   [Hegg.Rewrite ConstantFold Math] ->
@@ -135,7 +138,7 @@ extractTamagoh rs node =
   Bi.bimap
     (const ())
     ( \(gr, eids) -> case eids of
-        eid : _ -> fst $ fromJust $ Tamagoh.extractBest eid gr
+        eid : _ -> fst $ fromJust $ Tamagoh.extractBestWith @BenchCost eid gr
         [] -> error "saturateFromList returned no id for one input term"
     )
     $ Tamagoh.saturateFromList Tamagoh.defaultConfig rs [node]
@@ -148,7 +151,7 @@ extractTamagohWithStats rs node =
   case Tamagoh.saturateFromList Tamagoh.defaultConfig rs [node] of
     Left _ -> (Left (), (0, 0))
     Right (gr, eid : _) ->
-      ( Right $ fst $ fromJust $ Tamagoh.extractBest eid gr
+      ( Right $ fst $ fromJust $ Tamagoh.extractBestWith @BenchCost eid gr
       , (Tamagoh.size gr, Tamagoh.numEClasses gr)
       )
     Right (_, []) -> error "saturateFromList returned no id for one input term"

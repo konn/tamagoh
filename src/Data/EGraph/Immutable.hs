@@ -1,6 +1,8 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE QualifiedDo #-}
 {-# LANGUAGE RankNTypes #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
@@ -54,6 +56,7 @@ module Data.EGraph.Immutable (
   extractBest,
   extractBest_,
   extractBestOf,
+  extractBestWith,
   ExtractBest (..),
 
   -- * Re-exports
@@ -68,15 +71,17 @@ module Data.EGraph.Immutable (
 import Control.Functor.Linear (StateT (..), evalStateT)
 import Control.Functor.Linear qualified as Control
 import Control.Lens (Lens')
-import Control.Monad.Borrow.Pure (BO, Linearly, Mut, Share, linearly, modifyLinearOnlyBO, modifyLinearOnlyBO_, sharing)
+import Control.Monad.Borrow.Pure (BO, Linearly, Mut, Share, linearly, modifyLinearOnlyBO, modifyLinearOnlyBO_, share, sharing)
 import Control.Monad.Borrow.Pure.Utils (unsafeLeak)
 import Data.EGraph.EMatch.Relational qualified as Rel
 import Data.EGraph.EMatch.Relational.Database (Database, HasDatabase)
 import Data.EGraph.EMatch.Relational.Database qualified as RawDb
 import Data.EGraph.EMatch.Types (Substitution)
+import Data.EGraph.Extraction qualified as Extraction
 import Data.EGraph.Saturation hiding (extractBest, extractBestOf, extractBest_, saturate)
 import Data.EGraph.Saturation qualified as Raw
 import Data.EGraph.Types (EClassId (..), ENode (..), unwrapTerm, wrapTerm)
+import Data.EGraph.Types.EClasses qualified as EC
 import Data.EGraph.Types.EGraph (Analysis, Term)
 import Data.EGraph.Types.EGraph qualified as Raw
 import Data.EGraph.Types.Language (Language)
@@ -86,7 +91,10 @@ import Data.Functor.Classes (Show1)
 import Data.Functor.Linear qualified as PL
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
+import Data.IntMap.Strict qualified as IntMap
+import Data.List qualified as List
 import Data.List.NonEmpty (NonEmpty)
+import Data.Record.Linear.Borrow.Experimental.PatternMatch ((.#))
 import Data.Unrestricted.Linear (Ur (..), dup, lseq, move, unur)
 import Data.Unrestricted.Linear.Internal.UrT (UrT (..), runUrT)
 import Data.Unrestricted.Linear.Lifted (Copyable1, Movable1)
@@ -236,6 +244,51 @@ extractBestOf ::
   EGraph d l ->
   Maybe (Term l, cost)
 extractBestOf lens eid = withRaw (Raw.extractBestOf lens eid)
+
+{- | Egg-faithful post-hoc extraction: saturate with any analysis @d@
+(no 'ExtractBest' required), then compute the best term once over the
+frozen graph by fixpoint relaxation ("Data.EGraph.Extraction"). This is
+the pipeline of egg's @Extractor@ and hegg's @equalitySaturation@:
+no extraction bookkeeping runs during saturation.
+
+Ties are broken deterministically (ascending class id, 'Ord' order within
+a class); the winning /cost/ agrees with the incrementally maintained
+'extractBest' for monotone cost models, though the witness term may
+differ on exact-cost ties.
+-}
+extractBestWith ::
+  forall cost d l.
+  (Language l, P.Ord (ENode l), CostModel cost l) =>
+  EClassId ->
+  EGraph d l ->
+  Maybe (Term l, cost)
+extractBestWith eid = withRaw \egraph ->
+  share egraph PL.& \(Ur egraph) -> Control.do
+    Ur mroot <- Raw.find egraph eid
+    case mroot of
+      Nothing -> Control.pure (Ur Nothing)
+      Just root -> Control.do
+        Ur rows <- EC.nodeLists (egraph .# #classes)
+        runUrT do
+          classes <-
+            IntMap.fromList
+              P.<$> P.traverse
+                ( \(cid, nodes) -> do
+                    canon <- P.traverse (canonicalizeNode egraph) nodes
+                    P.pure (Extraction.classKey cid, List.sort canon)
+                )
+                rows
+          P.pure P.$ Extraction.reconstruct (Extraction.findCosts classes) root
+  where
+    canonicalizeNode ::
+      Share α (Raw.EGraph d l) ->
+      ENode l ->
+      UrT (BO α) (ENode l)
+    canonicalizeNode egraph (ENode node) =
+      ENode
+        P.<$> P.traverse
+          (\c -> P.maybe c P.id P.<$> UrT (Raw.find egraph c))
+          node
 
 {-# INLINEABLE saturate #-}
 saturate ::

@@ -451,6 +451,16 @@ deriving via
   instance
     (Show cost, Copyable cost, Show1 l, Copyable1 l) => Display (ExtractBest l cost)
 
+{- | A cost model for extraction.
+
+Law (monotonicity, egg's documented @CostFunction@ contract):
+'costFunction' must be monotone in each child slot — replacing a child's
+cost with a strictly larger one must not decrease the result. Extraction
+fixpoints ('ExtractBest' and "Data.EGraph.Extraction") assume this: it
+guarantees termination of cost relaxation and term reconstruction on
+cyclic e-graphs and makes the incremental and post-hoc extractors agree
+on the winning cost.
+-}
 class
   ( Ord cost
   , Copyable cost

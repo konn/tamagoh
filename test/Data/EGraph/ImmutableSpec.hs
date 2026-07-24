@@ -272,4 +272,42 @@ test_extractBest =
             extractBest eid graph'
         count @?= 1
         bestTerm @?= 7
+    , testCase "post-hoc extractBestWith agrees with maintained extractBest on cost" do
+        -- Post-hoc extraction (reference semantics: egg's Extractor, hegg's
+        -- findCosts) is ground truth; only the winning COST is compared in
+        -- general, since tie-broken witness terms may differ by construction.
+        let term = var "a" + 2 :: Term Expr
+            five = 5 :: Term Expr
+            graph = fromList @(ExtractBest Expr NodeCount, ConstantFolding) [term, five]
+
+        eid <- maybe (assertFailure "term not found in initial graph") pure $ lookupTerm term graph
+        aId <- maybe (assertFailure "term not found in initial graph") pure $ lookupTerm (var "a") graph
+        fiveId <- maybe (assertFailure "term not found in initial graph") pure $ lookupTerm five graph
+
+        (mTerm0, mCost0) <-
+          maybe (assertFailure "maintained extractor found nothing") pure $
+            extractBest eid graph
+        (pTerm0, pCost0) <-
+          maybe (assertFailure "post-hoc extractor found nothing") pure $
+            extractBestWith @NodeCount eid graph
+        pCost0 @?= mCost0
+        -- tie-free class: the witness must agree, too
+        pTerm0 @?= mTerm0
+
+        !graph' <-
+          either throwIO pure $
+            saturate defaultConfig ringRules $
+              PL.unur PL.$
+                modify
+                  (Control.void PL.. Raw.merge aId fiveId)
+                  graph
+
+        (_, mCost1) <-
+          maybe (assertFailure "maintained extractor found nothing after merge") pure $
+            extractBest eid graph'
+        (pTerm1, pCost1) <-
+          maybe (assertFailure "post-hoc extractor found nothing after merge") pure $
+            extractBestWith @NodeCount eid graph'
+        pCost1 @?= mCost1
+        pTerm1 @?= 7
     ]
