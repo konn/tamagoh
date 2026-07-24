@@ -111,6 +111,7 @@ new = runReader Control.do
   hashcons <- asks $ HMUr.empty 2048
   worklist <- asks $ LRef.new []
   analysisWorklist <- asks $ LRef.new []
+  nodeSetsCanonical <- asks $ LRef.new True
   Control.pure EGraph {..}
 
 {-# INLINEABLE find #-}
@@ -305,7 +306,16 @@ addCanonicalNode enode egraph = Control.do
           share egraph & \(Ur egraph) -> Control.do
             Ur ids <- move Control.<$> Data.mapM (\c -> move c & \(Ur c) -> unsafeFind egraph c) (children enode)
             Control.pure $ Ur $ P.map (\(Ur c) -> c) ids
-        void $ EC.unsafeInsertNew eid enode childIds d $ egraph .# #classes
+        -- The class node SET stores the canonical form (egg's classes hold
+        -- canonicalized nodes; the hashcons key deliberately keeps the
+        -- as-given form). They differ only when a modifyAnalysis merge made
+        -- a child id stale mid-batch.
+        let !rawChildren = children enode
+            !setNode =
+              if childIds P.== rawChildren
+                then enode
+                else ENode (refill (unwrap enode) childIds)
+        void $ EC.unsafeInsertNew eid setNode childIds d $ egraph .# #classes
       egraph <- reborrowing_ egraph \egraph -> Control.do
         let %1 !(!hashcons, !worklist) = egraph .@ (#hashcons, #worklist)
         -- The hashcons table has not changed since 'lookupForInsert', so resume
@@ -387,7 +397,7 @@ unsafeMerge eid1 eid2 egraph = Control.do
         Control.pure $ clss `lseq` changes
 
       egraph <- reborrowing_ egraph \egraph -> Control.do
-        let %1 !(!wl, !awl) = egraph .@ (#worklist, #analysisWorklist)
+        let %1 !(!wl, !awl, !setsCanon) = egraph .@ (#worklist, #analysisWorklist, #nodeSetsCanonical)
         -- Parent histories are already in worklist orientation: the spines
         -- flow through unchanged (egg's pending.extend(parents)).
         wl <- Ref.modify (subParents <>) wl
@@ -396,7 +406,8 @@ unsafeMerge eid1 eid2 egraph = Control.do
               (if subChanged then subParents else [])
                 <> (if leaderChanged then leaderParents else [])
         awl <- Ref.modify (pending <>) awl
-        Control.pure (consume wl `lseq` consume awl)
+        setsCanon <- Ref.modify (`lseq` False) setsCanon
+        Control.pure (consume wl `lseq` consume awl `lseq` consume setsCanon)
 
       egraph <- reborrowing_ egraph (modifyAnalysis id eid)
 
@@ -419,10 +430,10 @@ rebuild ::
   (Hashable1 l, Movable1 l, Analysis l d) =>
   Mut α (EGraph d l) %1 ->
   BO α (Mut α (EGraph d l))
-rebuild = loop
+rebuild = loop HS.empty
   where
-    loop :: Mut α (EGraph d l) %1 -> BO α (Mut α (EGraph d l))
-    loop egraph = Control.do
+    loop :: HS.HashSet EClassId -> Mut α (EGraph d l) %1 -> BO α (Mut α (EGraph d l))
+    loop !touched egraph = Control.do
       (Ur (rawTodos, rawAnalysisTodos), egraph) <- reborrowing egraph \egraph -> Control.do
         let %1 !(!worklist, !analysisWorklist) = egraph .@ (#worklist, #analysisWorklist)
         (Ur todos, worklist) <- Ref.update (\todos -> Control.pure (move todos, [])) worklist
@@ -433,7 +444,30 @@ rebuild = loop
             consume analysisWorklist `lseq`
               Ur (todos, analysisTodos)
       if P.null rawTodos && P.null rawAnalysisTodos
-        then Control.pure egraph
+        then
+          if HS.null touched
+            then Control.pure egraph
+            else Control.do
+              -- egg's rebuild_classes: canonicalize + deduplicate the node set
+              -- of every class touched by this rebuild, then mark all node
+              -- sets canonical so database builds can trust them without
+              -- re-canonicalizing every row. Touched ids are re-found at the
+              -- fixpoint: a batch-time canonical owner may have been merged
+              -- away (and deleted from the class table) by a later batch.
+              (Ur owners, egraph) <- sharing egraph \egraph ->
+                share egraph & \(Ur egraph) -> Control.do
+                  Ur ids <-
+                    move
+                      Control.<$> Data.mapM
+                        (\c -> move c & \(Ur c) -> unsafeFind egraph c)
+                        (HS.toList touched)
+                  Control.pure $ Ur $ HS.toList $ HS.fromList $ P.map (\(Ur c) -> c) ids
+              egraph <- forReborrowing_ egraph owners \egraph owner ->
+                move owner & \(Ur owner) -> trimClass egraph owner
+              egraph <- reborrowing_ egraph \egraph -> Control.do
+                flag <- Ref.modify (`lseq` True) (egraph .# #nodeSetsCanonical)
+                Control.pure $ consume flag
+              Control.pure egraph
         else Control.do
           (Ur todos, egraph) <- sharing egraph \egraph -> runUrT do
             canonical <- P.mapM (canonicalTodo egraph) rawTodos
@@ -451,7 +485,30 @@ rebuild = loop
 
           egraph <- forReborrowing_ egraph analysisTodos \egraph todo ->
             move todo & \(Ur (pClass, pNode)) -> repairAnal egraph pClass pNode
-          loop egraph
+          loop (P.foldl' (\s (c, _) -> HS.insert c s) touched todos) egraph
+
+    -- Rewrite one class's node set with canonicalized, deduplicated nodes
+    -- (egg's rebuild_classes body). A missing class (merged away between
+    -- re-find and trim cannot happen — ids are re-found at the fixpoint with
+    -- no merges pending — but tolerate it defensively).
+    trimClass :: forall β. Mut β (EGraph d l) %1 -> EClassId -> BO β ()
+    trimClass egraph owner = Control.do
+      (Ur mnodes, egraph) <- sharing egraph \egraph ->
+        EC.nodes (egraph .# #classes) owner
+      case mnodes of
+        Nothing -> Control.pure $ consume egraph
+        Just ns -> Control.do
+          (Ur canonSet, egraph) <- sharing egraph \egraph ->
+            share egraph & \(Ur egraph) -> Control.do
+              Ur ns' <-
+                move
+                  Control.<$> Data.mapM
+                    (\nd -> move nd & \(Ur nd) -> unsafeCanonicalize nd egraph)
+                    (F.toList ns)
+              Control.pure $ Ur $ HS.fromList $ P.map (\(Ur nd) -> nd) ns'
+          egraph <- reborrowing_ egraph \egraph ->
+            void $ EC.setNodes owner canonSet (egraph .# #classes)
+          Control.pure $ consume egraph
 
     canonicalTodo egraph (Ur (pClass, pNode)) = UrT $ Control.do
       Ur pClass <- unsafeFind egraph pClass

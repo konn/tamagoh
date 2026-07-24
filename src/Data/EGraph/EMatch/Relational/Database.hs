@@ -83,7 +83,7 @@ buildDatabase ::
   (HasDatabase l, Traversable l) =>
   Borrow k α (EGraph d l) %m ->
   BO α (Ur (Database l))
-buildDatabase = buildDatabaseWithIndexes True True
+buildDatabase = buildDatabaseWithIndexes True True False
 
 {- | Build the indexes required by queries produced from e-matching patterns.
 
@@ -96,9 +96,11 @@ buildDatabaseForPatterns ::
   forall l d k α m.
   (HasDatabase l, Traversable l) =>
   Bool ->
+  Bool ->
   Borrow k α (EGraph d l) %m ->
   BO α (Ur (Database l))
-buildDatabaseForPatterns includeSelectAll = buildDatabaseWithIndexes False includeSelectAll
+buildDatabaseForPatterns includeSelectAll assumeCanonical =
+  buildDatabaseWithIndexes False includeSelectAll assumeCanonical
 
 {-# INLINEABLE buildDatabaseWithIndexes #-}
 buildDatabaseWithIndexes ::
@@ -106,9 +108,15 @@ buildDatabaseWithIndexes ::
   (HasDatabase l, Traversable l) =>
   Bool ->
   Bool ->
+  {- | May class node sets be trusted as canonical (the graph's
+  @nodeSetsCanonical@ flag, set by rebuild's canonical trim)? Only the
+  saturation loop passes 'True', and only for builds that follow a
+  rebuild; every public entry point re-canonicalizes each row.
+  -}
+  Bool ->
   Borrow k α (EGraph d l) %m ->
   BO α (Ur (Database l))
-buildDatabaseWithIndexes includeUniverse includeSelectAll egraph =
+buildDatabaseWithIndexes includeUniverse includeSelectAll assumeCanonical egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
     Ur classes <- EC.nodeLists (egraph .# #classes)
     let goClasses :: [(EClassId, [ENode l])] -> [Relation l EClassId] -> BO α (Ur (Database l))
@@ -118,9 +126,13 @@ buildDatabaseWithIndexes includeUniverse includeSelectAll egraph =
 
         goNodes :: EClassId -> [ENode l] -> [(EClassId, [ENode l])] -> [Relation l EClassId] -> BO α (Ur (Database l))
         goNodes _ [] rest acc = goClasses rest acc
-        goNodes eid (enode : nodes) rest acc = Control.do
-          Ur (ENode args) <- unsafeCanonicalize enode egraph
-          goNodes eid nodes rest (MkRel {id = eid, args} : acc)
+        goNodes eid (enode : nodes) rest acc
+          | assumeCanonical =
+              case enode of
+                ENode args -> goNodes eid nodes rest (MkRel {id = eid, args} : acc)
+          | otherwise = Control.do
+              Ur (ENode args) <- unsafeCanonicalize enode egraph
+              goNodes eid nodes rest (MkRel {id = eid, args} : acc)
     goClasses classes []
 
 {- | An operator is a pattern with all metavariables replaced by unit.

@@ -62,6 +62,12 @@ data EGraph d l = EGraph
   -}
   , worklist :: !(Ref [Ur (EClassId, ENode l)])
   -- ^ Ordered exact @(owner, parent node)@ entries needing congruence repair.
+  , nodeSetsCanonical :: !(Ref Bool)
+  {- ^ 'True' iff every class's node set contains only canonical nodes —
+  set 'False' by any union, restored by 'rebuild''s canonical trim of the
+  touched classes (egg's @rebuild_classes@). While 'True', database builds
+  may skip per-row re-canonicalization.
+  -}
   , analysisWorklist :: !(Ref [Ur (EClassId, ENode l)])
   {- ^ Ordered exact parent entries whose analyses must be recomputed
   (cf. hegg's @analysisWorklist@).

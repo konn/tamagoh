@@ -47,6 +47,7 @@ import Control.Exception (Exception)
 import Control.Functor.Linear qualified as Control
 import Control.Lens (Lens', (?~), (^.), _1)
 import Control.Monad.Borrow.Pure
+import Control.Monad.Borrow.Pure.BO.Unsafe (Alias (..))
 import Control.Monad.Borrow.Pure.Clone
 import Control.Monad.Borrow.Pure.Experimental.Loop
 import Control.Monad.Borrow.Pure.Orphans ()
@@ -210,7 +211,13 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
         then Control.pure egraph
         else Control.do
           (Ur (results, matchCounts, schedSearched), egraph) <- sharing egraph \egraph -> Control.do
-            Ur db <- buildDatabaseForPatterns needsSelectAll egraph
+            -- Class node sets are canonical right after a rebuild (the
+            -- nodeSetsCanonical flag); the DB build may then skip per-row
+            -- re-canonicalization. Un-rebuilt graphs (manual merges,
+            -- add-phase modifyAnalysis merges before iteration 1) keep the
+            -- canonicalizing path.
+            Ur (UnsafeAlias !setsCanon) <- Ref.readShare (egraph .# #nodeSetsCanonical)
+            Ur db <- buildDatabaseForPatterns needsSelectAll setsCanon egraph
             -- Match all non-banned rules against one immutable database.
             -- Side conditions are deliberately NOT checked here: hegg checks
             -- each condition immediately before applying its match, against

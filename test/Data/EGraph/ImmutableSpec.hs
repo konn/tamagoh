@@ -25,6 +25,7 @@ import Data.EGraph.Immutable
 import Data.EGraph.Types.EGraph qualified as MEG
 import Data.EGraph.Types.EGraph qualified as Raw
 import Data.EGraph.Types.Language (deriveLanguage)
+import Data.Foldable (for_)
 import Data.Hashable (Hashable)
 import GHC.Generics hiding ((:*:))
 import Generics.Linear.TH qualified as LG
@@ -310,4 +311,30 @@ test_extractBest =
             extractBestWith @NodeCount eid graph'
         pCost1 @?= mCost1
         pTerm1 @?= 7
+    , testCase "class node sets are canonical after saturation" do
+        -- Guard for rebuild's canonical trim (egg's rebuild_classes): after a
+        -- rebuild fixpoint, every node stored in a class set must be a
+        -- fixpoint of canonicalization; database builds rely on this to skip
+        -- per-row re-canonicalization.
+        let term = var "a" + 2 :: Term Expr
+            five = 5 :: Term Expr
+            graph = fromList @(ExtractBest Expr NodeCount, ConstantFolding) [term, five]
+
+        eid <- maybe (assertFailure "term not found in initial graph") pure $ lookupTerm term graph
+        aId <- maybe (assertFailure "term not found in initial graph") pure $ lookupTerm (var "a") graph
+        fiveId <- maybe (assertFailure "term not found in initial graph") pure $ lookupTerm five graph
+
+        !graph' <-
+          either throwIO pure $
+            saturate defaultConfig ringRules $
+              PL.unur PL.$
+                modify
+                  (Control.void PL.. Raw.merge aId fiveId)
+                  graph
+
+        for_ [eid, aId, fiveId] \cid0 -> do
+          cid <- maybe (assertFailure "find failed on saturated graph") pure $ find cid0 graph'
+          ns <- maybe (assertFailure "class disappeared") pure $ lookupEClass cid graph'
+          for_ ns \n ->
+            canonicalize n graph' @?= Just n
     ]

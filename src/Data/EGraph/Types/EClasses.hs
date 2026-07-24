@@ -27,6 +27,7 @@ module Data.EGraph.Types.EClasses (
   lookupParentHistory,
   lookupParentHistoryWithCount,
   setAnalysis,
+  setNodes,
   nodes,
   delete,
   addParent,
@@ -168,6 +169,26 @@ setAnalysis eid d classes = Control.do
     Nothing -> Control.pure $ Ur False
     Just eclass -> Control.do
       ref <- Ref.modify (`lseq` d) $ eclass .# #analysis
+      Control.pure $ ref `lseq` Ur True
+
+{- | Replace a class's node set (rebuild's canonical trim; egg's
+@rebuild_classes@ writes back canonicalized, deduplicated nodes).
+Returns 'False' if the class is absent.
+-}
+{-# INLINEABLE setNodes #-}
+setNodes ::
+  forall α d l.
+  EClassId ->
+  PHS.HashSet (ENode l) ->
+  Mut α (EClasses d l) %1 ->
+  BO α (Ur Bool)
+setNodes eid ns classes = Control.do
+  let %1 clss = coerceLin classes :: Mut α (Raw d l)
+  mclass <- HMB.lookup eid clss
+  case mclass of
+    Nothing -> Control.pure $ Ur False
+    Just eclass -> Control.do
+      ref <- Ref.modify (`lseq` Ur ns) $ eclass .# #nodes
       Control.pure $ ref `lseq` Ur True
 
 {-# INLINEABLE delete #-}
