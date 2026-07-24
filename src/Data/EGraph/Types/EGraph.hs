@@ -296,7 +296,16 @@ addCanonicalNode enode egraph = Control.do
         Control.pure $ uf `lseq` Ur.lift EClassId eid
       egraph <- reborrowing_ egraph \egraph -> Control.do
         (Ur !d, egraph) <- sharing egraph $ unsafeMakeAnalyzeNode enode
-        void $ EC.unsafeInsertNew eid enode d $ egraph .# #classes
+        -- Parent edges must be registered under CANONICAL child ids: a
+        -- modifyAnalysis hook may have merged a child's class away since the
+        -- node was canonicalized (mid-batch), and a stale id would miss the
+        -- class table and silently drop the edge, leaving later congruence
+        -- repair incomplete.
+        (Ur childIds, egraph) <- sharing egraph \egraph ->
+          share egraph & \(Ur egraph) -> Control.do
+            Ur ids <- move Control.<$> Data.mapM (\c -> move c & \(Ur c) -> unsafeFind egraph c) (children enode)
+            Control.pure $ Ur $ P.map (\(Ur c) -> c) ids
+        void $ EC.unsafeInsertNew eid enode childIds d $ egraph .# #classes
       egraph <- reborrowing_ egraph \egraph -> Control.do
         let %1 !(!hashcons, !worklist) = egraph .@ (#hashcons, #worklist)
         -- The hashcons table has not changed since 'lookupForInsert', so resume

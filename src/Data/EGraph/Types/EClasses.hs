@@ -254,23 +254,29 @@ insertIfNew eid enode analysis clss = Control.do
   if mem
     then Control.pure (Ur False, coerceLin clss)
     else Control.do
-      clss <- unsafeInsertNew eid enode analysis clss
+      clss <- unsafeInsertNew eid enode (children enode) analysis clss
       Control.pure (Ur True, clss)
 
 {- | Insert a class whose identifier is known to be absent.
 
-The caller must ensure that the identifier is fresh.
+The caller must ensure that the identifier is fresh, and must pass the
+node's child class ids (in child order, duplicates preserved) as
+@childIds@. Pass /canonical/ ids whenever merges may already have
+happened (e.g. through analysis modify hooks mid-batch): a stale id whose
+class was merged away would miss the class-table lookup here and silently
+drop the parent edge, leaving later congruence repair incomplete.
 -}
 {-# INLINEABLE unsafeInsertNew #-}
 unsafeInsertNew ::
   forall d l α.
-  (Hashable1 l, Foldable l, Consumable d) =>
+  (Hashable1 l, Consumable d) =>
   EClassId ->
   ENode l ->
+  [EClassId] ->
   d ->
   Mut α (EClasses d l) %1 ->
   BO α (Mut α (EClasses d l))
-unsafeInsertNew eid enode analysis clss = Control.do
+unsafeInsertNew eid enode childIds analysis clss = Control.do
   nodes <- asksLinearly $ Ref.new (Ur (PHS.singleton enode))
   parents <- asksLinearly $ Ref.new (Parents 0 [])
   analysis <- asksLinearly $ Ref.new analysis
@@ -278,7 +284,7 @@ unsafeInsertNew eid enode analysis clss = Control.do
   clss <- reborrowing_ clss \clss -> Control.do
     chss <-
       mapMaybe (\(Ur child, e) -> consume child `lseq` e)
-        Control.<$> HMB.lookupsAll (children enode) clss
+        Control.<$> HMB.lookupsAll childIds clss
     void $ Data.forM chss $ addParent eid enode
   mop `lseq` Control.pure (coerceLin clss)
 
