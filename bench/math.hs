@@ -78,9 +78,9 @@ main = do
             [ bgroup
                 name
                 [ env (evaluate $ force tamagoh) \term ->
-                    bench "tamagoh" $ nf (extractTamagohWithStats tamagohRules) term
+                    bench "tamagoh" $ nf (extractTamagoh tamagohRules) term
                 , env (evaluate $ force hegg) \term ->
-                    bench "hegg" $ nf (extractHeggWithStats heggRules) term
+                    bench "hegg" $ nf (extractHegg heggRules) term
                 ]
             | (name, tamagoh, hegg) <- controlled
             ]
