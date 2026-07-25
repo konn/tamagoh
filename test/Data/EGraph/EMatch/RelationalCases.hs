@@ -26,15 +26,19 @@ import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Borrow.Pure.Utils
 import Data.EGraph.EMatch.Relational
 import Data.EGraph.EMatch.Relational.Database qualified as Database
+import Data.EGraph.EMatch.Relational.Query qualified as Query
 import Data.EGraph.EMatch.Types
+import Data.EGraph.Saturation qualified as Saturation
 import Data.EGraph.Types
 import Data.EGraph.Types.Language (deriveLanguage)
 import Data.Functor.Linear qualified as Data
 import Data.HashSet qualified as HS
+import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, listToMaybe)
 import Data.Trie qualified as Trie
+import Data.Vector qualified as V
 import GHC.Generics qualified as GHC
 import Prelude.Linear
 import Prelude qualified as P
@@ -50,6 +54,353 @@ data Lang1 a = F !a !a | G !a | I !Int
     )
 
 deriveLanguage ''Lang1
+
+data PlannerLang a
+  = PAdd !a !a
+  | PMul !a !a
+  | PLit !Int
+  deriving
+    ( P.Eq
+    , P.Ord
+    , P.Show
+    , P.Functor
+    , P.Foldable
+    , P.Traversable
+    )
+
+deriveLanguage ''PlannerLang
+
+data PreparedTransposePin = PreparedTransposePin
+  { nestedOrderExact :: !P.Bool
+  , nestedRawSizeExact :: !P.Bool
+  , staticOrderExact :: !P.Bool
+  , atomCountEligibilityExact :: !P.Bool
+  , layoutValidationExact :: !P.Bool
+  , repeatedVariableExact :: !P.Bool
+  , fixedColumnFallbackExact :: !P.Bool
+  , identityLayoutExact :: !P.Bool
+  , missingRelationExact :: !P.Bool
+  }
+  deriving (P.Eq, P.Show)
+
+preparedTransposePin :: PreparedTransposePin
+preparedTransposePin =
+  let nestedPatQuery =
+        Query.Conj $
+          [4]
+            Query.::- ( Query.Atom (Query.MkRel (Query.QVar 0) (PAdd (Query.QVar 1) (Query.QVar 2)))
+                          NE.:| [ Query.Atom (Query.MkRel (Query.QVar 1) (PLit 0))
+                                , Query.Atom (Query.MkRel (Query.QVar 2) (PMul (Query.QVar 3) (Query.QVar 4)))
+                                , Query.Atom (Query.MkRel (Query.QVar 3) (PLit 1))
+                                ]
+                      )
+      nestedQuery =
+        Query.PatternQuery
+          { Query.root = 0
+          , Query.varNames = V.fromList [Nothing, Nothing, Nothing, Nothing, Just "x"]
+          , Query.patQuery = nestedPatQuery
+          }
+      nestedDb =
+        Database.fromRelations
+          [ Query.MkRel 100 (PAdd 10 20)
+          , Query.MkRel 101 (PAdd 10 30)
+          , Query.MkRel 10 (PLit 0)
+          , Query.MkRel 20 (PMul 50 200)
+          , Query.MkRel 30 (PMul 40 300)
+          , Query.MkRel 40 (PLit 1)
+          , Query.MkRel 50 (PLit 1)
+          ]
+      nestedExpected =
+        [ (100, IM.fromList [(0, 100), (1, 10), (2, 20), (3, 50), (4, 200)])
+        , (101, IM.fromList [(0, 101), (1, 10), (2, 30), (3, 40), (4, 300)])
+        ]
+      nestedCanonical = ematchDbWithCount nestedQuery nestedDb
+      nestedPrepared =
+        ematchPreparedDbWithCount (prepare nestedQuery) nestedDb
+
+      repeatedQuery =
+        Query.PatternQuery
+          { Query.root = 0
+          , Query.varNames = V.empty
+          , Query.patQuery =
+              Query.Conj $
+                []
+                  Query.::- ( Query.Atom (Query.MkRel (Query.QVar 0) (PAdd (Query.QVar 1) (Query.QVar 1)))
+                                NE.:| [ Query.Atom (Query.MkRel (Query.QVar 1) (PLit 0))
+                                      , Query.Atom (Query.MkRel (Query.QVar 1) (PLit 0))
+                                      ]
+                            )
+          }
+      repeatedDb =
+        Database.fromRelations
+          [ Query.MkRel 100 (PAdd 10 10)
+          , Query.MkRel 101 (PAdd 10 11)
+          , Query.MkRel 10 (PLit 0)
+          ]
+      repeatedCanonical = ematchDbWithCount repeatedQuery repeatedDb
+      repeatedPrepared =
+        ematchPreparedDbWithCount (prepare repeatedQuery) repeatedDb
+
+      fixedQuery =
+        Query.PatternQuery
+          { Query.root = 0
+          , Query.varNames = V.empty
+          , Query.patQuery =
+              Query.Conj $
+                []
+                  Query.::- ( Query.Atom (Query.MkRel (Query.QVar 0) (PAdd (Query.QVar 1) (Query.EId 99)))
+                                NE.:| [ Query.Atom (Query.MkRel (Query.QVar 1) (PLit 0))
+                                      , Query.Atom (Query.MkRel (Query.QVar 1) (PLit 0))
+                                      ]
+                            )
+          }
+      fixedDb =
+        Database.fromRelations
+          [ Query.MkRel 100 (PAdd 10 99)
+          , Query.MkRel 10 (PLit 0)
+          ]
+      fixedCanonical = ematchDbWithCount fixedQuery fixedDb
+      fixedPrepared =
+        ematchPreparedDbWithCount (prepare fixedQuery) fixedDb
+
+      identityQuery =
+        Query.PatternQuery
+          { Query.root = 0
+          , Query.varNames = V.empty
+          , Query.patQuery =
+              Query.Conj $
+                []
+                  Query.::- ( Query.Atom (Query.MkRel (Query.QVar 0) (PLit 0))
+                                NE.:| [ Query.Atom (Query.MkRel (Query.QVar 0) (PLit 0))
+                                      , Query.Atom (Query.MkRel (Query.QVar 0) (PLit 0))
+                                      ]
+                            )
+          }
+      identityDb = Database.fromRelations [Query.MkRel 10 (PLit 0)]
+      identityCanonical = ematchDbWithCount identityQuery identityDb
+      identityPrepared =
+        ematchPreparedDbWithCount (prepare identityQuery) identityDb
+
+      oneAtomQuery =
+        nestedQuery
+          { Query.patQuery =
+              Query.Conj $
+                []
+                  Query.::- (Query.Atom (Query.MkRel (Query.QVar 0) (PLit 0)) NE.:| [])
+          }
+      twoAtomQuery =
+        nestedQuery
+          { Query.patQuery =
+              Query.Conj $
+                []
+                  Query.::- ( Query.Atom (Query.MkRel (Query.QVar 0) (PLit 0))
+                                NE.:| [Query.Atom (Query.MkRel (Query.QVar 0) (PLit 0))]
+                            )
+          }
+      threeAtomQuery = identityQuery
+      headOnlyQuery =
+        identityQuery
+          { Query.patQuery =
+              Query.Conj $
+                [9]
+                  Query.::- ( Query.Atom (Query.MkRel (Query.QVar 0) (PLit 0))
+                                NE.:| [ Query.Atom (Query.MkRel (Query.QVar 0) (PLit 0))
+                                      , Query.Atom (Query.MkRel (Query.QVar 0) (PLit 0))
+                                      ]
+                            )
+          }
+
+      missingDb =
+        Database.fromRelations
+          [ Query.MkRel 100 (PAdd 10 20)
+          , Query.MkRel 10 (PLit 0)
+          ]
+      missingCanonical = ematchDbWithCount nestedQuery missingDb
+      missingPrepared =
+        ematchPreparedDbWithCount (prepare nestedQuery) missingDb
+   in PreparedTransposePin
+        { nestedOrderExact =
+            P.fst nestedCanonical P.== nestedExpected
+              P.&& nestedPrepared P.== nestedCanonical
+        , nestedRawSizeExact =
+            P.snd nestedCanonical P.== 10
+        , staticOrderExact =
+            preparedStaticOrder (prepare nestedQuery)
+              P.== preparedRuntimeOrder (prepare nestedQuery) nestedDb
+              P.&& preparedStaticOrder (prepare nestedQuery) P.== Just [1, 2, 3, 0, 4]
+        , atomCountEligibilityExact =
+            P.not (preparedLayoutEligible (prepare oneAtomQuery))
+              P.&& P.not (preparedLayoutEligible (prepare twoAtomQuery))
+              P.&& preparedLayoutEligible (prepare threeAtomQuery)
+              P.&& P.not (preparedLayoutEligible (prepare headOnlyQuery))
+        , layoutValidationExact =
+            Database.mkColumnLayout 3 [0, 1, 2]
+              P.== Just (Database.identityColumnLayout 3)
+              P.&& Database.mkColumnLayout 3 [0, 0, 2] P.== Nothing
+              P.&& Database.mkColumnLayout 3 [0, 1] P.== Nothing
+              P.&& Database.mkColumnLayout 3 [0, 1, 3] P.== Nothing
+        , repeatedVariableExact =
+            repeatedPrepared P.== repeatedCanonical
+              P.&& P.length (P.fst repeatedCanonical) P.== 1
+        , fixedColumnFallbackExact =
+            fixedPrepared P.== fixedCanonical
+        , identityLayoutExact =
+            identityPrepared P.== identityCanonical
+              P.&& P.length (P.fst identityCanonical) P.== 1
+        , missingRelationExact =
+            missingCanonical P.== ([], 0)
+              P.&& missingPrepared P.== missingCanonical
+        }
+
+data PreparedDatabasePin = PreparedDatabasePin
+  { fusedMatchesExact :: !P.Bool
+  , preparedRowsExact :: !P.Bool
+  , preparedOnlyCanonicalAbsent :: !P.Bool
+  , preparedRequirementsExact :: !P.Bool
+  , multipleLayoutsExact :: !P.Bool
+  , absentPreparedFallbackExact :: !P.Bool
+  }
+  deriving (P.Eq, P.Show)
+
+plannerLit :: Int -> Term PlannerLang
+plannerLit i = wrapTerm (PLit i)
+
+plannerNested :: Int -> Term PlannerLang
+plannerNested i =
+  wrapTerm $
+    PAdd
+      (plannerLit 0)
+      (wrapTerm (PMul (plannerLit 1) (plannerLit i)))
+
+mkPreparedDatabasePin ::
+  Mut α (EGraph () PlannerLang) %1 ->
+  BO α (Ur PreparedDatabasePin)
+mkPreparedDatabasePin egraph = Control.do
+  (Ur _, Ur _, egraph) <- addTerm (plannerNested 2) egraph
+  (Ur _, Ur _, egraph) <- addTerm (plannerNested 3) egraph
+  egraph <- rebuild egraph
+  uncurry (flip lseq) Control.<$> sharing egraph \egraph -> Control.do
+    let pattern =
+          PNode $
+            PAdd
+              (PNode (PLit 0))
+              (PNode (PMul (PNode (PLit 1)) (Metavar "x")))
+        prepared = prepare (compile pattern)
+        (canonicalOperators, preparedIndexes) =
+          preparedDatabaseRequirements prepared
+        canonicalSet = HS.fromList canonicalOperators
+        preparedSet = HS.fromList preparedIndexes
+        primaryKey = fromJust (listToMaybe preparedIndexes)
+        preparedOperator = Database.preparedIndexOperator primaryKey
+        layoutA = fromJust (Database.mkColumnLayout 3 [1, 2, 0])
+        layoutB = fromJust (Database.mkColumnLayout 3 [2, 1, 0])
+        keyA = fromJust (Database.mkPreparedIndexKey preparedOperator layoutA)
+        keyB = fromJust (Database.mkPreparedIndexKey preparedOperator layoutB)
+        multiLayoutSet = HS.fromList [keyA, keyB]
+    Ur full <- Database.buildDatabaseForPatterns False True egraph
+    Ur fused <-
+      Database.buildDatabaseForPrepared
+        canonicalSet
+        preparedSet
+        True
+        egraph
+    Ur multiLayout <-
+      Database.buildDatabaseForPrepared
+        HS.empty
+        multiLayoutSet
+        True
+        egraph
+    let fusedMatchesExact =
+          ematchPreparedDbWithCount prepared fused
+            P.== ematchPreparedDbWithCount prepared full
+        preparedRowsExact =
+          P.all
+            ( \key ->
+                let operator = Database.preparedIndexOperator key
+                    layout = Database.preparedIndexLayout key
+                 in Database.getPreparedTrie key fused
+                      P.== ( Trie.fromRows
+                               P.<$> P.traverse
+                                 (Database.permuteColumns layout)
+                                 (Trie.toRows (Database.getTrie operator full))
+                           )
+            )
+            preparedIndexes
+        preparedOnlyCanonicalAbsent =
+          P.all
+            ( \key ->
+                let operator = Database.preparedIndexOperator key
+                 in HS.member operator canonicalSet
+                      P.|| Database.getTrie operator fused P.== Trie.empty
+            )
+            preparedIndexes
+        preparedRequirementsExact =
+          P.length preparedIndexes P.== 1
+            P.&& HS.size preparedSet P.== 1
+            P.&& HS.size (HS.fromList (preparedIndexes P.<> preparedIndexes)) P.== 1
+        multipleLayoutsExact =
+          HS.size multiLayoutSet P.== 2
+            P.&& Database.getTrie preparedOperator multiLayout P.== Trie.empty
+            P.&& P.all
+              ( \key ->
+                  Database.getPreparedTrie key multiLayout
+                    P.== ( Trie.fromRows
+                             P.<$> P.traverse
+                               (Database.permuteColumns (Database.preparedIndexLayout key))
+                               (Trie.toRows (Database.getTrie preparedOperator full))
+                         )
+              )
+              [keyA, keyB]
+        emptyDatabase = Database.newDatabase
+        absentPreparedFallbackExact =
+          Database.getPreparedTrie primaryKey emptyDatabase P.== Nothing
+            P.&& Database.getTrie preparedOperator emptyDatabase P.== Trie.empty
+            P.&& ematchPreparedDbWithCount prepared emptyDatabase P.== ([], 0)
+    Control.pure $
+      Ur
+        PreparedDatabasePin
+          { fusedMatchesExact
+          , preparedRowsExact
+          , preparedOnlyCanonicalAbsent
+          , preparedRequirementsExact
+          , multipleLayoutsExact
+          , absentPreparedFallbackExact
+          }
+
+mkMixedSelectAllSaturationPin ::
+  Mut α (EGraph () PlannerLang) %1 ->
+  BO α (Ur (Maybe P.Bool))
+mkMixedSelectAllSaturationPin egraph = Control.do
+  (Ur _, Ur leaf, egraph) <- addTerm (plannerLit 2) egraph
+  (Ur _, Ur root, egraph) <- addTerm (plannerNested 2) egraph
+  let nestedPattern =
+        PNode $
+          PAdd
+            (PNode (PLit 0))
+            (PNode (PMul (PNode (PLit 1)) (Metavar "x")))
+      ruleDefs =
+        [ (Metavar "z" Saturation.==> Metavar "z")
+            { Saturation.name = "select-all-noop"
+            }
+        , (nestedPattern Saturation.==> Metavar "x")
+            { Saturation.name = "nested-collapse"
+            }
+        ]
+      compiledRules =
+        case P.traverse Saturation.compileRule ruleDefs of
+          Left err -> P.error (P.show err)
+          Right compiled -> compiled
+  egraph <-
+    Saturation.saturate
+      Saturation.defaultConfig
+        { Saturation.maxIterations = Just 2
+        , Saturation.nodeLimit = Nothing
+        , Saturation.scheduler = Nothing
+        }
+      compiledRules
+      egraph
+  uncurry (flip lseq) Control.<$> sharing egraph \egraph ->
+    equivalent egraph root leaf
 
 intT :: Int -> Term Lang1
 intT i = wrapTerm $ I i
@@ -109,6 +460,7 @@ data DatabaseFilterPin = DatabaseFilterPin
   , emptySelectionEmpty :: !P.Bool
   , auxiliaryIndexesEmpty :: !P.Bool
   , preparedMatchesEqual :: !P.Bool
+  , preparedCanonicalizationEqual :: !P.Bool
   }
   deriving (P.Eq, P.Show)
 
@@ -150,9 +502,17 @@ mkDatabaseFilterPin assumeCanonical egraph = Control.do
         required = HS.fromList [opI1, opG]
         pat = PNode (G (Metavar "x")) :: Pattern Lang1 P.String
         prepared = prepare (compile pat)
+        preparedLayout = fromJust (Database.mkColumnLayout 3 [1, 2, 0])
+        preparedKey = fromJust (Database.mkPreparedIndexKey opF preparedLayout)
     Ur full <- Database.buildDatabaseForPatterns False assumeCanonical egraph
     Ur filtered <- Database.buildDatabaseForOperators required assumeCanonical egraph
     Ur empty <- Database.buildDatabaseForOperators HS.empty assumeCanonical egraph
+    Ur fused <-
+      Database.buildDatabaseForPrepared
+        HS.empty
+        (HS.singleton preparedKey)
+        assumeCanonical
+        egraph
     let selectedLiteralEqual =
           Database.getTrie opI1 filtered P.== Database.getTrie opI1 full
         selectedUnaryEqual =
@@ -169,6 +529,14 @@ mkDatabaseFilterPin assumeCanonical egraph = Control.do
         preparedMatchesEqual =
           ematchPreparedDbWithCount prepared filtered
             P.== ematchPreparedDbWithCount prepared full
+        preparedCanonicalizationEqual =
+          Database.getTrie opF fused P.== Trie.empty
+            P.&& Database.getPreparedTrie preparedKey fused
+              P.== ( Trie.fromRows
+                       P.<$> P.traverse
+                         (Database.permuteColumns preparedLayout)
+                         (Trie.toRows (Database.getTrie opF full))
+                   )
     Control.pure $
       Ur
         DatabaseFilterPin
@@ -179,6 +547,7 @@ mkDatabaseFilterPin assumeCanonical egraph = Control.do
           , emptySelectionEmpty
           , auxiliaryIndexesEmpty
           , preparedMatchesEqual
+          , preparedCanonicalizationEqual
           }
 
 {- | A full database must retain cross-operator multiplicity for a SelectAll

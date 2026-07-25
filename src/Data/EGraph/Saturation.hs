@@ -53,8 +53,19 @@ import Control.Monad.Borrow.Pure.Experimental.Loop
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Deriving (deriveShow1)
-import Data.EGraph.EMatch.Relational (PreparedPatternQuery, ematchPreparedDbWithCount, prepare, preparedOperators)
-import Data.EGraph.EMatch.Relational.Database (Operator, buildDatabaseForOperators, buildDatabaseForPatterns)
+import Data.EGraph.EMatch.Relational (
+  PreparedPatternQuery,
+  ematchPreparedDbWithCount,
+  prepare,
+  preparedDatabaseRequirements,
+ )
+import Data.EGraph.EMatch.Relational.Database (
+  Operator,
+  PreparedIndexKey,
+  buildDatabaseForOperators,
+  buildDatabaseForPatterns,
+  buildDatabaseForPrepared,
+ )
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types (substPatternInt)
 import Data.EGraph.Saturation.Scheduler
@@ -214,9 +225,13 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
     needsSelectAll = any isSelectAllRule rules
 
     requiredOperators :: HashSet.HashSet (Operator l)
-    requiredOperators =
-      HashSet.fromList $
-        F.foldMap (\CompiledRule {preparedLhs} -> preparedOperators preparedLhs) rules
+    requiredPreparedIndexes :: HashSet.HashSet (PreparedIndexKey l)
+    (requiredOperators, requiredPreparedIndexes) =
+      let (operators, indexes) =
+            F.foldMap
+              (\CompiledRule {preparedLhs} -> preparedDatabaseRequirements preparedLhs)
+              rules
+       in (HashSet.fromList operators, HashSet.fromList indexes)
 
     isSelectAllRule CompiledRule {lhs = PatternQuery {patQuery = SelectAll {}}} = True
     isSelectAllRule _ = False
@@ -244,7 +259,15 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
             Ur db <-
               if needsSelectAll
                 then buildDatabaseForPatterns True setsCanon egraph
-                else buildDatabaseForOperators requiredOperators setsCanon egraph
+                else
+                  if HashSet.null requiredPreparedIndexes
+                    then buildDatabaseForOperators requiredOperators setsCanon egraph
+                    else
+                      buildDatabaseForPrepared
+                        requiredOperators
+                        requiredPreparedIndexes
+                        setsCanon
+                        egraph
             -- Match all non-banned rules against one immutable database.
             -- Side conditions are deliberately NOT checked here: hegg checks
             -- each condition immediately before applying its match, against

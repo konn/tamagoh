@@ -30,6 +30,39 @@ test_nestedPin = testCase "B12 pin: nested two-atom pattern matches exactly once
   let Ur subss = withNewEGraph mkNestedPin
   length subss @?= 1
 
+test_preparedTransposePin :: TestTree
+test_preparedTransposePin = testCase "T9 prepared transposition preserves exact matching" do
+  preparedTransposePin
+    @?= PreparedTransposePin
+      { nestedOrderExact = True
+      , nestedRawSizeExact = True
+      , staticOrderExact = True
+      , atomCountEligibilityExact = True
+      , layoutValidationExact = True
+      , repeatedVariableExact = True
+      , fixedColumnFallbackExact = True
+      , identityLayoutExact = True
+      , missingRelationExact = True
+      }
+
+test_preparedDatabasePin :: TestTree
+test_preparedDatabasePin = testCase "T9 fused prepared indexes preserve canonical matching" do
+  let Ur result = withNewEGraph mkPreparedDatabasePin
+  result
+    @?= PreparedDatabasePin
+      { fusedMatchesExact = True
+      , preparedRowsExact = True
+      , preparedOnlyCanonicalAbsent = True
+      , preparedRequirementsExact = True
+      , multipleLayoutsExact = True
+      , absentPreparedFallbackExact = True
+      }
+
+test_mixedSelectAllSaturationPin :: TestTree
+test_mixedSelectAllSaturationPin = testCase "T9 mixed SelectAll forces canonical prepared fallback" do
+  let Ur result = withNewEGraph mkMixedSelectAllSaturationPin
+  result @?= Just True
+
 test_selectAllPin :: TestTree
 test_selectAllPin = testCase "B12 pin: SelectAll dedups cross-operator multiplicity" do
   let Ur subss = withNewEGraph mkSelectAllPin
@@ -57,6 +90,7 @@ allDatabaseFilterChecks =
     , emptySelectionEmpty = True
     , auxiliaryIndexesEmpty = True
     , preparedMatchesEqual = True
+    , preparedCanonicalizationEqual = True
     }
 
 test_mixedSelectAll :: TestTree

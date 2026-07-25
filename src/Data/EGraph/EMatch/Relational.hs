@@ -18,7 +18,11 @@ module Data.EGraph.EMatch.Relational (
   ematchDbWithCount,
   PreparedPatternQuery,
   prepare,
+  preparedLayoutEligible,
+  preparedStaticOrder,
+  preparedRuntimeOrder,
   preparedOperators,
+  preparedDatabaseRequirements,
   ematchPreparedDbWithCount,
   query,
   genericJoin,
@@ -120,14 +124,33 @@ data PreparedAtom l = PreparedAtom
   { preparedAtom :: !(Atom l VarId)
   , preparedOperator :: !(Operator l)
   , preparedPositions :: !(IntMap (NonEmpty Int))
+  , preparedVariables :: !(Maybe [VarId])
   }
   deriving (Generic)
 
 deriving stock instance (Show1 l) => Show (PreparedAtom l)
 
+data PreparedLayoutAtom l = PreparedLayoutAtom
+  { layoutAtom :: !(PreparedAtom l)
+  , layoutIndex :: !(Maybe (PreparedIndexKey l))
+  , layoutPositions :: !(IntMap (NonEmpty Int))
+  }
+  deriving (Generic)
+
+deriving stock instance (Show1 l) => Show (PreparedLayoutAtom l)
+
+data PreparedLayoutPlan l = PreparedLayoutPlan
+  { layoutOrder :: ![VarId]
+  , layoutAtoms :: !(NonEmpty (PreparedLayoutAtom l))
+  }
+  deriving (Generic)
+
+deriving stock instance (Show1 l) => Show (PreparedLayoutPlan l)
+
 data PreparedPatternQuery l v = PreparedPatternQuery
   { originalQuery :: !(PatternQuery l v)
   , preparedBody :: !(Maybe (NonEmpty (PreparedAtom l)))
+  , preparedLayoutPlan :: !(Maybe (PreparedLayoutPlan l))
   }
   deriving (Generic)
 
@@ -137,12 +160,25 @@ prepare :: (Functor l, Foldable l) => PatternQuery l v -> PreparedPatternQuery l
 prepare originalQuery@PatternQuery {patQuery} =
   PreparedPatternQuery
     { originalQuery
-    , preparedBody = case patQuery of
-        SelectAll {} -> Nothing
-        Conj (_ ::- body) -> Just (prepareAtom <$> body)
+    , preparedBody
+    , preparedLayoutPlan
     }
   where
-    prepareAtom atom@(Atom MkRel {args}) =
+    preparedBody = case patQuery of
+      SelectAll {} -> Nothing
+      Conj (_ ::- body) -> Just (prepareAtom <$> body)
+
+    preparedLayoutPlan = case (patQuery, preparedBody) of
+      (Conj (headVars ::- _), Just body)
+        | NE.length body >= 3
+        , all (maybe False (const True) . preparedVariables) body
+        , IS.fromList headVars
+            `IS.isSubsetOf` F.foldMap (IM.keysSet . preparedPositions) body ->
+            let !order = staticVariableOrder headVars body
+             in PreparedLayoutPlan order <$> traverse (prepareLayoutAtom order) body
+      _ -> Nothing
+
+    prepareAtom atom@(Atom rel@MkRel {args}) =
       PreparedAtom
         { preparedAtom = atom
         , preparedOperator = toOperator args
@@ -150,7 +186,77 @@ prepare originalQuery@PatternQuery {patQuery} =
             IM.fromListWith
               (flip (<>))
               [(v, NE.singleton i) | (i, v) <- zip [0 ..] (F.toList atom)]
+        , preparedVariables =
+            traverse
+              ( \case
+                  QVar v -> Just v
+                  EId _ -> Nothing
+              )
+              (F.toList rel)
         }
+
+    prepareLayoutAtom order atom@PreparedAtom {preparedVariables = Just variables, ..} = do
+      let !layoutColumns =
+            F.foldMap
+              (\v -> maybe [] F.toList (IM.lookup v preparedPositions))
+              order
+      layout <- mkColumnLayout (length variables) layoutColumns
+      permutedVariables <- permuteColumns layout variables
+      let !positions =
+            IM.fromListWith
+              (flip (<>))
+              [(v, NE.singleton i) | (i, v) <- zip [0 ..] permutedVariables]
+      index <-
+        if layout == identityColumnLayout (length variables)
+          then Just Nothing
+          else Just <$> mkPreparedIndexKey preparedOperator layout
+      pure
+        PreparedLayoutAtom
+          { layoutAtom = atom
+          , layoutIndex = index
+          , layoutPositions = positions
+          }
+    prepareLayoutAtom _ PreparedAtom {preparedVariables = Nothing} = Nothing
+
+preparedLayoutEligible :: PreparedPatternQuery l v -> Bool
+preparedLayoutEligible PreparedPatternQuery {preparedLayoutPlan} =
+  maybe False (const True) preparedLayoutPlan
+
+preparedStaticOrder :: PreparedPatternQuery l v -> Maybe [VarId]
+preparedStaticOrder PreparedPatternQuery {preparedLayoutPlan} =
+  layoutOrder <$> preparedLayoutPlan
+
+preparedRuntimeOrder ::
+  (HasDatabase l) =>
+  PreparedPatternQuery l v ->
+  Database l ->
+  Maybe [VarId]
+preparedRuntimeOrder PreparedPatternQuery {originalQuery = PatternQuery {patQuery}, preparedBody} db =
+  case (patQuery, preparedBody) of
+    (Conj (headVars ::- _), Just body) -> do
+      relsStats <- mapM (buildPreparedQueryState db) body
+      let varStat =
+            IM.unionWith
+              (<>)
+              (foldl1' (IM.unionWith (<>)) (snd <$> relsStats))
+              (IM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) headVars))
+      pure $ map fst $ sortOn snd $ IM.toList varStat
+    _ -> Nothing
+
+staticVariableOrder :: [VarId] -> NonEmpty (PreparedAtom l) -> [VarId]
+staticVariableOrder headVars atoms =
+  map fst $ sortOn snd $ IM.toList varStat
+  where
+    zeroSizeWeight =
+      VarWeight
+        { numRels = Down (Sum 1)
+        , smallestDbSize = Min 0
+        }
+    varStat =
+      IM.unionWith
+        (<>)
+        (foldl1' (IM.unionWith (<>)) (IM.map (const zeroSizeWeight) . preparedPositions <$> atoms))
+        (IM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) headVars))
 
 {- | Operators whose relation tries are needed to run a prepared query.
 
@@ -162,6 +268,22 @@ preparedOperators :: PreparedPatternQuery l v -> [Operator l]
 preparedOperators PreparedPatternQuery {preparedBody} =
   maybe [] (map preparedOperator . NE.toList) preparedBody
 
+preparedDatabaseRequirements ::
+  PreparedPatternQuery l v ->
+  ([Operator l], [PreparedIndexKey l])
+preparedDatabaseRequirements PreparedPatternQuery {preparedBody, preparedLayoutPlan} =
+  case preparedLayoutPlan of
+    Nothing -> (maybe [] (map preparedOperator . NE.toList) preparedBody, [])
+    Just PreparedLayoutPlan {layoutAtoms} ->
+      foldr
+        ( \PreparedLayoutAtom {layoutAtom = PreparedAtom {preparedOperator}, layoutIndex} (operators, indexes) ->
+            case layoutIndex of
+              Nothing -> (preparedOperator : operators, indexes)
+              Just index -> (operators, index : indexes)
+        )
+        ([], [])
+        layoutAtoms
+
 {-# INLINEABLE ematchPreparedDbWithCount #-}
 ematchPreparedDbWithCount ::
   (HasDatabase l) =>
@@ -171,7 +293,8 @@ ematchPreparedDbWithCount PreparedPatternQuery {originalQuery = PatternQuery {..
   where
     subs = case (patQuery, preparedBody) of
       (SelectAll v, Nothing) -> map (IM.singleton v) (selectAll db)
-      (Conj cq, Just body) -> genericJoinPrepared cq body db
+      (Conj cq, Just body) ->
+        genericJoinPrepared preparedLayoutPlan cq body db
       _ -> error "ematchPreparedDbWithCount: inconsistent prepared query"
     rawSize = sum (IM.size <$> subs)
     !vs = userVars varNames
@@ -310,11 +433,12 @@ genericJoin (hd ::- qs) db = fromMaybe [] do
 genericJoinPrepared ::
   forall l.
   (HasDatabase l) =>
+  Maybe (PreparedLayoutPlan l) ->
   ConjunctiveQuery l VarId ->
   NonEmpty (PreparedAtom l) ->
   Database l ->
   [IntSubst]
-genericJoinPrepared (hd ::- _) (PreparedAtom {preparedAtom = atom@(Atom rel), preparedOperator} :| []) db = fromMaybe [] do
+genericJoinPrepared _ (hd ::- _) (PreparedAtom {preparedAtom = atom@(Atom rel), preparedOperator} :| []) db = fromMaybe [] do
   let vars = IS.fromList (F.toList atom)
       frees :: [IntSubst]
       frees =
@@ -325,16 +449,38 @@ genericJoinPrepared (hd ::- _) (PreparedAtom {preparedAtom = atom@(Atom rel), pr
   trie <- db ^. at preparedOperator
   let !matches = Trie.match (F.toList rel) trie
   pure $ if null frees then matches else IM.union <$> matches <*> frees
-genericJoinPrepared (hd ::- _) qs db = fromMaybe [] do
-  relsStats <- mapM (buildPreparedQueryState db) qs
-  let rels = fst <$> relsStats
-      varStat =
-        IM.unionWith
-          (<>)
-          (foldl1' (IM.unionWith (<>)) (snd <$> relsStats))
-          (IM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) hd))
-      order = map fst $ sortOn snd $ IM.toList varStat
-  pure $ runGenericJoin db order rels
+genericJoinPrepared layoutPlan (hd ::- _) qs db =
+  case layoutPlan >>= resolvePreparedLayoutPlan db of
+    Just (order, rels) -> runGenericJoin db order rels
+    Nothing -> fromMaybe [] do
+      relsStats <- mapM (buildPreparedQueryState db) qs
+      let rels = fst <$> relsStats
+          varStat =
+            IM.unionWith
+              (<>)
+              (foldl1' (IM.unionWith (<>)) (snd <$> relsStats))
+              (IM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) hd))
+          order = map fst $ sortOn snd $ IM.toList varStat
+      pure $ runGenericJoin db order rels
+
+resolvePreparedLayoutPlan ::
+  (HasDatabase l) =>
+  Database l ->
+  PreparedLayoutPlan l ->
+  Maybe ([VarId], NonEmpty (RelationState l))
+resolvePreparedLayoutPlan db PreparedLayoutPlan {layoutOrder, layoutAtoms} =
+  (layoutOrder,) <$> traverse resolveAtom layoutAtoms
+  where
+    resolveAtom PreparedLayoutAtom {layoutAtom = PreparedAtom {preparedOperator}, ..} = do
+      database <- case layoutIndex of
+        Nothing -> db ^. at preparedOperator
+        Just index -> getPreparedTrie index db
+      pure
+        RelationState
+          { database
+          , positions = layoutPositions
+          , constraints = IM.empty
+          }
 
 runGenericJoin :: Database l -> [VarId] -> NonEmpty (RelationState l) -> [IntSubst]
 runGenericJoin db order rels = FML.toList (go order rels IM.empty)
