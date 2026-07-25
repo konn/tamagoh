@@ -20,6 +20,7 @@
 module Data.EGraph.EMatch.Relational.Database (
   buildDatabase,
   buildDatabaseForPatterns,
+  buildDatabaseForOperators,
   fromRelations,
   Database,
   universe,
@@ -43,6 +44,8 @@ import Data.Functor.Classes
 import Data.Generics.Labels ()
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
+import Data.HashSet (HashSet)
+import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
 import Data.Hashable.Lifted (Hashable1)
 import Data.IntSet (IntSet)
@@ -102,6 +105,21 @@ buildDatabaseForPatterns ::
 buildDatabaseForPatterns includeSelectAll assumeCanonical =
   buildDatabaseWithIndexes False includeSelectAll assumeCanonical
 
+{- | Build only the per-operator relation tries needed by a prepared LHS rule
+set. The 'universe' and 'selectAll' indexes are left empty; callers with a
+variable-only query must use 'buildDatabaseForPatterns' instead.
+-}
+{-# INLINEABLE buildDatabaseForOperators #-}
+buildDatabaseForOperators ::
+  forall l d k α m.
+  (HasDatabase l, Traversable l) =>
+  HashSet (Operator l) ->
+  Bool ->
+  Borrow k α (EGraph d l) %m ->
+  BO α (Ur (Database l))
+buildDatabaseForOperators operators assumeCanonical =
+  buildDatabaseWithOperatorFilter operators assumeCanonical
+
 {-# INLINEABLE buildDatabaseWithIndexes #-}
 buildDatabaseWithIndexes ::
   forall l d k α m.
@@ -117,6 +135,30 @@ buildDatabaseWithIndexes ::
   Borrow k α (EGraph d l) %m ->
   BO α (Ur (Database l))
 buildDatabaseWithIndexes includeUniverse includeSelectAll assumeCanonical egraph =
+  buildDatabaseWithFilter includeUniverse includeSelectAll assumeCanonical Nothing egraph
+
+{-# INLINEABLE buildDatabaseWithOperatorFilter #-}
+buildDatabaseWithOperatorFilter ::
+  forall l d k α m.
+  (HasDatabase l, Traversable l) =>
+  HashSet (Operator l) ->
+  Bool ->
+  Borrow k α (EGraph d l) %m ->
+  BO α (Ur (Database l))
+buildDatabaseWithOperatorFilter operators assumeCanonical =
+  buildDatabaseWithFilter False False assumeCanonical (Just operators)
+
+{-# INLINEABLE buildDatabaseWithFilter #-}
+buildDatabaseWithFilter ::
+  forall l d k α m.
+  (HasDatabase l, Traversable l) =>
+  Bool ->
+  Bool ->
+  Bool ->
+  Maybe (HashSet (Operator l)) ->
+  Borrow k α (EGraph d l) %m ->
+  BO α (Ur (Database l))
+buildDatabaseWithFilter includeUniverse includeSelectAll assumeCanonical operatorFilter egraph =
   share egraph PL.& \(Ur egraph) -> Control.do
     Ur classes <- EC.nodeLists (egraph .# #classes)
     let goClasses :: [(EClassId, [ENode l])] -> [Relation l EClassId] -> BO α (Ur (Database l))
@@ -126,13 +168,15 @@ buildDatabaseWithIndexes includeUniverse includeSelectAll assumeCanonical egraph
 
         goNodes :: EClassId -> [ENode l] -> [(EClassId, [ENode l])] -> [Relation l EClassId] -> BO α (Ur (Database l))
         goNodes _ [] rest acc = goClasses rest acc
-        goNodes eid (enode : nodes) rest acc
+        goNodes eid (enode@(ENode args) : nodes) rest acc
+          | Just operators <- operatorFilter
+          , not (HS.member (toOperator args) operators) =
+              goNodes eid nodes rest acc
           | assumeCanonical =
-              case enode of
-                ENode args -> goNodes eid nodes rest (MkRel {id = eid, args} : acc)
-          | otherwise = Control.do
-              Ur (ENode args) <- unsafeCanonicalize enode egraph
               goNodes eid nodes rest (MkRel {id = eid, args} : acc)
+          | otherwise = Control.do
+              Ur (ENode canonicalArgs) <- unsafeCanonicalize enode egraph
+              goNodes eid nodes rest (MkRel {id = eid, args = canonicalArgs} : acc)
     goClasses classes []
 
 {- | An operator is a pattern with all metavariables replaced by unit.

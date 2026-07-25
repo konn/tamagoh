@@ -37,6 +37,40 @@ test_selectAllPin = testCase "B12 pin: SelectAll dedups cross-operator multiplic
   -- assert one match per class, no operator-multiplied duplicates
   length subss @?= length (foldr (\(cid, _) acc -> if cid `elem` acc then acc else cid : acc) [] subss)
 
+test_databaseFilterCanonical :: TestTree
+test_databaseFilterCanonical = testCase "operator filter agrees with full database after rebuild" do
+  let Ur result = withNewEGraph (mkDatabaseFilterPin True)
+  result @?= allDatabaseFilterChecks
+
+test_databaseFilterNoncanonical :: TestTree
+test_databaseFilterNoncanonical = testCase "operator filter agrees with full database after an unrepaired merge" do
+  let Ur result = withNewEGraph (mkDatabaseFilterPin False)
+  result @?= allDatabaseFilterChecks
+
+allDatabaseFilterChecks :: DatabaseFilterPin
+allDatabaseFilterChecks =
+  DatabaseFilterPin
+    { selectedLiteralEqual = True
+    , selectedUnaryEqual = True
+    , excludedLiteralEmpty = True
+    , excludedBinaryEmpty = True
+    , emptySelectionEmpty = True
+    , auxiliaryIndexesEmpty = True
+    , preparedMatchesEqual = True
+    }
+
+test_mixedSelectAll :: TestTree
+test_mixedSelectAll = testCase "mixed SelectAll preserves exact multiplicity and scheduler counts" do
+  let Ur result = withNewEGraph mkMixedSelectAllPin
+  result
+    @?= MixedSelectAllPin
+      { selectAllOrderExact = True
+      , selectAllMatchesExact = True
+      , selectAllRawSizeExact = True
+      , ordinaryMatchesExact = True
+      , ordinaryRawSizeExact = True
+      }
+
 test_projectWithConstraints :: TestTree
 test_projectWithConstraints = testCase "constrained projection agrees with focus then project" do
   let trie =

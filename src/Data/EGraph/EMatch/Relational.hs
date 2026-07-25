@@ -18,6 +18,7 @@ module Data.EGraph.EMatch.Relational (
   ematchDbWithCount,
   PreparedPatternQuery,
   prepare,
+  preparedOperators,
   ematchPreparedDbWithCount,
   query,
   genericJoin,
@@ -150,6 +151,16 @@ prepare originalQuery@PatternQuery {patQuery} =
               (flip (<>))
               [(v, NE.singleton i) | (i, v) <- zip [0 ..] (F.toList atom)]
         }
+
+{- | Operators whose relation tries are needed to run a prepared query.
+
+Variable-only queries return no operators because they use the database's
+'selectAll' index instead.
+-}
+{-# INLINE preparedOperators #-}
+preparedOperators :: PreparedPatternQuery l v -> [Operator l]
+preparedOperators PreparedPatternQuery {preparedBody} =
+  maybe [] (map preparedOperator . NE.toList) preparedBody
 
 {-# INLINEABLE ematchPreparedDbWithCount #-}
 ematchPreparedDbWithCount ::

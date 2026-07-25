@@ -53,8 +53,8 @@ import Control.Monad.Borrow.Pure.Experimental.Loop
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Deriving (deriveShow1)
-import Data.EGraph.EMatch.Relational (PreparedPatternQuery, ematchPreparedDbWithCount, prepare)
-import Data.EGraph.EMatch.Relational.Database (buildDatabaseForPatterns)
+import Data.EGraph.EMatch.Relational (PreparedPatternQuery, ematchPreparedDbWithCount, prepare, preparedOperators)
+import Data.EGraph.EMatch.Relational.Database (Operator, buildDatabaseForOperators, buildDatabaseForPatterns)
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types (substPatternInt)
 import Data.EGraph.Saturation.Scheduler
@@ -213,6 +213,11 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
     needsSelectAll :: Bool
     needsSelectAll = any isSelectAllRule rules
 
+    requiredOperators :: HashSet.HashSet (Operator l)
+    requiredOperators =
+      HashSet.fromList $
+        F.foldMap (\CompiledRule {preparedLhs} -> preparedOperators preparedLhs) rules
+
     isSelectAllRule CompiledRule {lhs = PatternQuery {patQuery = SelectAll {}}} = True
     isSelectAllRule _ = False
 
@@ -236,7 +241,10 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
             -- add-phase modifyAnalysis merges before iteration 1) keep the
             -- canonicalizing path.
             Ur (UnsafeAlias !setsCanon) <- Ref.readShare (egraph .# #nodeSetsCanonical)
-            Ur db <- buildDatabaseForPatterns needsSelectAll setsCanon egraph
+            Ur db <-
+              if needsSelectAll
+                then buildDatabaseForPatterns True setsCanon egraph
+                else buildDatabaseForOperators requiredOperators setsCanon egraph
             -- Match all non-banned rules against one immutable database.
             -- Side conditions are deliberately NOT checked here: hegg checks
             -- each condition immediately before applying its match, against
