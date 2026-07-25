@@ -260,13 +260,13 @@ alter f k hm =
         Nothing -> hm -- No modification needed
         Just !v -> probeForInsert k v st hm
     -- Already inserted with older value.
-    (# Found loc@Location {..}, hm #) ->
-      case f (Just val) of
+    (# Found loc, hm #) ->
+      case f (Just loc.val) of
         Nothing -> deleteFrom loc hm
         (Just !v) ->
           -- Update in place
           hm & \(HashMap size capa maxDIB slots) -> DataFlow.do
-            slots <- LV.unsafeSet foundAt (Occupied slotFp slotDIB k v) slots
+            slots <- LV.unsafeSet loc.foundAt (Occupied loc.slotFp loc.slotDIB k v) slots
             HashMap size capa maxDIB slots
 
 size :: HashMap k v %1 -> (Ur Int, HashMap k v)
@@ -301,13 +301,13 @@ alterF f k hm =
         Ur Nothing -> hm -- No modification needed
         Ur (Just !v) -> probeForInsert k v st hm
     -- Already inserted with older value.
-    (# Found loc@Location {..}, hm #) ->
-      f (Just val) Control.<&> \case
+    (# Found loc, hm #) ->
+      f (Just loc.val) Control.<&> \case
         Ur Nothing -> deleteFrom loc hm
         Ur (Just !v) ->
           -- Update in place
           hm & \(HashMap size capa maxDIB slots) -> DataFlow.do
-            slots <- LV.unsafeSet foundAt (Occupied slotFp slotDIB k v) slots
+            slots <- LV.unsafeSet loc.foundAt (Occupied loc.slotFp loc.slotDIB k v) slots
             HashMap size capa maxDIB slots
 
 {-# INLINE lookupForInsert #-}
@@ -317,7 +317,7 @@ lookupForInsert ::
   HashMap k v %1 ->
   (Ur (Either v (InsertPlan k)), HashMap k v)
 lookupForInsert k hm = case probeKeyForAlter k hm of
-  (# Found Location {val}, hm #) -> (Ur (Left val), hm)
+  (# Found loc, hm #) -> (Ur (Left loc.val), hm)
   (# NotFound ProbeSuspended {..}, hm #) ->
     ( Ur
         ( Right
@@ -542,7 +542,7 @@ lookup :: (Hashable k) => k -> HashMap k v %1 -> (Ur (Maybe v), HashMap k v)
 lookup k hm =
   case probeKeyForAlter k hm of
     (# NotFound _, hm #) -> (Ur Nothing, hm)
-    (# Found Location {val}, hm #) -> (Ur (Just val), hm)
+    (# Found !loc, hm #) -> (Ur (Just loc.val), hm)
 
 member :: (Hashable k) => k -> HashMap k v %1 -> (Ur Bool, HashMap k v)
 member k hm =
