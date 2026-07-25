@@ -16,6 +16,9 @@ module Data.EGraph.EMatch.Relational (
   ematch,
   ematchDb,
   ematchDbWithCount,
+  PreparedPatternQuery,
+  prepare,
+  ematchPreparedDbWithCount,
   query,
   genericJoin,
   compile,
@@ -33,6 +36,7 @@ import Data.Foldable (foldMap')
 import Data.Foldable qualified as F
 import Data.Foldable1 (foldl1')
 import Data.Functor qualified as Functor
+import Data.Functor.Classes (Show1)
 import Data.Generics.Labels ()
 import Data.HashMap.Strict qualified as HM
 import Data.HashSet qualified as HS
@@ -95,6 +99,70 @@ ematchDbWithCount PatternQuery {..} db =
   (nubMatches HS.empty matches, rawSize)
   where
     subs = query patQuery db
+    rawSize = sum (IM.size <$> subs)
+    !vs = userVars varNames
+    matches =
+      map
+        ( \sub ->
+            let !rootId = IM.findWithDefault (error "ematchDb: root variable unbound") root sub
+             in (rootId, sub)
+        )
+        subs
+
+    nubMatches !_ [] = []
+    nubMatches !seen (m@(rootId, sub) : rest)
+      | HS.member key seen = nubMatches seen rest
+      | otherwise = m : nubMatches (HS.insert key seen) rest
+      where
+        !key = MatchKey rootId vs sub
+
+data PreparedAtom l = PreparedAtom
+  { preparedAtom :: !(Atom l VarId)
+  , preparedOperator :: !(Operator l)
+  , preparedPositions :: !(IntMap (NonEmpty Int))
+  }
+  deriving (Generic)
+
+deriving stock instance (Show1 l) => Show (PreparedAtom l)
+
+data PreparedPatternQuery l v = PreparedPatternQuery
+  { originalQuery :: !(PatternQuery l v)
+  , preparedBody :: !(Maybe (NonEmpty (PreparedAtom l)))
+  }
+  deriving (Generic)
+
+deriving stock instance (Show1 l, Show v) => Show (PreparedPatternQuery l v)
+
+prepare :: (Functor l, Foldable l) => PatternQuery l v -> PreparedPatternQuery l v
+prepare originalQuery@PatternQuery {patQuery} =
+  PreparedPatternQuery
+    { originalQuery
+    , preparedBody = case patQuery of
+        SelectAll {} -> Nothing
+        Conj (_ ::- body) -> Just (prepareAtom <$> body)
+    }
+  where
+    prepareAtom atom@(Atom MkRel {args}) =
+      PreparedAtom
+        { preparedAtom = atom
+        , preparedOperator = toOperator args
+        , preparedPositions =
+            IM.fromListWith
+              (flip (<>))
+              [(v, NE.singleton i) | (i, v) <- zip [0 ..] (F.toList atom)]
+        }
+
+{-# INLINEABLE ematchPreparedDbWithCount #-}
+ematchPreparedDbWithCount ::
+  (HasDatabase l) =>
+  PreparedPatternQuery l v -> Database l -> ([(EClassId, IntSubst)], Int)
+ematchPreparedDbWithCount PreparedPatternQuery {originalQuery = PatternQuery {..}, ..} db =
+  (nubMatches HS.empty matches, rawSize)
+  where
+    subs = case (patQuery, preparedBody) of
+      (SelectAll v, Nothing) -> map (IM.singleton v) (selectAll db)
+      (Conj cq, Just body) -> genericJoinPrepared cq body db
+      _ -> error "ematchPreparedDbWithCount: inconsistent prepared query"
     rawSize = sum (IM.size <$> subs)
     !vs = userVars varNames
     matches =
@@ -176,6 +244,21 @@ buildQueryState db atom@(Atom MkRel {args}) = do
       !stats = IM.map (const weight) positions
   pure (RelationState {..}, stats)
 
+buildPreparedQueryState ::
+  (HasDatabase l) =>
+  Database l ->
+  PreparedAtom l ->
+  Maybe (RelationState l, IntMap VarWeight)
+buildPreparedQueryState db PreparedAtom {..} = do
+  !database <- db ^. at preparedOperator
+  let weight =
+        VarWeight
+          { numRels = Down (Sum 1)
+          , smallestDbSize = Min (Trie.size database)
+          }
+      !stats = IM.map (const weight) preparedPositions
+  pure (RelationState {positions = preparedPositions, ..}, stats)
+
 {-# INLINEABLE genericJoin #-}
 genericJoin ::
   forall l.
@@ -249,3 +332,62 @@ genericJoin (hd ::- qs) db = fromMaybe [] do
       | otherwise = case ds of
           [] -> acc
           d : rest -> intersectAll (IS.intersection acc d) rest
+
+genericJoinPrepared ::
+  forall l.
+  (HasDatabase l) =>
+  ConjunctiveQuery l VarId ->
+  NonEmpty (PreparedAtom l) ->
+  Database l ->
+  [IntSubst]
+genericJoinPrepared (hd ::- _) (PreparedAtom {preparedAtom = atom@(Atom rel), preparedOperator} :| []) db = fromMaybe [] do
+  let vars = IS.fromList (F.toList atom)
+      frees :: [IntSubst]
+      frees =
+        filter (not . IM.null) $
+          sequenceA $
+            IM.fromSet (const $ map Trie.fromKey $ IS.toList $ universe db) $
+              IS.fromList hd `IS.difference` vars
+  trie <- db ^. at preparedOperator
+  let !matches = Trie.match (F.toList rel) trie
+  pure $ if null frees then matches else IM.union <$> matches <*> frees
+genericJoinPrepared (hd ::- _) qs db = fromMaybe [] do
+  relsStats <- mapM (buildPreparedQueryState db) qs
+  let rels = fst <$> relsStats
+      varStat =
+        IM.unionWith
+          (<>)
+          (foldl1' (IM.unionWith (<>)) (snd <$> relsStats))
+          (IM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) hd))
+      order = map fst $ sortOn snd $ IM.toList varStat
+  pure $ FML.toList (go order rels IM.empty)
+  where
+    go [] !_qs sub = FML.singleton sub
+    go (v : vs) !qs' sub =
+      let (!doms, !qs'') =
+            Functor.unzip $
+              fmap
+                ( \q ->
+                    case IM.lookup v q.positions of
+                      Nothing -> (Nothing, const q)
+                      Just poss ->
+                        ( Just $ project poss q.database
+                        , \eid -> q & #database %~ Trie.focus ((,eid) <$> poss)
+                        )
+                )
+                qs'
+          !domain = case catMaybes (NE.toList doms) of
+            [] -> universe db
+            d : ds -> intersectAllPrepared d ds
+       in foldMap'
+            ( \k ->
+                let !eid = Trie.fromKey k
+                 in go vs (($ eid) <$> qs'') (IM.insert v eid sub)
+            )
+            (IS.toList domain)
+
+    intersectAllPrepared !acc ds
+      | IS.null acc = IS.empty
+      | otherwise = case ds of
+          [] -> acc
+          d : rest -> intersectAllPrepared (IS.intersection acc d) rest

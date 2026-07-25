@@ -53,7 +53,7 @@ import Control.Monad.Borrow.Pure.Experimental.Loop
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Deriving (deriveShow1)
-import Data.EGraph.EMatch.Relational (ematchDbWithCount)
+import Data.EGraph.EMatch.Relational (PreparedPatternQuery, ematchPreparedDbWithCount, prepare)
 import Data.EGraph.EMatch.Relational.Database (buildDatabaseForPatterns)
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types (substPatternInt)
@@ -138,6 +138,7 @@ r @? cond = r & #condition ?~ SideCondition cond
 data CompiledRule l d v = CompiledRule
   { name :: !String
   , lhs :: !(PatternQuery l v)
+  , preparedLhs :: !(PreparedPatternQuery l v)
   , rhs :: !(Pattern l VarId)
   -- ^ RHS pre-interned through the LHS variable table.
   , namedVars :: ![(VarId, v)]
@@ -166,14 +167,16 @@ compileRule Rule {..} =
       case traverse (\v -> maybe (Failure [v]) Success (PHM.lookup v nameToId)) rhs of
         Failure misses -> Left $ DanglingVariables $ HashSet.fromList misses
         Success rhsInterned ->
-          Right
-            CompiledRule
-              { name
-              , lhs = lhsQ
-              , rhs = rhsInterned
-              , namedVars = [(i, v) | (i, Just v) <- zip [0 ..] (F.toList lhsQ.varNames)]
-              , condition
-              }
+          let !preparedLhs = prepare lhsQ
+           in Right
+                CompiledRule
+                  { name
+                  , lhs = lhsQ
+                  , preparedLhs
+                  , rhs = rhsInterned
+                  , namedVars = [(i, v) | (i, Just v) <- zip [0 ..] (F.toList lhsQ.varNames)]
+                  , condition
+                  }
 
 data SaturationConfig = SaturationConfig
   { maxIterations :: {-# UNPACK #-} !(Maybe Word)
@@ -244,7 +247,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
             let searchOne (accRaws, st) (ruleIdx, rule@CompiledRule {..}) =
                   case config.scheduler of
                     Nothing ->
-                      let (ms, stat) = ematchDbWithCount lhs db
+                      let (ms, stat) = ematchPreparedDbWithCount preparedLhs db
                        in ((ruleIdx, rule, ms, stat) : accRaws, st)
                     Just sched
                       | isBanned iterNum ruleIdx st ->
@@ -254,12 +257,12 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                           -- banned NOW and its matches are dropped for this
                           -- iteration (deferred to a later re-match). The
                           -- statistic is egg's: the number of substitutions.
-                          let (ms, _stat) = ematchDbWithCount lhs db
+                          let (ms, _stat) = ematchPreparedDbWithCount preparedLhs db
                            in case banAtSearch sched iterNum ruleIdx (P.length ms) st of
                                 Just st' -> ((ruleIdx, rule, [], 0) : accRaws, st')
                                 Nothing -> ((ruleIdx, rule, ms, 0) : accRaws, st)
                       | otherwise ->
-                          let (ms, rawSubstitutionSize) = ematchDbWithCount lhs db
+                          let (ms, rawSubstitutionSize) = ematchPreparedDbWithCount preparedLhs db
                            in -- NB: apply ALL matches of a non-banned rule (as
                               -- hegg does); the scheduler statistic only
                               -- feeds the backoff, which bans over-productive

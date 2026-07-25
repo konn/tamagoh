@@ -517,10 +517,13 @@ test_ematchDifferential = testProperty "B12 differential: interned ematch == nam
       pq = Rel.compile pat :: Q.PatternQuery Expr String
       (refMatches, refRaw) = oldEmatchRef pq db
       (newInterned, newRaw) = Rel.ematchDbWithCount pq db
+      (preparedInterned, preparedRaw) = Rel.ematchPreparedDbWithCount (Rel.prepare pq) db
       newNamed = Rel.ematchDb pq db
   F.assert (Pred.eq .$ ("reference matches", refMatches) .$ ("interned pipeline", newNamed))
   F.assert (Pred.eq .$ ("reference rawSize", refRaw) .$ ("interned rawSize", newRaw))
   F.assert (Pred.eq .$ ("survivor count", length refMatches) .$ ("interned survivors", length newInterned))
+  F.assert (Pred.eq .$ ("on-demand matches", newInterned) .$ ("prepared matches", preparedInterned))
+  F.assert (Pred.eq .$ ("on-demand rawSize", newRaw) .$ ("prepared rawSize", preparedRaw))
 
 {- | Deterministic reproducer for the falsify-found staleness: the maintained
 'ExtractBest' analysis must agree with post-hoc extraction (ground truth) on
