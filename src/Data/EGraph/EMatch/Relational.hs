@@ -25,7 +25,7 @@ module Data.EGraph.EMatch.Relational (
 ) where
 
 import Control.Functor.Linear qualified as Control
-import Control.Lens (at, (%~), (&), (^.))
+import Control.Lens (at, (^.))
 import Control.Monad.Borrow.Pure
 import Data.EGraph.EMatch.Relational.Database
 import Data.EGraph.EMatch.Relational.Query
@@ -50,7 +50,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Ord (Down (..))
 import Data.Semigroup (Min (..), Sum (..))
-import Data.Trie (project)
 import Data.Trie qualified as Trie
 import Data.Vector qualified as V
 import GHC.Generics (Generic, Generically (..))
@@ -215,6 +214,7 @@ query (SelectAll v) = map (IM.singleton v) . selectAll
 data RelationState l = RelationState
   { database :: !Trie.Trie
   , positions :: !(IntMap (NonEmpty Int))
+  , constraints :: !(IntMap EClassId)
   }
   deriving (Show, Generic)
 
@@ -242,7 +242,7 @@ buildQueryState db atom@(Atom MkRel {args}) = do
           , smallestDbSize = Min (Trie.size database)
           }
       !stats = IM.map (const weight) positions
-  pure (RelationState {..}, stats)
+  pure (RelationState {constraints = IM.empty, ..}, stats)
 
 buildPreparedQueryState ::
   (HasDatabase l) =>
@@ -257,7 +257,7 @@ buildPreparedQueryState db PreparedAtom {..} = do
           , smallestDbSize = Min (Trie.size database)
           }
       !stats = IM.map (const weight) preparedPositions
-  pure (RelationState {positions = preparedPositions, ..}, stats)
+  pure (RelationState {positions = preparedPositions, constraints = IM.empty, ..}, stats)
 
 {-# INLINEABLE genericJoin #-}
 genericJoin ::
@@ -294,44 +294,7 @@ genericJoin (hd ::- qs) db = fromMaybe [] do
       -- routing a cost-sorted list through IntSet.fromAscList (whose input
       -- contract requires id order and is not satisfied by a cost order).
       order = map fst $ sortOn snd $ IM.toList varStat
-  -- NB: @go@ accumulates in 'FML.FMList', whose @(<>)@ is O(1); accumulating in a
-  -- plain list here would be a left-nested @(++)@ (via @foldMap'@) and hence O(N^2)
-  -- in the number of matches. Materialise to a list exactly once, at the boundary.
-  pure $ FML.toList (go order rels IM.empty)
-  where
-    -- TODO: consider some selection strategy
-    go [] !_qs sub = FML.singleton sub
-    go (v : vs) !qs sub =
-      let (!doms, !qs') =
-            Functor.unzip $
-              fmap
-                ( \q ->
-                    case IM.lookup v q.positions of
-                      Nothing -> (Nothing, const q)
-                      Just poss ->
-                        ( Just $ project poss q.database
-                        , \eid ->
-                            q
-                              & #database %~ Trie.focus ((,eid) <$> poss)
-                        )
-                )
-                qs
-          !domain = case catMaybes (NE.toList doms) of
-            [] -> universe db
-            d : ds -> intersectAll d ds
-       in foldMap'
-            ( \k ->
-                let !eid = Trie.fromKey k
-                 in go vs (($ eid) <$> qs') (IM.insert v eid sub)
-            )
-            (IS.toList domain)
-
-    intersectAll :: IS.IntSet -> [IS.IntSet] -> IS.IntSet
-    intersectAll !acc ds
-      | IS.null acc = IS.empty
-      | otherwise = case ds of
-          [] -> acc
-          d : rest -> intersectAll (IS.intersection acc d) rest
+  pure $ runGenericJoin db order rels
 
 genericJoinPrepared ::
   forall l.
@@ -360,34 +323,46 @@ genericJoinPrepared (hd ::- _) qs db = fromMaybe [] do
           (foldl1' (IM.unionWith (<>)) (snd <$> relsStats))
           (IM.fromList (map (,VarWeight {numRels = 0, smallestDbSize = maxBound}) hd))
       order = map fst $ sortOn snd $ IM.toList varStat
-  pure $ FML.toList (go order rels IM.empty)
+  pure $ runGenericJoin db order rels
+
+runGenericJoin :: Database l -> [VarId] -> NonEmpty (RelationState l) -> [IntSubst]
+runGenericJoin db order rels = FML.toList (go order rels IM.empty)
   where
+    -- NB: @go@ accumulates in 'FML.FMList', whose @(<>)@ is O(1);
+    -- materialise to a list exactly once, at the boundary.
     go [] !_qs sub = FML.singleton sub
-    go (v : vs) !qs' sub =
-      let (!doms, !qs'') =
+    go (v : vs) !qs sub =
+      let (!doms, !updateRelations) =
             Functor.unzip $
               fmap
                 ( \q ->
                     case IM.lookup v q.positions of
                       Nothing -> (Nothing, const q)
                       Just poss ->
-                        ( Just $ project poss q.database
-                        , \eid -> q & #database %~ Trie.focus ((,eid) <$> poss)
+                        ( Just $ Trie.projectWithConstraints q.constraints poss q.database
+                        , \eid ->
+                            q
+                              { constraints =
+                                  F.foldl'
+                                    (\acc column -> IM.insert column eid acc)
+                                    q.constraints
+                                    poss
+                              }
                         )
                 )
-                qs'
+                qs
           !domain = case catMaybes (NE.toList doms) of
             [] -> universe db
-            d : ds -> intersectAllPrepared d ds
+            d : ds -> intersectAll d ds
        in foldMap'
             ( \k ->
                 let !eid = Trie.fromKey k
-                 in go vs (($ eid) <$> qs'') (IM.insert v eid sub)
+                 in go vs (($ eid) <$> updateRelations) (IM.insert v eid sub)
             )
             (IS.toList domain)
 
-    intersectAllPrepared !acc ds
+    intersectAll !acc ds
       | IS.null acc = IS.empty
       | otherwise = case ds of
           [] -> acc
-          d : rest -> intersectAllPrepared (IS.intersection acc d) rest
+          d : rest -> intersectAll (IS.intersection acc d) rest

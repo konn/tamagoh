@@ -14,6 +14,7 @@ module Data.Trie (
   insert,
   focus,
   project,
+  projectWithConstraints,
   match,
   toKey,
   fromKey,
@@ -153,6 +154,40 @@ project indices =
             i' : is' -> go (n + 1) (i' :| is') eid trie'
       | otherwise =
           alaf Alt foldMap (go (n + 1) (i :| is) eid) trie.branches
+
+projectWithConstraints :: IntMap EClassId -> NonEmpty Int -> Trie -> IntSet
+projectWithConstraints constraints positions = go 0 Nothing
+  where
+    !projected = IS.fromList (F.toList positions)
+    !lastRelevant =
+      max
+        (maybe (-1) fst (IM.lookupMax constraints))
+        (IS.findMax projected)
+
+    go :: Int -> Maybe IM.Key -> Trie -> IntSet
+    go !column !candidate trie
+      | column > lastRelevant = maybe IS.empty IS.singleton candidate
+      | Just eid <- IM.lookup column constraints =
+          maybe
+            IS.empty
+            (go (column + 1) candidate)
+            (IM.lookup (toKey eid) trie.branches)
+      | IS.member column projected =
+          case candidate of
+            Just key ->
+              maybe
+                IS.empty
+                (go (column + 1) candidate)
+                (IM.lookup key trie.branches)
+            Nothing
+              | column == lastRelevant -> trie.keys
+              | otherwise ->
+                  IM.foldMapWithKey
+                    (\key -> go (column + 1) (Just key))
+                    trie.branches
+      | otherwise =
+          foldMap' (go (column + 1) candidate) trie.branches
+{-# INLINE projectWithConstraints #-}
 
 cons :: EClassId -> Trie -> Trie
 {-# INLINE cons #-}

@@ -12,6 +12,9 @@ module Data.EGraph.EMatch.RelationalSpec (
 
 import Data.EGraph.EMatch.RelationalCases
 import Data.EGraph.TestUtils
+import Data.IntMap.Strict qualified as IM
+import Data.List.NonEmpty qualified as NE
+import Data.Trie qualified as Trie
 import Data.Unrestricted.Linear (Ur (..))
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -33,3 +36,23 @@ test_selectAllPin = testCase "B12 pin: SelectAll dedups cross-operator multiplic
   -- classes after merging the I-class into the G-class: {I1,G} and the inner? —
   -- assert one match per class, no operator-multiplied duplicates
   length subss @?= length (foldr (\(cid, _) acc -> if cid `elem` acc then acc else cid : acc) [] subss)
+
+test_projectWithConstraints :: TestTree
+test_projectWithConstraints = testCase "constrained projection agrees with focus then project" do
+  let trie =
+        Trie.fromRows
+          [ [1, 10, 1, 100]
+          , [1, 20, 1, 200]
+          , [2, 10, 3, 100]
+          , [3, 30, 3, 100]
+          , [3, 30, 3, 100]
+          ]
+      check constraints positions =
+        Trie.projectWithConstraints constraints positions trie
+          @?= Trie.project
+            positions
+            (Trie.focus (NE.fromList (IM.toAscList constraints)) trie)
+  check (IM.singleton 3 100) (0 NE.:| [2])
+  check (IM.fromList [(0, 1), (3, 200)]) (1 NE.:| [])
+  check (IM.fromList [(0, 3), (2, 3)]) (1 NE.:| [])
+  check (IM.fromList [(0, 1), (3, 999)]) (1 NE.:| [])
