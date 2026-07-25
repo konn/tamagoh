@@ -227,10 +227,16 @@ benchmark tamagoh-bench-math
     tasty,
     tasty-bench,
 
+  -- -A32m matches hegg's upstream bench nursery.
+  -- Deliberately single-threaded: the old -threaded +
+  -- -with-rtsopts=-N ran the parallel GC on all cores, which inflates
+  -- tamagoh's controlled depth-500 wall ~2x with identical allocation (the
+  -- mutable-heavy heap pays the per-capability sync tax) while barely
+  -- affecting hegg — see TUNE-PLAN Phase 11. -rtsopts kept so measurement
+  -- protocols can pass +RTS -T etc. at the CLI.
   ghc-options:
-    -threaded
     -rtsopts
-    -with-rtsopts=-N
+    -with-rtsopts=-A32m
 
 benchmark tamagoh-bench-hashmap
   import: defaults
