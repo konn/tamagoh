@@ -32,16 +32,35 @@ integrationCases =
     x = var "x"
 
 controlledCases :: [(String, Tamagoh.Term Math, Hegg.Fix Math)]
-controlledCases = [mkControlled 100, mkControlled 500]
+controlledCases = [mkControlled 100, mkControlled 500, mkControlledGrid 2500 8]
+
+controlledConfig :: Tamagoh.SaturationConfig
+controlledConfig = Tamagoh.defaultConfig {Tamagoh.nodeLimit = Just 100_000}
 
 mkControlled :: Int -> (String, Tamagoh.Term Math, Hegg.Fix Math)
 mkControlled depth = ("depth-" <> show depth, tame depth, tame depth)
 
 tame :: (Num f, Corecursive f, Base f ~ Math) => Int -> f
-tame depth = go depth (var "x")
+tame depth = tameFrom depth (var "x")
+
+tameFrom :: (Num f) => Int -> f -> f
+tameFrom depth = go depth
   where
     go 0 !term = term
     go n !term = go (n - 1) (0 + (1 * term))
+
+mkControlledGrid :: Int -> Int -> (String, Tamagoh.Term Math, Hegg.Fix Math)
+mkControlledGrid width depth =
+  ( "grid-" <> show width <> "x" <> show depth
+  , controlledGrid width depth
+  , controlledGrid width depth
+  )
+
+controlledGrid :: (Num f, Corecursive f, Base f ~ Math) => Int -> Int -> f
+controlledGrid width depth =
+  case [tameFrom depth (var ("x" <> show i)) | i <- [1 .. width]] of
+    [] -> error "controlledGrid: width must be positive"
+    term : terms -> foldl' (+) term terms
 
 controlledRuleDefs :: [Rule]
 controlledRuleDefs =
@@ -78,7 +97,7 @@ main = do
             [ bgroup
                 name
                 [ env (evaluate $ force tamagoh) \term ->
-                    bench "tamagoh" $ nf (extractTamagoh tamagohRules) term
+                    bench "tamagoh" $ nf (extractTamagohWith controlledConfig tamagohRules) term
                 , env (evaluate $ force hegg) \term ->
                     bench "hegg" $ nf (extractHegg heggRules) term
                 ]
@@ -90,7 +109,7 @@ annotateControlled ::
   (String, Tamagoh.Term Math, Hegg.Fix Math) ->
   IO (String, Tamagoh.Term Math, Hegg.Fix Math)
 annotateControlled (name, tamagoh, hegg) = do
-  let tamagohStats = snd $ extractTamagohWithStats (fmap toTamagohRule controlledRuleDefs) tamagoh
+  let tamagohStats = snd $ extractTamagohWithStats controlledConfig (fmap toTamagohRule controlledRuleDefs) tamagoh
       heggGraphStats = snd $ extractHeggWithStats (fmap toHeggRule controlledRuleDefs) hegg
   if tamagohStats == heggGraphStats
     then pure (name <> "-nodes-" <> show (fst tamagohStats) <> "-classes-" <> show (snd tamagohStats), tamagoh, hegg)
@@ -134,21 +153,29 @@ extractTamagoh ::
   [Tamagoh.Rule Math TamagohAnalysis String] ->
   Tamagoh.Term Math ->
   Either () (Tamagoh.Term Math)
-extractTamagoh rs node =
+extractTamagoh = extractTamagohWith Tamagoh.defaultConfig
+
+extractTamagohWith ::
+  Tamagoh.SaturationConfig ->
+  [Tamagoh.Rule Math TamagohAnalysis String] ->
+  Tamagoh.Term Math ->
+  Either () (Tamagoh.Term Math)
+extractTamagohWith config rs node =
   Bi.bimap
     (const ())
     ( \(gr, eids) -> case eids of
         eid : _ -> fst $ fromJust $ Tamagoh.extractBestWith @BenchCost eid gr
         [] -> error "saturateFromList returned no id for one input term"
     )
-    $ Tamagoh.saturateFromList Tamagoh.defaultConfig rs [node]
+    $ Tamagoh.saturateFromList config rs [node]
 
 extractTamagohWithStats ::
+  Tamagoh.SaturationConfig ->
   [Tamagoh.Rule Math TamagohAnalysis String] ->
   Tamagoh.Term Math ->
   (Either () (Tamagoh.Term Math), (Int, Int))
-extractTamagohWithStats rs node =
-  case Tamagoh.saturateFromList Tamagoh.defaultConfig rs [node] of
+extractTamagohWithStats config rs node =
+  case Tamagoh.saturateFromList config rs [node] of
     Left _ -> (Left (), (0, 0))
     Right (gr, eid : _) ->
       ( Right $ fst $ fromJust $ Tamagoh.extractBestWith @BenchCost eid gr
