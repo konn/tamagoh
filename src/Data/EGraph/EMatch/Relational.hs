@@ -24,7 +24,6 @@ module Data.EGraph.EMatch.Relational (
 import Control.Functor.Linear qualified as Control
 import Control.Lens (at, (%~), (&), (^.))
 import Control.Monad.Borrow.Pure
-import Data.Bifunctor qualified as Bi
 import Data.EGraph.EMatch.Relational.Database
 import Data.EGraph.EMatch.Relational.Query
 import Data.EGraph.EMatch.Types (Substitution (..))
@@ -146,8 +145,7 @@ query (Conj cq) = genericJoin cq
 query (SelectAll v) = map (IM.singleton v) . selectAll
 
 data RelationState l = RelationState
-  { atom :: !(Atom l VarId)
-  , database :: !Trie.Trie
+  { database :: !Trie.Trie
   , positions :: !(IntMap (NonEmpty Int))
   }
   deriving (Show, Generic)
@@ -222,27 +220,32 @@ genericJoin (hd ::- qs) db = fromMaybe [] do
     go [] !_qs sub = FML.singleton sub
     go (v : vs) !qs sub =
       let (!doms, !qs') =
-            Bi.first (sortOn IS.size . catMaybes . NE.toList) $
-              Functor.unzip $
-                fmap
-                  ( \q ->
-                      case IM.lookup v q.positions of
-                        Nothing -> (Nothing, const q)
-                        Just poss ->
-                          ( Just $ project poss q.database
-                          , \eid ->
-                              q
-                                & #atom %~ substAtom v eid
-                                & #database %~ Trie.focus ((,eid) <$> poss)
-                          )
-                  )
-                  qs
-          !domain = case NE.nonEmpty doms of
-            Nothing -> universe db
-            Just xs' -> foldl1' IS.intersection xs'
+            Functor.unzip $
+              fmap
+                ( \q ->
+                    case IM.lookup v q.positions of
+                      Nothing -> (Nothing, const q)
+                      Just poss ->
+                        ( Just $ project poss q.database
+                        , \eid ->
+                            q
+                              & #database %~ Trie.focus ((,eid) <$> poss)
+                        )
+                )
+                qs
+          !domain = case catMaybes (NE.toList doms) of
+            [] -> universe db
+            d : ds -> intersectAll d ds
        in foldMap'
             ( \k ->
                 let !eid = Trie.fromKey k
                  in go vs (($ eid) <$> qs') (IM.insert v eid sub)
             )
             (IS.toList domain)
+
+    intersectAll :: IS.IntSet -> [IS.IntSet] -> IS.IntSet
+    intersectAll !acc ds
+      | IS.null acc = IS.empty
+      | otherwise = case ds of
+          [] -> acc
+          d : rest -> intersectAll (IS.intersection acc d) rest

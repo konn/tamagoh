@@ -69,6 +69,7 @@ import Data.Functor.Foldable (cataA)
 import Data.Functor.Linear qualified as Data
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue qualified as HMUr
 import Data.HashSet qualified as HS
+import Data.Hashable (hash)
 import Data.Hashable.Lifted (Hashable1)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe qualified as P
@@ -486,7 +487,7 @@ rebuild = loop HS.empty
         else Control.do
           (Ur todos, egraph) <- sharing egraph \egraph -> runUrT do
             canonical <- P.mapM (canonicalTodo egraph) rawTodos
-            UrT $ Control.pure $ Ur (P.reverse (nubHash canonical))
+            UrT $ Control.pure $ Ur (P.reverse (nubByCachedHash canonical))
 
           egraph <- forReborrowing_ egraph todos \egraph todo ->
             move todo & \(Ur (pClass, pNode)) -> repair egraph pClass pNode
@@ -504,7 +505,7 @@ rebuild = loop HS.empty
           -- "maintained ExtractBest equals post-hoc" reproducer).
           (Ur analysisTodos, egraph) <- sharing egraph \egraph -> runUrT do
             canonical <- P.mapM (canonicalAnalysisTodo egraph) rawAnalysisTodos
-            UrT $ Control.pure $ Ur (P.reverse (nubHash canonical))
+            UrT $ Control.pure $ Ur (P.reverse (nubByCachedHash canonical))
 
           egraph <- forReborrowing_ egraph analysisTodos \egraph todo ->
             move todo & \(Ur (pClass, pNode)) -> repairAnal egraph pClass pNode
@@ -536,11 +537,13 @@ rebuild = loop HS.empty
     canonicalTodo egraph (Ur (pClass, pNode)) = UrT $ Control.do
       Ur pClass <- unsafeFind egraph pClass
       Ur pNode <- unsafeCanonicalize pNode egraph
-      Control.pure $ Ur (pClass, pNode)
+      let !pair = (pClass, pNode)
+      Control.pure $ Ur (hash pair, pair)
 
     canonicalAnalysisTodo egraph (Ur (pClass, pNode)) = UrT $ Control.do
       Ur pClass <- unsafeFind egraph pClass
-      Control.pure $ Ur (pClass, pNode)
+      let !pair = (pClass, pNode)
+      Control.pure $ Ur (hash pair, pair)
 
 {-# INLINEABLE repair #-}
 repair ::

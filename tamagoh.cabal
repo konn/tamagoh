@@ -237,6 +237,7 @@ benchmark tamagoh-bench-math
   ghc-options:
     -rtsopts
     -with-rtsopts=-A32m
+    -fproc-alignment=64
 
 benchmark tamagoh-bench-hashmap
   import: defaults

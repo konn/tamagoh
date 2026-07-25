@@ -28,6 +28,7 @@ module Control.Monad.Borrow.Pure.Utils (
   Borrows (..),
   swapTuple,
   nubHash,
+  nubByCachedHash,
   coerceLin,
 ) where
 
@@ -39,6 +40,7 @@ import Data.Array.Mutable.Linear qualified as Array
 import Data.Coerce (Coercible, coerce)
 import Data.HashSet qualified as HS
 import Data.Hashable (Hashable)
+import Data.IntMap.Strict qualified as IM
 import Prelude.Linear hiding (Eq, Ord, Show, find, lookup)
 import Unsafe.Linear qualified as Unsafe
 import Prelude qualified as P
@@ -84,6 +86,17 @@ nubHash = go P.mempty
     go !s (x : xs)
       | HS.member x s = go s xs
       | otherwise = x : go (HS.insert x s) xs
+
+nubByCachedHash :: (P.Eq a) => [(Int, a)] -> [a]
+nubByCachedHash = go IM.empty
+  where
+    go !_ [] = []
+    go !buckets ((!h, x) : xs) =
+      case IM.lookup h buckets of
+        Just bucket
+          | P.any (P.== x) bucket -> go buckets xs
+          | otherwise -> x : go (IM.insert h (x : bucket) buckets) xs
+        Nothing -> x : go (IM.insert h [x] buckets) xs
 
 coerceLin :: (Coercible a b) => a %1 -> b
 {-# INLINE coerceLin #-}
