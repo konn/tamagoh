@@ -494,9 +494,17 @@ rebuild = loop HS.empty
           -- Match hegg's rebuild cadence: the analysis batch is the one
           -- snapshotted before congruence repair. Work enqueued by either
           -- phase is handled by the next recursive batch.
+          -- Deduplicate analysis repairs on the (owner, node) PAIR — egg's
+          -- analysis_pending is a UniqueQueue of (node, class) pairs. hegg
+          -- instead keeps only the newest entry per owner (nubIntOn fst),
+          -- which silently drops sibling parent nodes of the same class:
+          -- an analysis improvement discoverable only through a dropped
+          -- node is then never propagated, leaving maintained analyses
+          -- stale (observed: ExtractBest cost 15 vs true 13; see the
+          -- "maintained ExtractBest equals post-hoc" reproducer).
           (Ur analysisTodos, egraph) <- sharing egraph \egraph -> runUrT do
             canonical <- P.mapM (canonicalAnalysisTodo egraph) rawAnalysisTodos
-            UrT $ Control.pure $ Ur (P.reverse (nubAnalysis canonical))
+            UrT $ Control.pure $ Ur (P.reverse (nubHash canonical))
 
           egraph <- forReborrowing_ egraph analysisTodos \egraph todo ->
             move todo & \(Ur (pClass, pNode)) -> repairAnal egraph pClass pNode
@@ -533,16 +541,6 @@ rebuild = loop HS.empty
     canonicalAnalysisTodo egraph (Ur (pClass, pNode)) = UrT $ Control.do
       Ur pClass <- unsafeFind egraph pClass
       Control.pure $ Ur (pClass, pNode)
-
-    -- hegg's analysis worklist uses @nubIntOn fst@: retain the newest queued
-    -- entry for each canonical owner, then process retained entries oldest
-    -- first (the surrounding reverse corresponds to hegg's strict foldr).
-    nubAnalysis = go HS.empty
-      where
-        go !_ [] = []
-        go !seen (entry@(pClass, _) : rest)
-          | HS.member pClass seen = go seen rest
-          | otherwise = entry : go (HS.insert pClass seen) rest
 
 {-# INLINEABLE repair #-}
 repair ::

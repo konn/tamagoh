@@ -406,14 +406,11 @@ checkExtractEquiv terms (i, j) = do
         ( \r -> do
             let mc = fmap snd (extractBest r g)
                 pc = fmap snd (extractBestWith @NodeCount r g)
-            -- KNOWN BUG (tracked): the maintained ExtractBest can be
-            -- stale-HIGH (found by this property: cost 15 vs true 13 on
-            -- ((a+a)+(0+a))*((a+a)+(a+a))). Post-hoc is ground truth, so
-            -- until the propagation gap is fixed we assert the one-sided
-            -- invariant: the post-hoc optimum is never WORSE than the
-            -- maintained value (and both are defined together). Restore
-            -- Pred.eq once the maintained analysis is repaired.
-            F.assert (Pred.expect True .$ ("post-hoc <= maintained", pc <= mc && (pc == Nothing) == (mc == Nothing)))
+            -- Post-hoc is ground truth; the maintained analysis must agree
+            -- on the winning cost (the pair-dedup analysis worklist fix —
+            -- egg's UniqueQueue (node, class) semantics — repaired the
+            -- staleness this property originally found).
+            F.assert (Pred.eq .$ ("maintained", mc) .$ ("post-hoc", pc))
         )
         roots0
 
@@ -524,3 +521,16 @@ test_ematchDifferential = testProperty "B12 differential: interned ematch == nam
   F.assert (Pred.eq .$ ("reference matches", refMatches) .$ ("interned pipeline", newNamed))
   F.assert (Pred.eq .$ ("reference rawSize", refRaw) .$ ("interned rawSize", newRaw))
   F.assert (Pred.eq .$ ("survivor count", length refMatches) .$ ("interned survivors", length newInterned))
+
+{- | Deterministic reproducer for the falsify-found staleness: the maintained
+'ExtractBest' analysis must agree with post-hoc extraction (ground truth) on
+the winning cost.
+-}
+test_maintainedExtractFresh :: TestTree
+test_maintainedExtractFresh = testCase "maintained ExtractBest equals post-hoc on the reproducer" do
+  let aT = var "a"
+      t = ((aT + aT) + (0 + aT)) * ((aT + aT) + (aT + aT))
+      graph0 = fromList @(ExtractBest Expr NodeCount, ConstantFolding) [t]
+  r <- maybe (assertFailure "root missing") pure $ lookupTerm t graph0
+  g <- either (assertFailure . show) pure $ saturate defaultConfig ringRules graph0
+  fmap snd (extractBest r g) @?= fmap snd (extractBestWith @NodeCount r g)
