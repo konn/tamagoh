@@ -170,12 +170,16 @@ prepare originalQuery@PatternQuery {patQuery} =
 
     preparedLayoutPlan = case (patQuery, preparedBody) of
       (Conj (headVars ::- _), Just body)
-        | NE.length body >= 3
-        , all (maybe False (const True) . preparedVariables) body
+        | all (maybe False (const True) . preparedVariables) body
         , IS.fromList headVars
-            `IS.isSubsetOf` F.foldMap (IM.keysSet . preparedPositions) body ->
+            `IS.isSubsetOf` F.foldMap (IM.keysSet . preparedPositions) body
+        , NE.length body >= 3 || isDirectedUnaryChain body ->
             let !order = staticVariableOrder headVars body
-             in PreparedLayoutPlan order <$> traverse (prepareLayoutAtom order) body
+             in do
+                  atoms <- traverse (prepareLayoutAtom order) body
+                  if NE.length body >= 3 || any hasPreparedIndex atoms
+                    then Just (PreparedLayoutPlan order atoms)
+                    else Nothing
       _ -> Nothing
 
     prepareAtom atom@(Atom rel@MkRel {args}) =
@@ -217,6 +221,24 @@ prepare originalQuery@PatternQuery {patQuery} =
           , layoutPositions = positions
           }
     prepareLayoutAtom _ PreparedAtom {preparedVariables = Nothing} = Nothing
+
+    hasPreparedIndex PreparedLayoutAtom {layoutIndex = Just _} = True
+    hasPreparedIndex PreparedLayoutAtom {layoutIndex = Nothing} = False
+
+    isDirectedUnaryChain body = case NE.toList body of
+      [left, right] -> case (preparedVariables left, preparedVariables right) of
+        (Just [leftRoot, leftChild], Just [rightRoot, rightChild]) ->
+          leftRoot /= leftChild
+            && rightRoot /= rightChild
+            && IS.size
+              ( IS.intersection
+                  (IS.fromList [leftRoot, leftChild])
+                  (IS.fromList [rightRoot, rightChild])
+              )
+              == 1
+            && (leftChild == rightRoot || rightChild == leftRoot)
+        _ -> False
+      _ -> False
 
 preparedLayoutEligible :: PreparedPatternQuery l v -> Bool
 preparedLayoutEligible PreparedPatternQuery {preparedLayoutPlan} =

@@ -58,6 +58,8 @@ deriveLanguage ''Lang1
 data PlannerLang a
   = PAdd !a !a
   | PMul !a !a
+  | POuter !a
+  | PInner !a
   | PLit !Int
   deriving
     ( P.Eq
@@ -80,6 +82,7 @@ data PreparedTransposePin = PreparedTransposePin
   , fixedColumnFallbackExact :: !P.Bool
   , identityLayoutExact :: !P.Bool
   , missingRelationExact :: !P.Bool
+  , unaryChainEligibilityExact :: !P.Bool
   }
   deriving (P.Eq, P.Show)
 
@@ -209,6 +212,59 @@ preparedTransposePin =
                                       ]
                             )
           }
+      unaryChainQuery atoms =
+        nestedQuery
+          { Query.patQuery = Query.Conj $ [] Query.::- atoms
+          }
+      directedUnaryQuery =
+        unaryChainQuery
+          ( Query.Atom (Query.MkRel (Query.QVar 0) (POuter (Query.QVar 1)))
+              NE.:| [Query.Atom (Query.MkRel (Query.QVar 1) (PInner (Query.QVar 2)))]
+          )
+      disconnectedUnaryQuery =
+        unaryChainQuery
+          ( Query.Atom (Query.MkRel (Query.QVar 0) (POuter (Query.QVar 1)))
+              NE.:| [Query.Atom (Query.MkRel (Query.QVar 2) (PInner (Query.QVar 3)))]
+          )
+      repeatedUnaryQuery =
+        unaryChainQuery
+          ( Query.Atom (Query.MkRel (Query.QVar 0) (POuter (Query.QVar 0)))
+              NE.:| [Query.Atom (Query.MkRel (Query.QVar 0) (PInner (Query.QVar 1)))]
+          )
+      sharedChildUnaryQuery =
+        unaryChainQuery
+          ( Query.Atom (Query.MkRel (Query.QVar 0) (POuter (Query.QVar 2)))
+              NE.:| [Query.Atom (Query.MkRel (Query.QVar 1) (PInner (Query.QVar 2)))]
+          )
+      sharedRootUnaryQuery =
+        unaryChainQuery
+          ( Query.Atom (Query.MkRel (Query.QVar 2) (POuter (Query.QVar 0)))
+              NE.:| [Query.Atom (Query.MkRel (Query.QVar 2) (PInner (Query.QVar 1)))]
+          )
+      cyclicUnaryQuery =
+        unaryChainQuery
+          ( Query.Atom (Query.MkRel (Query.QVar 0) (POuter (Query.QVar 1)))
+              NE.:| [Query.Atom (Query.MkRel (Query.QVar 1) (PInner (Query.QVar 0)))]
+          )
+      binaryLiteralQuery =
+        unaryChainQuery
+          ( Query.Atom (Query.MkRel (Query.QVar 0) (PAdd (Query.QVar 1) (Query.QVar 2)))
+              NE.:| [Query.Atom (Query.MkRel (Query.QVar 1) (PLit 0))]
+          )
+      fixedUnaryQuery =
+        unaryChainQuery
+          ( Query.Atom (Query.MkRel (Query.QVar 0) (POuter (Query.QVar 1)))
+              NE.:| [Query.Atom (Query.MkRel (Query.QVar 1) (PInner (Query.EId 2)))]
+          )
+      headOnlyUnaryQuery =
+        nestedQuery
+          { Query.patQuery =
+              Query.Conj $
+                [9]
+                  Query.::- ( Query.Atom (Query.MkRel (Query.QVar 0) (POuter (Query.QVar 1)))
+                                NE.:| [Query.Atom (Query.MkRel (Query.QVar 1) (PInner (Query.QVar 2)))]
+                            )
+          }
 
       missingDb =
         Database.fromRelations
@@ -250,6 +306,16 @@ preparedTransposePin =
         , missingRelationExact =
             missingCanonical P.== ([], 0)
               P.&& missingPrepared P.== missingCanonical
+        , unaryChainEligibilityExact =
+            preparedLayoutEligible (prepare directedUnaryQuery)
+              P.&& P.not (preparedLayoutEligible (prepare disconnectedUnaryQuery))
+              P.&& P.not (preparedLayoutEligible (prepare repeatedUnaryQuery))
+              P.&& P.not (preparedLayoutEligible (prepare sharedChildUnaryQuery))
+              P.&& P.not (preparedLayoutEligible (prepare sharedRootUnaryQuery))
+              P.&& P.not (preparedLayoutEligible (prepare cyclicUnaryQuery))
+              P.&& P.not (preparedLayoutEligible (prepare binaryLiteralQuery))
+              P.&& P.not (preparedLayoutEligible (prepare fixedUnaryQuery))
+              P.&& P.not (preparedLayoutEligible (prepare headOnlyUnaryQuery))
         }
 
 data PreparedDatabasePin = PreparedDatabasePin
@@ -259,6 +325,9 @@ data PreparedDatabasePin = PreparedDatabasePin
   , preparedRequirementsExact :: !P.Bool
   , multipleLayoutsExact :: !P.Bool
   , absentPreparedFallbackExact :: !P.Bool
+  , sameUnaryPreparedExact :: !P.Bool
+  , distinctUnaryPreparedExact :: !P.Bool
+  , unaryMissingFallbackExact :: !P.Bool
   }
   deriving (P.Eq, P.Show)
 
@@ -278,6 +347,22 @@ mkPreparedDatabasePin ::
 mkPreparedDatabasePin egraph = Control.do
   (Ur _, Ur _, egraph) <- addTerm (plannerNested 2) egraph
   (Ur _, Ur _, egraph) <- addTerm (plannerNested 3) egraph
+  (Ur _, Ur _, egraph) <-
+    addTerm
+      (wrapTerm (POuter (wrapTerm (POuter (plannerLit 0)))))
+      egraph
+  (Ur _, Ur _, egraph) <-
+    addTerm
+      (wrapTerm (POuter (wrapTerm (POuter (plannerLit 1)))))
+      egraph
+  (Ur _, Ur _, egraph) <-
+    addTerm
+      (wrapTerm (POuter (wrapTerm (PInner (plannerLit 0)))))
+      egraph
+  (Ur _, Ur _, egraph) <-
+    addTerm
+      (wrapTerm (POuter (wrapTerm (PInner (plannerLit 1)))))
+      egraph
   egraph <- rebuild egraph
   uncurry (flip lseq) Control.<$> sharing egraph \egraph -> Control.do
     let pattern =
@@ -297,6 +382,27 @@ mkPreparedDatabasePin egraph = Control.do
         keyA = fromJust (Database.mkPreparedIndexKey preparedOperator layoutA)
         keyB = fromJust (Database.mkPreparedIndexKey preparedOperator layoutB)
         multiLayoutSet = HS.fromList [keyA, keyB]
+        unaryQuery outer inner =
+          Query.PatternQuery
+            { Query.root = 0
+            , Query.varNames = V.empty
+            , Query.patQuery =
+                Query.Conj $
+                  [0]
+                    Query.::- ( Query.Atom (Query.MkRel (Query.QVar 0) (outer (Query.QVar 1)))
+                                  NE.:| [Query.Atom (Query.MkRel (Query.QVar 1) (inner (Query.QVar 2)))]
+                              )
+            }
+        sameUnaryQuery = unaryQuery POuter POuter
+        distinctUnaryQuery = unaryQuery POuter PInner
+        sameUnaryPrepared = prepare sameUnaryQuery
+        distinctUnaryPrepared = prepare distinctUnaryQuery
+        (sameCanonicalOperators, sameIndexes) =
+          preparedDatabaseRequirements sameUnaryPrepared
+        (distinctCanonicalOperators, distinctIndexes) =
+          preparedDatabaseRequirements distinctUnaryPrepared
+        distinctAllCanonical =
+          HS.fromList (preparedOperators distinctUnaryPrepared)
     Ur full <- Database.buildDatabaseForPatterns False True egraph
     Ur fused <-
       Database.buildDatabaseForPrepared
@@ -308,6 +414,24 @@ mkPreparedDatabasePin egraph = Control.do
       Database.buildDatabaseForPrepared
         HS.empty
         multiLayoutSet
+        True
+        egraph
+    Ur sameUnary <-
+      Database.buildDatabaseForPrepared
+        (HS.fromList sameCanonicalOperators)
+        (HS.fromList sameIndexes)
+        True
+        egraph
+    Ur distinctUnary <-
+      Database.buildDatabaseForPrepared
+        (HS.fromList distinctCanonicalOperators)
+        (HS.fromList distinctIndexes)
+        True
+        egraph
+    Ur missingUnary <-
+      Database.buildDatabaseForPrepared
+        distinctAllCanonical
+        HS.empty
         True
         egraph
     let fusedMatchesExact =
@@ -356,6 +480,45 @@ mkPreparedDatabasePin egraph = Control.do
           Database.getPreparedTrie primaryKey emptyDatabase P.== Nothing
             P.&& Database.getTrie preparedOperator emptyDatabase P.== Trie.empty
             P.&& ematchPreparedDbWithCount prepared emptyDatabase P.== ([], 0)
+        sameCanonical =
+          ematchDbWithCount sameUnaryQuery full
+        samePrepared =
+          ematchPreparedDbWithCount sameUnaryPrepared sameUnary
+        sameOperator = Database.toOperator (POuter (0 :: EClassId))
+        sameUnaryPreparedExact =
+          preparedLayoutEligible sameUnaryPrepared
+            P.&& HS.size (HS.fromList sameIndexes) P.== 1
+            P.&& Database.getTrie sameOperator sameUnary P./= Trie.empty
+            P.&& P.all
+              (\key -> Database.getPreparedTrie key sameUnary P./= Nothing)
+              sameIndexes
+            P.&& P.not (P.null (P.fst sameCanonical))
+            P.&& samePrepared P.== sameCanonical
+        distinctCanonical =
+          ematchDbWithCount distinctUnaryQuery full
+        distinctPrepared =
+          ematchPreparedDbWithCount distinctUnaryPrepared distinctUnary
+        outerOperator = Database.toOperator (POuter (0 :: EClassId))
+        innerOperator = Database.toOperator (PInner (0 :: EClassId))
+        distinctUnaryPreparedExact =
+          preparedLayoutEligible distinctUnaryPrepared
+            P.&& HS.size (HS.fromList distinctIndexes) P.== 1
+            P.&& Database.getTrie outerOperator distinctUnary P.== Trie.empty
+            P.&& Database.getTrie innerOperator distinctUnary P./= Trie.empty
+            P.&& P.all
+              (\key -> Database.getPreparedTrie key distinctUnary P./= Nothing)
+              distinctIndexes
+            P.&& P.not (P.null (P.fst distinctCanonical))
+            P.&& distinctPrepared P.== distinctCanonical
+        unaryMissingFallbackExact =
+          P.all
+            (\key -> Database.getPreparedTrie key missingUnary P.== Nothing)
+            distinctIndexes
+            P.&& Database.getTrie outerOperator missingUnary P./= Trie.empty
+            P.&& Database.getTrie innerOperator missingUnary P./= Trie.empty
+            P.&& ematchPreparedDbWithCount distinctUnaryPrepared missingUnary
+              P.== distinctCanonical
+            P.&& P.not (P.null (P.fst distinctCanonical))
     Control.pure $
       Ur
         PreparedDatabasePin
@@ -365,6 +528,9 @@ mkPreparedDatabasePin egraph = Control.do
           , preparedRequirementsExact
           , multipleLayoutsExact
           , absentPreparedFallbackExact
+          , sameUnaryPreparedExact
+          , distinctUnaryPreparedExact
+          , unaryMissingFallbackExact
           }
 
 mkMixedSelectAllSaturationPin ::

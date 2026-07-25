@@ -149,11 +149,12 @@ buildDatabaseForPrepared canonicalOperators preparedIndexes assumeCanonical egra
   share egraph PL.& \(Ur egraph) -> Control.do
     Ur classes <- EC.nodeLists (egraph .# #classes)
     let layoutsByOperator =
-          HM.fromListWith
-            HS.union
-            [ (operator, HS.singleton layout)
-            | PreparedIndexKey operator layout <- HS.toList preparedIndexes
-            ]
+          HM.map (sortOn id) $
+            HM.fromListWith
+              (<>)
+              [ (operator, [layout])
+              | PreparedIndexKey operator layout <- HS.toList preparedIndexes
+              ]
 
         goClasses ::
           [(EClassId, [ENode l])] ->
@@ -184,7 +185,7 @@ buildDatabaseForPrepared canonicalOperators preparedIndexes assumeCanonical egra
         goNodes eid (enode@(ENode args) : nodes) rest canonicalRows preparedRows =
           let !operator = toOperator args
               !needCanonical = HS.member operator canonicalOperators
-              !layouts = maybe [] (sortOn id . HS.toList) (HM.lookup operator layoutsByOperator)
+              !layouts = HM.lookupDefault [] operator layoutsByOperator
            in if not needCanonical && null layouts
                 then goNodes eid nodes rest canonicalRows preparedRows
                 else

@@ -43,6 +43,7 @@ test_preparedTransposePin = testCase "T9 prepared transposition preserves exact 
       , fixedColumnFallbackExact = True
       , identityLayoutExact = True
       , missingRelationExact = True
+      , unaryChainEligibilityExact = True
       }
 
 test_preparedDatabasePin :: TestTree
@@ -56,6 +57,9 @@ test_preparedDatabasePin = testCase "T9 fused prepared indexes preserve canonica
       , preparedRequirementsExact = True
       , multipleLayoutsExact = True
       , absentPreparedFallbackExact = True
+      , sameUnaryPreparedExact = True
+      , distinctUnaryPreparedExact = True
+      , unaryMissingFallbackExact = True
       }
 
 test_mixedSelectAllSaturationPin :: TestTree
