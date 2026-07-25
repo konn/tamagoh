@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Main (main) where
 
@@ -10,7 +11,7 @@ import Data.Equality.Graph qualified as HeggGraph
 import Data.Equality.Matching qualified as Hegg
 import Data.Equality.Matching.Database qualified as HeggDB
 import Data.Equality.Saturation qualified as Hegg
-import Data.Functor.Foldable (Base, Corecursive)
+import Data.Functor.Foldable (Base, Corecursive, cata)
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import Data.Map.Strict qualified as Map
@@ -31,14 +32,35 @@ integrationCases =
     x :: (Corecursive f, Base f ~ Math) => f
     x = var "x"
 
-controlledCases :: [(String, Tamagoh.Term Math, Hegg.Fix Math)]
-controlledCases = [mkControlled 100, mkControlled 500, mkControlledGrid 2500 8]
+data ControlledCase
+  = ControlledCase
+      String
+      (Tamagoh.Term Math)
+      (Hegg.Fix Math)
+      [Rule]
+      Tamagoh.SaturationConfig
+
+controlledCases :: [ControlledCase]
+controlledCases =
+  [ mkSimplifyDepth 100
+  , mkSimplifyDepth 500
+  , mkSimplifyGrid 2500 8
+  , mkNestedJoin 1500
+  , mkRepeatedVar 1500
+  , mkMergeRebuild 1500
+  ]
 
 controlledConfig :: Tamagoh.SaturationConfig
 controlledConfig = Tamagoh.defaultConfig {Tamagoh.nodeLimit = Just 100_000}
 
-mkControlled :: Int -> (String, Tamagoh.Term Math, Hegg.Fix Math)
-mkControlled depth = ("depth-" <> show depth, tame depth, tame depth)
+mkSimplifyDepth :: Int -> ControlledCase
+mkSimplifyDepth depth =
+  ControlledCase
+    ("simplify-depth-" <> show depth)
+    (tame depth)
+    (tame depth)
+    simplifyRules
+    controlledConfig
 
 tame :: (Num f, Corecursive f, Base f ~ Math) => Int -> f
 tame depth = tameFrom depth (var "x")
@@ -49,12 +71,14 @@ tameFrom depth = go depth
     go 0 !term = term
     go n !term = go (n - 1) (0 + (1 * term))
 
-mkControlledGrid :: Int -> Int -> (String, Tamagoh.Term Math, Hegg.Fix Math)
-mkControlledGrid width depth =
-  ( "grid-" <> show width <> "x" <> show depth
-  , controlledGrid width depth
-  , controlledGrid width depth
-  )
+mkSimplifyGrid :: Int -> Int -> ControlledCase
+mkSimplifyGrid width depth =
+  ControlledCase
+    ("simplify-grid-" <> show width <> "x" <> show depth)
+    (controlledGrid width depth)
+    (controlledGrid width depth)
+    simplifyRules
+    controlledConfig
 
 controlledGrid :: (Num f, Corecursive f, Base f ~ Math) => Int -> Int -> f
 controlledGrid width depth =
@@ -62,14 +86,78 @@ controlledGrid width depth =
     [] -> error "controlledGrid: width must be positive"
     term : terms -> foldl' (+) term terms
 
-controlledRuleDefs :: [Rule]
-controlledRuleDefs =
+simplifyRules :: [Rule]
+simplifyRules =
   [ named "zero-add" $ 0 + a ==> a
   , named "one-mul" $ 1 * a ==> a
   ]
   where
     a :: Tamagoh.Pattern Math String
     a = Tamagoh.Metavar "a"
+
+mkNestedJoin :: Int -> ControlledCase
+mkNestedJoin width =
+  ControlledCase
+    ("nested-join-" <> show width <> "x2")
+    (nestedJoinWorkload width)
+    (nestedJoinWorkload width)
+    [named "nested-zero-one" $ 0 + (1 * a) ==> a]
+    controlledConfig
+  where
+    a :: Tamagoh.Pattern Math String
+    a = Tamagoh.Metavar "a"
+
+nestedJoinWorkload :: (Num f, Corecursive f, Base f ~ Math) => Int -> f
+nestedJoinWorkload width =
+  inertChain $
+    [0 + (1 * var ("m" <> show i)) | i <- [1 .. width]]
+      <> [0 + (2 * var ("d" <> show i)) | i <- [1 .. width]]
+
+mkRepeatedVar :: Int -> ControlledCase
+mkRepeatedVar width =
+  ControlledCase
+    ("repeated-var-" <> show width <> "x2")
+    (repeatedVarWorkload width)
+    (repeatedVarWorkload width)
+    [named "double-to-mul" $ a + a ==> 2 * a]
+    controlledConfig
+  where
+    a :: Tamagoh.Pattern Math String
+    a = Tamagoh.Metavar "a"
+
+repeatedVarWorkload :: (Num f, Corecursive f, Base f ~ Math) => Int -> f
+repeatedVarWorkload width =
+  inertChain $
+    [let x = var ("r" <> show i) in x + x | i <- [1 .. width]]
+      <> [var ("l" <> show i) + var ("r" <> show i) | i <- [1 .. width]]
+
+mkMergeRebuild :: Int -> ControlledCase
+mkMergeRebuild width =
+  ControlledCase
+    ("merge-rebuild-" <> show width <> "x3")
+    (mergeRebuildWorkload width)
+    (mergeRebuildWorkload width)
+    [ named "comm-add" $ a + b ==> b + a
+    , named "comm-mul" $ a * b ==> b * a
+    , named "sin-involution" $ sin (sin a) ==> a
+    ]
+    controlledConfig
+  where
+    a, b :: Tamagoh.Pattern Math String
+    a = Tamagoh.Metavar "a"
+    b = Tamagoh.Metavar "b"
+
+mergeRebuildWorkload :: (Floating f, Corecursive f, Base f ~ Math) => Int -> f
+mergeRebuildWorkload width =
+  inertChain $
+    [var ("a" <> show i) + var ("b" <> show i) | i <- [1 .. width]]
+      <> [var ("c" <> show i) * var ("d" <> show i) | i <- [1 .. width]]
+      <> [sin (sin (var ("s" <> show i))) | i <- [1 .. width]]
+
+inertChain :: (Num f) => [f] -> f
+inertChain = \case
+  [] -> error "inertChain: empty workload"
+  term : terms -> foldl' (-) term terms
 
 mk :: String -> (forall f. (Floating f, Corecursive f, Base f ~ Math) => f) -> (String, Tamagoh.Term Math, Hegg.Fix Math)
 mk name term = (name, term, term)
@@ -90,30 +178,68 @@ main = do
                 ]
             | (name, tamagoh, hegg) <- integrationCases
             ]
-    , env (evaluate $ force $ fmap (toHeggRule @ConstantFold) controlledRuleDefs) \heggRules ->
-        env (evaluate $ force $ fmap (toTamagohRule @TamagohAnalysis) controlledRuleDefs) \tamagohRules ->
-          bgroup
-            "controlled"
-            [ bgroup
+    , bgroup
+        "controlled"
+        [ env (evaluate $ force $ fmap (toHeggRule @ConstantFold) ruleDefs) \heggRules ->
+            env (evaluate $ force $ fmap (toTamagohRule @TamagohAnalysis) ruleDefs) \tamagohRules ->
+              bgroup
                 name
                 [ env (evaluate $ force tamagoh) \term ->
-                    bench "tamagoh" $ nf (extractTamagohWith controlledConfig tamagohRules) term
+                    bench "tamagoh" $ nf (extractTamagohWith config tamagohRules) term
                 , env (evaluate $ force hegg) \term ->
                     bench "hegg" $ nf (extractHegg heggRules) term
                 ]
-            | (name, tamagoh, hegg) <- controlled
-            ]
+        | ControlledCase name tamagoh hegg ruleDefs config <- controlled
+        ]
     ]
 
 annotateControlled ::
-  (String, Tamagoh.Term Math, Hegg.Fix Math) ->
-  IO (String, Tamagoh.Term Math, Hegg.Fix Math)
-annotateControlled (name, tamagoh, hegg) = do
-  let tamagohStats = snd $ extractTamagohWithStats controlledConfig (fmap toTamagohRule controlledRuleDefs) tamagoh
-      heggGraphStats = snd $ extractHeggWithStats (fmap toHeggRule controlledRuleDefs) hegg
-  if tamagohStats == heggGraphStats
-    then pure (name <> "-nodes-" <> show (fst tamagohStats) <> "-classes-" <> show (snd tamagohStats), tamagoh, hegg)
-    else error $ "controlled benchmark graph-size mismatch: " <> show (name, tamagohStats, heggGraphStats)
+  ControlledCase ->
+  IO ControlledCase
+annotateControlled (ControlledCase name tamagoh hegg ruleDefs config) = do
+  let tamagohRules = fmap toTamagohRule ruleDefs
+      heggRules = fmap toHeggRule ruleDefs
+      tamagohResult@(tamagohBest, tamagohStats) = extractTamagohWithStats config tamagohRules tamagoh
+      doubledResult =
+        extractTamagohWithStats
+          config
+            { Tamagoh.maxIterations = Just 60
+            , Tamagoh.nodeLimit = Just 200_000
+            }
+          tamagohRules
+          tamagoh
+      unlimitedResult =
+        extractTamagohWithStats
+          config {Tamagoh.maxIterations = Nothing, Tamagoh.nodeLimit = Nothing}
+          tamagohRules
+          tamagoh
+      (heggBest, heggGraphStats) = extractHeggWithStats heggRules hegg
+      sameBest = fmap toCommonTamagoh tamagohBest == fmap toCommonHegg heggBest
+  if tamagohResult /= doubledResult || tamagohResult /= unlimitedResult
+    then error $ "controlled benchmark budget instability: " <> show (name, tamagohResult, doubledResult, unlimitedResult)
+    else
+      if tamagohStats /= heggGraphStats
+        then error $ "controlled benchmark graph-size mismatch: " <> show (name, tamagohStats, heggGraphStats)
+        else
+          if not sameBest
+            then error $ "controlled benchmark extracted-result mismatch: " <> show name
+            else
+              pure $
+                ControlledCase
+                  (name <> "-nodes-" <> show (fst tamagohStats) <> "-classes-" <> show (snd tamagohStats))
+                  tamagoh
+                  hegg
+                  ruleDefs
+                  config
+
+newtype CommonMath = CommonMath (Math CommonMath)
+  deriving (Eq, Show)
+
+toCommonTamagoh :: Tamagoh.Term Math -> CommonMath
+toCommonTamagoh = cata CommonMath
+
+toCommonHegg :: Hegg.Fix Math -> CommonMath
+toCommonHegg = cata CommonMath
 
 -- Mirror hegg/egg exactly: saturate with ConstantFold only and extract
 -- post-hoc ('extractBestWith'), instead of maintaining ExtractBest as a
