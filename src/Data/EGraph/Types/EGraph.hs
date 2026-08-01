@@ -478,8 +478,7 @@ rebuild = loop HS.empty
                         (\c -> move c & \(Ur c) -> unsafeFind egraph c)
                         (HS.toList touched)
                   Control.pure $ Ur $ HS.toList $ HS.fromList $ P.map (\(Ur c) -> c) ids
-              egraph <- forReborrowing_ egraph owners \egraph owner ->
-                move owner & \(Ur owner) -> trimClass egraph owner
+              egraph <- goTrim egraph owners
               egraph <- reborrowing_ egraph \egraph -> Control.do
                 flag <- Ref.modify (`lseq` True) (egraph .# #nodeSetsCanonical)
                 Control.pure $ consume flag
@@ -489,8 +488,7 @@ rebuild = loop HS.empty
             canonical <- P.mapM (canonicalTodo egraph) rawTodos
             UrT $ Control.pure $ Ur (P.reverse (nubByCachedHash canonical))
 
-          egraph <- forReborrowing_ egraph todos \egraph todo ->
-            move todo & \(Ur (pClass, pNode)) -> repair egraph pClass pNode
+          egraph <- goRepair egraph todos
 
           -- Match hegg's rebuild cadence: the analysis batch is the one
           -- snapshotted before congruence repair. Work enqueued by either
@@ -507,20 +505,45 @@ rebuild = loop HS.empty
             canonical <- P.mapM (canonicalAnalysisTodo egraph) rawAnalysisTodos
             UrT $ Control.pure $ Ur (P.reverse (nubByCachedHash canonical))
 
-          egraph <- forReborrowing_ egraph analysisTodos \egraph todo ->
-            move todo & \(Ur (pClass, pNode)) -> repairAnal egraph pClass pNode
+          egraph <- goRepairAnal egraph analysisTodos
           loop (P.foldl' (\s (c, _) -> HS.insert c s) touched todos) egraph
+
+    -- Head-first strict recursions threading the exclusive borrow directly.
+    -- These replace 'forReborrowing_', whose per-element 'locally' is NOT
+    -- statically erased (it routes through 'reborrowing'' -> 'srunBO', i.e. a
+    -- 'NOINLINE askLinearly' fence plus the 'StateT'/'Ap' tower in
+    -- "Control.Monad.Borrow.Pure.Experimental.Loop") and which additionally
+    -- forced a 'move' — a full 'Movable1' deep copy of every todo's 'ENode l',
+    -- including 'Movable String' for 'Var' nodes.  Order is left-to-right, as
+    -- before: it is trajectory-visible through 'unsafeMerge''s leader choice.
+    goTrim :: Mut α (EGraph d l) %1 -> [EClassId] -> BO α (Mut α (EGraph d l))
+    goTrim egraph [] = Control.pure egraph
+    goTrim egraph (owner : rest) = Control.do
+      egraph <- trimClass egraph owner
+      goTrim egraph rest
+
+    goRepair :: Mut α (EGraph d l) %1 -> [(EClassId, ENode l)] -> BO α (Mut α (EGraph d l))
+    goRepair egraph [] = Control.pure egraph
+    goRepair egraph ((pClass, pNode) : rest) = Control.do
+      egraph <- repair egraph pClass pNode
+      goRepair egraph rest
+
+    goRepairAnal :: Mut α (EGraph d l) %1 -> [(EClassId, ENode l)] -> BO α (Mut α (EGraph d l))
+    goRepairAnal egraph [] = Control.pure egraph
+    goRepairAnal egraph ((pClass, pNode) : rest) = Control.do
+      egraph <- repairAnal egraph pClass pNode
+      goRepairAnal egraph rest
 
     -- Rewrite one class's node set with canonicalized, deduplicated nodes
     -- (egg's rebuild_classes body). A missing class (merged away between
     -- re-find and trim cannot happen — ids are re-found at the fixpoint with
     -- no merges pending — but tolerate it defensively).
-    trimClass :: forall β. Mut β (EGraph d l) %1 -> EClassId -> BO β ()
+    trimClass :: forall β. Mut β (EGraph d l) %1 -> EClassId -> BO β (Mut β (EGraph d l))
     trimClass egraph owner = Control.do
       (Ur mnodes, egraph) <- sharing egraph \egraph ->
         EC.nodes (egraph .# #classes) owner
       case mnodes of
-        Nothing -> Control.pure $ consume egraph
+        Nothing -> Control.pure egraph
         Just ns -> Control.do
           (Ur canonSet, egraph) <- sharing egraph \egraph ->
             share egraph & \(Ur egraph) -> Control.do
@@ -530,9 +553,8 @@ rebuild = loop HS.empty
                     (\nd -> move nd & \(Ur nd) -> unsafeCanonicalize nd egraph)
                     (F.toList ns)
               Control.pure $ Ur $ HS.fromList $ P.map (\(Ur nd) -> nd) ns'
-          egraph <- reborrowing_ egraph \egraph ->
+          reborrowing_ egraph \egraph ->
             void $ EC.setNodes owner canonSet (egraph .# #classes)
-          Control.pure $ consume egraph
 
     canonicalTodo egraph (Ur (pClass, pNode)) = UrT $ Control.do
       Ur pClass <- unsafeFind egraph pClass
@@ -551,7 +573,7 @@ repair ::
   Mut α (EGraph d l) %1 ->
   EClassId ->
   ENode l ->
-  BO α ()
+  BO α (Mut α (EGraph d l))
 repair egraph p_class p_node = Control.do
   -- Congruence repair, faithful to egg/hegg's 'repair'. Iterate a frozen
   -- snapshot of this class's parents (a merge inside the loop mutates the
@@ -577,14 +599,14 @@ repair egraph p_class p_node = Control.do
     Just other -> Control.do
       (Ur oc, egraph) <- flip unsafeFind other <$~ egraph
       if oc P.== p_class
-        then Control.pure (consume egraph)
+        then Control.pure egraph
         else Control.do
           -- hegg's repair calls @merge existing_class repair_id@.  Argument
           -- order is observable because equal parent counts retain the first
           -- class as leader.
           (Ur _res, egraph) <- {-# SCC "upwardMerge/merge" #-} unsafeMerge oc p_class egraph
-          Control.pure (consume egraph)
-    Nothing -> Control.pure (consume egraph)
+          Control.pure egraph
+    Nothing -> Control.pure egraph
 
 {- | Analysis counterpart of 'repair': called (from 'rebuild') for classes
 whose analysis value changed. Runs the analysis-driven modification hook for
@@ -597,7 +619,7 @@ repairAnal ::
   Mut α (EGraph d l) %1 ->
   EClassId ->
   ENode l ->
-  BO α ()
+  BO α (Mut α (EGraph d l))
 repairAnal egraph pClass pNode = Control.do
   (Ur newAnal, egraph) <- sharing egraph \egraph -> Control.do
     Ur analysis <- unsafeMakeAnalyzeNode pNode egraph
@@ -607,7 +629,7 @@ repairAnal egraph pClass pNode = Control.do
       then Control.pure $ Ur Nothing
       else Control.pure $ Ur (Just d)
   case newAnal of
-    Nothing -> Control.pure $ consume egraph
+    Nothing -> Control.pure egraph
     Just d -> Control.do
       egraph <- reborrowing_ egraph \egraph -> Control.do
         void $ EC.setAnalysis pClass d (egraph .# #classes)
@@ -617,7 +639,10 @@ repairAnal egraph pClass pNode = Control.do
       egraph <- reborrowing_ egraph \egraph -> Control.do
         awl <- Ref.modify (parents <>) (egraph .# #analysisWorklist)
         Control.pure $ consume awl
-      modifyAnalysis id pClass egraph
+      -- 'modifyAnalysis' is a public 'Analysis' method returning @BO α ()@, so
+      -- it consumes the borrow.  Wrap it in the (statically erased, hence
+      -- free) 'reborrowing_' rather than widening the class's signature.
+      reborrowing_ egraph (modifyAnalysis id pClass)
 
 numEClasses :: Borrow k α (EGraph d l) %m -> BO α (Ur Int)
 numEClasses egraph = Control.do
