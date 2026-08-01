@@ -381,6 +381,7 @@ data VarWeight = VarWeight
   deriving (Show, Eq, Ord, Generic)
   deriving (Semigroup, Monoid) via Generically VarWeight
 
+{-# INLINEABLE buildQueryState #-}
 buildQueryState ::
   (HasDatabase l) =>
   Database l ->
@@ -400,6 +401,7 @@ buildQueryState db atom@(Atom MkRel {args}) = do
       !stats = IM.map (const weight) positions
   pure (RelationState {constraints = IM.empty, ..}, stats)
 
+{-# INLINEABLE buildPreparedQueryState #-}
 buildPreparedQueryState ::
   (HasDatabase l) =>
   Database l ->
@@ -452,6 +454,7 @@ genericJoin (hd ::- qs) db = fromMaybe [] do
       order = map fst $ sortOn snd $ IM.toList varStat
   pure $ runGenericJoin db order rels
 
+{-# INLINEABLE genericJoinPrepared #-}
 genericJoinPrepared ::
   forall l.
   (HasDatabase l) =>
@@ -485,6 +488,7 @@ genericJoinPrepared layoutPlan (hd ::- _) qs db =
           order = map fst $ sortOn snd $ IM.toList varStat
       pure $ runGenericJoin db order rels
 
+{-# INLINEABLE resolvePreparedLayoutPlan #-}
 resolvePreparedLayoutPlan ::
   (HasDatabase l) =>
   Database l ->
