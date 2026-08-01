@@ -49,6 +49,7 @@ import Control.Lens (Lens', (?~), (^.), _1)
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.BO.Unsafe (Alias (..))
 import Control.Monad.Borrow.Pure.Clone
+import Control.Monad.Borrow.Pure.Experimental.Borrows (Aliases (..))
 import Control.Monad.Borrow.Pure.Experimental.Loop
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Trans.Maybe (MaybeT (..))
