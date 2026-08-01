@@ -67,5 +67,6 @@ deriving newtype instance (Ord1 l) => Ord (ENode l)
 
 deriving newtype instance (Hashable1 l) => Hashable (ENode l)
 
+{-# INLINEABLE children #-}
 children :: (P.Foldable l) => ENode l -> [EClassId]
 children = F.toList P.. unwrap

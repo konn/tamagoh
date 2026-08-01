@@ -408,6 +408,7 @@ toOperator = Operator . (fmap (const Wildcard))
 getTrie :: forall l. (HasDatabase l) => Operator l -> Database l -> Trie
 getTrie l Database {database = db} = HM.lookupDefault Trie.empty l db
 
+{-# INLINEABLE getPreparedTrie #-}
 getPreparedTrie ::
   forall l.
   (HasDatabase l) =>
@@ -428,6 +429,7 @@ instance (HasDatabase l) => At (Database l) where
 
 type HasDatabase l = (Hashable1 l, Ord1 l, Functor l, Foldable l)
 
+{-# INLINEABLE fromRowsByKey #-}
 fromRowsByKey :: (Hashable key) => [(key, [EClassId])] -> HashMap key Trie
 fromRowsByKey =
   HM.map (Trie.fromRows . DL.toList)

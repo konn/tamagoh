@@ -49,7 +49,6 @@ import Control.Lens (Lens', (?~), (^.), _1)
 import Control.Monad.Borrow.Pure
 import Control.Monad.Borrow.Pure.BO.Unsafe (Alias (..))
 import Control.Monad.Borrow.Pure.Clone
-import Control.Monad.Borrow.Pure.Experimental.Loop
 import Control.Monad.Borrow.Pure.Orphans ()
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Deriving (deriveShow1)
@@ -83,7 +82,6 @@ import Data.Hashable.Lifted (Hashable1)
 import Data.IntMap.Strict qualified as IM
 import Data.List.NonEmpty qualified as NE
 import Data.Record.Linear.Borrow.Experimental.PatternMatch
-import Data.Ref.Linear qualified as Ref
 import Data.Ref.Linear.Borrow qualified as Ref
 import Data.Semigroup (Arg (..), ArgMin, Min (..))
 import Data.Strict qualified as St
@@ -314,7 +312,7 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
                       go (iterNum + 1) schedState'' (subtract 1 <$> remaining) egraph
                 _ -> Control.pure egraph
             else Control.do
-              (Ur _, egraph) <- substitute egraph results
+              egraph <- substitute egraph results
               -- Update scheduler state based on match counts. In deferring
               -- (egg) mode the bans were already applied during the search.
               let !schedState' = case config.scheduler of
@@ -350,70 +348,73 @@ saturate config rules = go 0 initialState (St.toStrict config.maxIterations)
       , [(ruleIdx, stat) | (ruleIdx, _, _, stat) <- raws]
       )
 
+    -- NOTE: this deliberately reports nothing.  It used to thread a
+    -- @Ref Bool@ recording "did any merge actually fire", but the caller
+    -- discarded it (saturation's fixpoint test is the node/class count
+    -- comparison), so the ref, its lender, and the per-applied-match
+    -- 'Ref.modify' were pure overhead.  It was also the only site in the
+    -- library needing 'reclaim'', i.e. the only one structurally unable to
+    -- use a statically erased borrow scope.
     substitute ::
       Mut α (EGraph d l) %1 ->
       [Ur (CompiledRule l d v, [Ur (EClassId, IntSubst)])] %1 ->
-      BO α (Ur Bool, Mut α (EGraph d l))
-    substitute egraph results = reborrowing' egraph \egraph -> Control.do
-      !(var, lend) <- borrowLinearlyM (Ref.new False)
-      varEGraph <-
-        forReborrowing_
-          (var :- egraph :- BNil)
-          results
-          \(var :- egraph :- BNil) (Ur (CompiledRule {..}, matches)) -> Control.do
-            varEGraph <-
-              forReborrowing_
-                (var :- egraph :- BNil)
-                matches
-                \(var :- egraph :- BNil) (Ur (eid, subs)) -> Control.do
-                  (Ur shouldApply, egraph) <- sharing egraph \egraph ->
-                    case condition of
-                      Nothing -> Control.pure (Ur True)
-                      Just (SideCondition cond) -> Control.do
-                        -- The user-facing named map is materialized only here,
-                        -- at apply time, for conditioned rules: namedVars is
-                        -- walked in ascending VarId order (mirroring the former
-                        -- ifoldl' build), neededIds comes from the NAMED
-                        -- projection only, and names whose class has no info
-                        -- are dropped exactly as the former mapMaybeWithKey did.
-                        let !namedBindings =
-                              [(nm, eid) | (vid, nm) <- namedVars, Just eid <- [IM.lookup vid subs]]
-                            !neededIds = HashSet.toList $ HashSet.fromList $ map snd namedBindings
-                        Ur infos <- lookupMatchInfos neededIds egraph
-                        let !matchInfos =
-                              PHM.fromList
-                                [ (nm, MatchInfo {eclassId = eid, nodes = nodes, analysis = analysis})
-                                | (nm, eid) <- namedBindings
-                                , Just (nodes, analysis) <- [PHM.lookup eid infos]
-                                ]
-                        Control.pure (Ur (cond matchInfos))
-                  if shouldApply
-                    then case substPatternInt subs rhs of
-                      Failure _ -> var `lseq` egraph `lseq` error "Substitution produces invalid expression"
-                      Success pat -> Control.do
-                        (Ur newEid, egraph) <- addNestedENode pat egraph
-                        -- Hegg applies a variable RHS as @merge variable lhs@,
-                        -- while a node RHS is applied as @merge lhs node@.  The
-                        -- distinction is observable: equal parent counts retain
-                        -- the first argument as the union-find representative.
-                        (Ur resl, egraph) <- case pat of
-                          Metavar {} -> unsafeMerge newEid eid egraph
-                          PNode {} -> unsafeMerge eid newEid egraph
-                        case resl of
-                          Merged {} -> Control.void PL.$ Ref.modify (`lseq` True) var
-                          AlreadyMerged {} -> Control.pure PL.$ consume var
-                        Control.pure (consume egraph)
-                    else Control.pure (consume var `lseq` consume egraph)
-            case varEGraph of
-              var :- egraph :- BNil ->
-                Control.pure (consume var `lseq` consume egraph)
-      case varEGraph of
-        var :- egraph :- BNil ->
-          Control.pure PL.$
-            upcast PL.$
-              var `lseq`
-                egraph `lseq`
-                  (move PL.. Ref.free Control.<$> reclaim' lend)
+      BO α (Mut α (EGraph d l))
+    substitute egraph [] = Control.pure egraph
+    substitute egraph (Ur (rule, matches) : rest) = Control.do
+      egraph <- applyRule egraph rule matches
+      substitute egraph rest
+
+    -- Head-first strict recursion threading the exclusive borrow, replacing
+    -- 'forReborrowing_'.  Its per-element 'locally' is NOT statically erased
+    -- (it routes through 'reborrowing'' -> 'srunBO'), and it carries a
+    -- 'StateT'/'Ap' tower per element on top.  This loop runs once per applied
+    -- MATCH, so it is the hottest of the five such loops in the engine.
+    applyRule ::
+      Mut α (EGraph d l) %1 ->
+      CompiledRule l d v ->
+      [Ur (EClassId, IntSubst)] ->
+      BO α (Mut α (EGraph d l))
+    applyRule egraph _ [] = Control.pure egraph
+    applyRule egraph rule (Ur (eid, subs) : rest) =
+      case rule of
+        CompiledRule {..} -> Control.do
+          (Ur shouldApply, egraph) <- sharing egraph \egraph ->
+            case condition of
+              Nothing -> Control.pure (Ur True)
+              Just (SideCondition cond) -> Control.do
+                -- The user-facing named map is materialized only here,
+                -- at apply time, for conditioned rules: namedVars is
+                -- walked in ascending VarId order (mirroring the former
+                -- ifoldl' build), neededIds comes from the NAMED
+                -- projection only, and names whose class has no info
+                -- are dropped exactly as the former mapMaybeWithKey did.
+                let !namedBindings =
+                      [(nm, eid) | (vid, nm) <- namedVars, Just eid <- [IM.lookup vid subs]]
+                    !neededIds = HashSet.toList $ HashSet.fromList $ map snd namedBindings
+                Ur infos <- lookupMatchInfos neededIds egraph
+                let !matchInfos =
+                      PHM.fromList
+                        [ (nm, MatchInfo {eclassId = eid, nodes = nodes, analysis = analysis})
+                        | (nm, eid) <- namedBindings
+                        , Just (nodes, analysis) <- [PHM.lookup eid infos]
+                        ]
+                Control.pure (Ur (cond matchInfos))
+          egraph <-
+            if shouldApply
+              then case substPatternInt subs rhs of
+                Failure _ -> egraph `lseq` error "Substitution produces invalid expression"
+                Success pat -> Control.do
+                  (Ur newEid, egraph) <- addNestedENode pat egraph
+                  -- Hegg applies a variable RHS as @merge variable lhs@,
+                  -- while a node RHS is applied as @merge lhs node@.  The
+                  -- distinction is observable: equal parent counts retain
+                  -- the first argument as the union-find representative.
+                  (Ur _resl, egraph) <- case pat of
+                    Metavar {} -> unsafeMerge newEid eid egraph
+                    PNode {} -> unsafeMerge eid newEid egraph
+                  Control.pure egraph
+              else Control.pure egraph
+          applyRule egraph rule rest
 
 addNestedENode ::
   forall d l α.

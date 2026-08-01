@@ -71,6 +71,7 @@ saturation loop's native currency) and a pre-interned pattern. The
 signature is written over the raw synonyms (@IntMap EClassId@, @Int@) so
 this module needs no import of the query layer.
 -}
+{-# INLINEABLE substPatternInt #-}
 substPatternInt ::
   (Traversable l) =>
   IntMap EClassId ->

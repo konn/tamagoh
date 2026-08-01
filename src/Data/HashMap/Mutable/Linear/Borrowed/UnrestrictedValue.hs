@@ -229,11 +229,12 @@ extend (HM dicRef') dic = Control.do
   Control.pure $! recoerceBor dic
 
 iterRebor_ ::
-  (Reborrowable bor) =>
-  bor α a %1 ->
+  forall bor α bk k v a.
+  (Reborrowable bor, α ~ LifetimeOf bor) =>
+  bor a %1 ->
   Borrow bk α (HashMapUr k v) %1 ->
-  (forall β. bor (β /\ α) a %1 -> k -> v -> BO (β /\ α) ()) ->
-  BO α (bor α a)
+  (forall β. WithLifetime bor (β /\ α) a %1 -> k -> v -> BO (β /\ α) ()) ->
+  BO α (bor a)
 iterRebor_ bor dic f = Control.do
   Ur (P.map (BiNL.bimap Ur Ur) -> ents) <- toList dic
   flip Control.execStateT bor $ for_ ents \(Ur k, Ur v) ->
