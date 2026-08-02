@@ -211,9 +211,9 @@ jobs:
   # identically when no runner is attached.
   #
   # Scope is tamagoh's own e-graph work and nothing else -- the hegg leaves are
-  # filtered out and tamagoh-bench-hashmap is not measured at all. See
-  # ci/scripts/codspeed-bench.sh for why. Both still build and still run under
-  # a plain `cabal bench`; they are simply not series on the dashboard.
+  # filtered out. See ci/scripts/codspeed-bench.sh for why. They still build
+  # and still run under a plain `cabal bench`; they are simply not series on
+  # the dashboard.
   #
   # Two metrics come out of a run:
   #

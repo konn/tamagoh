@@ -61,7 +61,6 @@ library
     hegg,
     hybrid-vectors,
     indexed-traversable,
-    integer-logarithms,
     lens,
     linear-generics,
     linear-witness,
@@ -107,7 +106,6 @@ library
     Data.HashMap.Mutable.Linear.Borrowed
     Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue
     Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Frozen
-    Data.HashMap.RobinHood.Mutable.Linear
     Data.Linear.Witness.Compat
     Data.Set.Mutable.Linear.Borrowed
     Data.SlotMap.Mutable.Linear.Borrowed
@@ -125,7 +123,6 @@ library
     Data.EGraph.Types.EClasses.Internal
     Data.EGraph.Types.EGraph.Internal
     Data.HashMap.Mutable.Linear.Borrowed.Internal
-    Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal
     Data.Set.Mutable.Linear.Borrowed.Internal
     Data.SlotMap.Mutable.Linear.Borrowed.Internal
     Data.UnionFind.Linear.Borrowed.Internal
@@ -160,8 +157,6 @@ test-suite tamagoh-test
     Data.EGraph.Types.EGraphSpec.Cases
     Data.HashMap.Linear.BorrowedCases
     Data.HashMap.Linear.BorrowedSpec
-    Data.HashMap.RobinHood.Mutable.LinearSpec
-    Data.HashMap.RobinHood.Mutable.LinearSpec.Cases
     Data.Set.Linear.BorrowedCases
     Data.Set.Linear.BorrowedSpec
     Data.SlotMap.Linear.BorrowedCases
@@ -246,26 +241,7 @@ benchmark tamagoh-bench-math
     "-with-rtsopts=-A32m -T -V0 -I0"
     -fproc-alignment=64
 
-benchmark tamagoh-bench-hashmap
-  import: defaults
-  type: exitcode-stdio-1.0
-  hs-source-dirs: bench
-  main-is: hashmap.hs
-  build-depends:
-    deepseq,
-    hashable,
-    haskell-codspeed:tasty-bench-codspeed,
-    linear-base,
-    linear-witness,
-    pure-borrow,
-    tamagoh,
-    unordered-containers,
-
-  -- Same stanza as tamagoh-bench-math, and for the same reasons. In
-  -- particular the old -threaded -with-rtsopts=-N is exactly the
-  -- configuration CodSpeed.RTS.Preflight rates *critical*: with more than one
-  -- capability the parallel collector splits work nondeterministically, so a
-  -- measured window covers a different amount of GC on every run.
-  ghc-options:
-    -rtsopts
-    "-with-rtsopts=-A32m -T -V0 -I0"
+-- The hash-map benchmark moved upstream along with the table itself: it is now
+-- the `hashmap/*` group of pure-borrow's `pure-borrow-bench` suite. It was
+-- never a CodSpeed series here -- ci/scripts/codspeed-bench.sh always excluded
+-- it -- so nothing on the dashboard changes.
