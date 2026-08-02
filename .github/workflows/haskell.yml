@@ -86,9 +86,14 @@ jobs:
         with:
           path: ~/.cabal/store
           key: ${{steps.cache-keys.outputs.store}}
+      # codspeed-hs-{rewrite,compare} are named explicitly because `all` does
+      # not reach them: they are executables of haskell-codspeed, which is a
+      # source-repository-package rather than one of ours. The CodSpeed job
+      # sets up no toolchain, so they have to come out of this build and ride
+      # along in the artifact — see ci/scripts/collect-bins.sh.
       - name: Build All
         run: |
-          ${{env.cabal}} build all
+          ${{env.cabal}} build all codspeed-hs-rewrite codspeed-hs-compare
       - name: Save dist-newstyle Cache
         uses: actions/cache/save@v4
         with:
@@ -199,6 +204,211 @@ jobs:
             echo "${FAIL} out of ${TOTAL} tests FAILED"'!'
             exit 1
           fi
+
+  # Measures the e-graph benchmark suite on CodSpeed, per `bench` leaf, using
+  # the konn/haskell-codspeed harness. It is an ordinary tasty-bench suite; the
+  # only difference is that it imports Test.Tasty.Bench.CodSpeed, which behaves
+  # identically when no runner is attached.
+  #
+  # Scope is tamagoh's own e-graph work and nothing else -- the hegg leaves are
+  # filtered out and tamagoh-bench-hashmap is not measured at all. See
+  # ci/scripts/codspeed-bench.sh for why. Both still build and still run under
+  # a plain `cabal bench`; they are simply not series on the dashboard.
+  #
+  # Two metrics come out of a run:
+  #
+  #   instruction counts   from CodSpeed's CPU simulation, per benchmark, which
+  #                        is what the PR comment and the dashboard show
+  #   allocated bytes      from GHC's own per-thread allocation counter,
+  #                        written to a CSV by the suite and compared against
+  #                        main below. Exactly reproducible for fixed code and
+  #                        input, which for a deterministic saturation
+  #                        algorithm makes it the sharper of the two signals.
+  #
+  # Nothing is compiled here: the binaries measured are the ones `build`
+  # produced, so the thing measured is the thing CI already tested, and a
+  # difference in the number cannot come from a difference in how it was built.
+  codspeed:
+    name: CodSpeed benchmarks
+    needs: [build]
+    runs-on: ubuntu-latest
+    # Simulation is roughly 200x native. One deterministic pass over the twelve
+    # measured leaves is ~6.7 s natively, of which only ~1.6 s is benchmark
+    # bodies -- the other ~5 s is the cross-validation annotateControlled does
+    # before defaultMain is reached, which reports nothing and is now most of
+    # the cost. So expect the measured step on the order of 20-25 minutes, and
+    # note that the remaining lever is that startup work rather than the
+    # benchmark set.
+    timeout-minutes: 180
+    # One `codspeed run` per ref. A commit carrying more than one upload is not
+    # readable: the backend keeps whichever arrived last, and sometimes merges
+    # them. Scoped to this job so a new push does not cancel the build and test
+    # jobs of the run in flight.
+    concurrency:
+      group: codspeed-${{github.ref}}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      # Reading main's allocation sidecar off its own workflow run.
+      actions: read
+      # Lets the runner exchange an OIDC token, so this public repository needs
+      # no CODSPEED_TOKEN secret.
+      #
+      # Do not "helpfully" add `token: ${{secrets.CODSPEED_TOKEN}}` as a
+      # fallback. An unset secret expands to the empty string, which the runner
+      # still binds as a present-but-invalid token and then skips OIDC entirely
+      # -- producing a 401 at upload that looks like a permissions problem and
+      # is not.
+      id-token: write
+    env:
+      # Deliberately one fixed plan rather than the matrix: an instruction
+      # count is only comparable against a baseline produced by the same
+      # compiler and the same resolved dependencies, so measuring two GHCs
+      # would be two unrelated series under one set of benchmark URIs. Must
+      # name a ci/configs/<plan>.project that the build matrix covers.
+      plan: ghc-9.12.4
+      artifact: artifact-ghc-9.12.4
+    steps:
+      - name: Fail when the corresponding build didn't succeed
+        if: ${{needs.build.result != 'success'}}
+        run: echo "BUILD FAILED" >&2; exit 1
+
+      # First, because actions/checkout cleans the workspace and would delete
+      # anything downloaded before it. Only ci/scripts/codspeed-bench.sh is
+      # wanted from the tree.
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{github.event.pull_request.head.sha || github.sha}}
+
+      - name: Download artifacts
+        id: download
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{env.artifact}}
+
+      - name: Decompress and locate the binaries
+        id: bin
+        run: |
+          set -euo pipefail
+          tar xaf "${{steps.download.outputs.download-path}}/${{env.artifact}}.tar.zst"
+          {
+            echo "math=${{github.workspace}}/${{env.artifact}}/benchs/tamagoh-bench-math"
+            echo "rewrite=${{github.workspace}}/${{env.artifact}}/exes/codspeed-hs-rewrite"
+            echo "compare=${{github.workspace}}/${{env.artifact}}/exes/codspeed-hs-compare"
+          } >>"$GITHUB_OUTPUT"
+          # Check now rather than discovering it as exit 127 from inside
+          # Valgrind, twenty minutes in.
+          for b in benchs/tamagoh-bench-math \
+                   exes/codspeed-hs-rewrite exes/codspeed-hs-compare; do
+            test -x "${{env.artifact}}/${b}" \
+              || { echo "::error::${b} is not in ${{env.artifact}}"; exit 1; }
+          done
+
+      # Simulation rather than walltime: it is deterministic, and a
+      # GitHub-hosted runner is far too noisy for walltime to mean anything on
+      # workloads this size.
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@v5
+        env:
+          MATH_BIN: ${{steps.bin.outputs.math}}
+          REWRITE_BIN: ${{steps.bin.outputs.rewrite}}
+          SIDECAR_DIR: ${{github.workspace}}/sidecar
+          # NOT set: CODSPEED_HS_CCS_DIR. Setting it makes the chained rewriter
+          # merge GHC cost centres into the call graph rather than only decode
+          # symbols, which upstream measured as producing a single-frame
+          # flamegraph and moving the reported metric. Cost-centre profiles are
+          # a local artifact for now; see the harness README.
+        with:
+          mode: simulation
+          run: bash ci/scripts/codspeed-bench.sh
+
+      # The sidecar is measured under the instrument, on a code path no local
+      # run exercises, so check there that it measured the benchmark rather
+      # than the harness. Upstream shipped this broken once -- every benchmark
+      # reported a constant few kilobytes, which was plausible and wrong -- so
+      # assert something the suite cannot accidentally satisfy: the controlled
+      # cases allocate hundreds of megabytes.
+      - name: Check the sidecar measured the benchmarks
+        if: always()
+        run: |
+          set -euo pipefail
+          [ -f sidecar/allocation-math.csv ] \
+            || { echo "::error::sidecar/allocation-math.csv was never written"; exit 1; }
+          cat sidecar/allocation-math.csv
+          # The filter is part of what is asserted: a hegg row here means the
+          # pattern stopped matching and the dashboard has grown a series
+          # nobody can act on.
+          ! grep -q '\.hegg,' sidecar/allocation-math.csv \
+            || { echo "::error::hegg leaves were measured; the --pattern is not taking"; exit 1; }
+          # Natively ~217 MB. Anything under 1 MB means the allocation counter
+          # is being read somewhere other than the benchmark's own thread.
+          alloc=$(awk -F, '$1 ~ /merge-rebuild.*\.tamagoh$/ {print $2}' \
+            sidecar/allocation-math.csv)
+          [ -n "$alloc" ] || { echo "::error::no merge-rebuild row in the sidecar"; exit 1; }
+          echo "merge-rebuild tamagoh allocated ${alloc} B"
+          [ "$alloc" -gt 1000000 ] || {
+            echo "::error::merge-rebuild allocated ${alloc} B; expected hundreds of MB"
+            exit 1
+          }
+
+      # Allocation is exact, so a change in it is a real change -- but the
+      # controlled benchmarks carry their e-graph size in their own names
+      # (`...-nodes-22499-classes-16499`), so any change to what saturation
+      # explores renames the benchmark rather than moving its number, and the
+      # comparison reports that as a removal plus an addition. Both are worth
+      # seeing and neither is worth blocking a merge on by default, so this
+      # reports rather than gates. Drop `continue-on-error` to make it a gate.
+      - name: Fetch the allocation baseline from main
+        id: baseline
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{github.token}}
+        run: |
+          set -euo pipefail
+          run_id=$(gh run list --workflow haskell.yml --branch main \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -z "$run_id" ]; then
+            echo "::notice::no successful CI run on main yet; nothing to compare against"
+            echo "found=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if gh run download "$run_id" --name allocation-csv --dir baseline; then
+            echo "found=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice::run ${run_id} has no allocation-csv artifact (expired?)"
+            echo "found=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Compare allocation against main
+        if: steps.baseline.outputs.found == 'true'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          status=0
+          {
+            echo "## Allocation vs main"
+            echo '```'
+            if [ -f baseline/allocation-math.csv ]; then
+              "${{steps.bin.outputs.compare}}" \
+                baseline/allocation-math.csv sidecar/allocation-math.csv \
+                --tolerance 0.01 2>&1 || status=1
+            else
+              echo "no baseline for allocation-math.csv"
+            fi
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$status" -eq 0 ] || echo "::warning::allocation grew against main; see the job summary"
+          exit "$status"
+
+      # Uploaded unconditionally, and under a stable name, because the run on
+      # main is the baseline every later pull request downloads.
+      - name: Upload allocation sidecars
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allocation-csv
+          path: sidecar/
+          if-no-files-found: warn
 
   fourmolu:
     name: Fourmolu

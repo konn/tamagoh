@@ -18,7 +18,7 @@ import Data.Linear.Witness.Compat (fromPB)
 import GHC.Generics (Generic)
 import Prelude.Linear (Ur (..), lseq, unur, (&))
 import Prelude.Linear qualified as PL
-import Test.Tasty.Bench
+import Test.Tasty.Bench.CodSpeed
 
 {- | Key with expensive equality but cheap hash.
 Hash only uses the prefix (Int), but Eq compares the full payload.

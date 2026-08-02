@@ -69,6 +69,27 @@ Details, history, and the evidence behind each rule: `workspace/TUNE-PLAN.md`.
 - To run test suite, use `cabal test ...`; for benchmarks `cabal bench ...`.
   + You can use as many `--test-options=".."` (multiple options separated by white spaces) and `--test-option=".."` (as a single option containing whites paces) to pass the test option(s).
   + The same applies to `--benchmark-options` and `--benchmark-option`.
+- Both benchmarks import `Test.Tasty.Bench.CodSpeed` (from the `haskell-codspeed`
+  source-repository-package) instead of `Test.Tasty.Bench`. It re-exports everything
+  `tasty-bench` does and behaves identically when no CodSpeed runner is attached, so
+  local measurement protocols are unaffected. Keep the import — swapping it back
+  silently drops the suite out of the `codspeed` job in
+  `.github/workflows/haskell.yml`, which measures the GHC 9.12.4 build job's own
+  binaries rather than compiling its own.
+- CodSpeed measures **tamagoh's e-graph leaves only**: `tamagoh-bench-math` filtered
+  by `--pattern '$NF != "hegg"'`, and `tamagoh-bench-hashmap` not at all. Nothing here
+  can move hegg's or `unordered-containers`' numbers, so tracking them would spend the
+  simulation budget on series nobody can act on. Local `cabal bench` is unfiltered and
+  is where the tamagoh-vs-hegg comparison belongs — do not "fix" CI to match it.
+- `-with-rtsopts=-A32m -T -V0 -I0` on both suites is a measurement contract, not
+  decoration: changing `-A` shifts CodSpeed's instruction counts exactly as a code
+  change would and invalidates the baseline. Never add `-threaded -N` back — the
+  parallel collector splits work nondeterministically inside a measured window.
+- `CODSPEED_HS_SIDECAR=alloc.csv <bench>` writes per-benchmark allocated bytes, exact
+  and reproducible; `codspeed-hs-compare old.csv new.csv` diffs two runs. This is often
+  a sharper regression signal than wall time and needs no runner.
+- `CODSPEED_HS_DETERMINISTIC=1` runs each benchmark body exactly once, the way the
+  instrumented run does. Useful for a quick allocation snapshot; useless for timing.
 
 ### Debugging
 
