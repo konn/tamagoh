@@ -19,16 +19,10 @@ source-repository-package
 -- does not exist). A pin that lives only in the freeze is therefore invisible
 -- to CI, which then resolves a stale pure-borrow and fails on whatever the API
 -- rename touched.
---
--- NOTE: this tag is the head of pure-borrow's `feat/robin-hood-hashmap` branch
--- (PR #37), not a commit on its `main`. It is what brings in
--- `Data.HashMap.RobinHood.Mutable.Linear{,.Borrow}`, which this package's hash
--- map now wraps instead of defining itself. Re-pin to the merge commit once
--- that PR lands.
 source-repository-package
   type: git
   location: https://github.com/SoftwareFoundationGroupAtKyotoU/pure-borrow.git
-  tag: 4e454db5819dba0ae97f256223c0bf4017bc9015
+  tag: 9592f768097e2615051513ab3ec64640c6426cd3
 
 -- The CodSpeed harness. Not on Hackage, and the same reasoning as the stanza
 -- above applies: it must live here rather than in the freeze, so CI's
