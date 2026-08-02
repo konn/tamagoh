@@ -7,8 +7,10 @@ For serious usage, go to [hegg][hegg].
 
 ## Benchmarking
 
-Two `tasty-bench` suites, both run on every pull request by the
-[CodSpeed workflow](.github/workflows/codspeed.yml):
+Two `tasty-bench` suites, both measured on every pull request by the `codspeed`
+job in [Haskell CI](.github/workflows/haskell.yml) — which measures the very
+binaries the GHC 9.12.4 build job produced, so the thing benchmarked is the
+thing CI tested:
 
 ```bash
 cabal bench tamagoh-bench-math

@@ -47,6 +47,13 @@ while read -r TARG; do
     local_pkgs+=("-e" "$(basename "${TARG%*.cabal}")");
 done < <(find . -type f -not -path '*/dist-newstyle/*' -name '*.cabal')
 
+# Tools that are not ours but have to ride along in the artifact: the CodSpeed
+# job runs them against these binaries and sets up no toolchain of its own, so
+# whatever it needs has to be in here. They belong to a
+# source-repository-package, which `cabal build all` does not reach -- the
+# build step names them explicitly.
+local_pkgs+=("-e" "haskell-codspeed:exe:")
+
 ${CABAL_PLAN} list-bins | grep "${local_pkgs[@]}" | while read -r TARG; do
     COMPONENT=$(echo "${TARG}" | awk '{ print $1 }')
     BIN=$(echo "${TARG}" | awk '{ print $2 }')

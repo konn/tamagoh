@@ -73,7 +73,9 @@ Details, history, and the evidence behind each rule: `workspace/TUNE-PLAN.md`.
   source-repository-package) instead of `Test.Tasty.Bench`. It re-exports everything
   `tasty-bench` does and behaves identically when no CodSpeed runner is attached, so
   local measurement protocols are unaffected. Keep the import — swapping it back
-  silently drops the suite out of `.github/workflows/codspeed.yml`.
+  silently drops the suite out of the `codspeed` job in
+  `.github/workflows/haskell.yml`, which measures the GHC 9.12.4 build job's own
+  binaries rather than compiling its own.
 - `-with-rtsopts=-A32m -T -V0 -I0` on both suites is a measurement contract, not
   decoration: changing `-A` shifts CodSpeed's instruction counts exactly as a code
   change would and invalidates the baseline. Never add `-threaded -N` back — the
