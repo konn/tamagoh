@@ -24,6 +24,14 @@ source-repository-package
   location: https://github.com/SoftwareFoundationGroupAtKyotoU/pure-borrow.git
   tag: c35dace000587e7ebe59e315520ecf99060b4061
 
+-- The CodSpeed harness. Not on Hackage, and the same reasoning as the stanza
+-- above applies: it must live here rather than in the freeze, so CI's
+-- `--project-file=ci/configs/ghc-X.project` sees it.
+source-repository-package
+  type: git
+  location: https://github.com/konn/haskell-codspeed.git
+  tag: 2f04e8cce92932215c1c6b80f4737328ac2f2d3b
+
 allow-newer:
   falsify:*,
   optparse-applicative,

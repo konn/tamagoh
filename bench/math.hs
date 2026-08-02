@@ -17,7 +17,7 @@ import Data.IntSet qualified as IntSet
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromJust)
 import Tamagoh.Bench.Math
-import Test.Tasty.Bench
+import Test.Tasty.Bench.CodSpeed
 
 integrationCases :: [(String, Tamagoh.Term Math, Hegg.Fix Math)]
 integrationCases =
