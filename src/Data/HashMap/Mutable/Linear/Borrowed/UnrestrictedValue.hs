@@ -1,25 +1,27 @@
 {-# LANGUAGE BlockArguments #-}
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE ImpredicativeTypes #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE LiberalTypeSynonyms #-}
 {-# LANGUAGE LinearTypes #-}
-{-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE QualifiedDo #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE NoImplicitPrelude #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
-{-# OPTIONS_GHC -Wno-partial-type-signatures #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 {- |
 A borrowed HashMap with unrestricted (immutable) keys and values.
 
-Unlike "Data.HashMap.Mutable.Linear.Borrowed", this variant does not
-support linear/mutable values. Both keys and values must be unrestricted.
-This allows for faster duplication (no deep cloning needed) and more
-efficient iteration.
+The table itself now lives upstream, as
+"Data.HashMap.RobinHood.Mutable.Linear.Borrow"; this module is the thin
+adapter tamagoh consumes it through. It exists for two reasons:
+
+* upstream's queries thread the borrow back to the caller, in the style of
+  @Data.Vector.Mutable.Linear.Borrow@, whereas tamagoh's call sites pass a
+  fresh projection per query and want only the answer. The wrappers here drop
+  the returned borrow, which is exactly what the pre-upstreaming API did.
+
+* the 'Display' instance depends on "Text.Show.Borrowed", which is tamagoh's
+  own class and so cannot be declared upstream.
+
+Unlike "Data.HashMap.Mutable.Linear.Borrowed", this variant does not support
+linear/mutable values. Both keys and values must be unrestricted.
 -}
 module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (
   HashMapUr,
@@ -52,190 +54,88 @@ module Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (
   take_,
   union,
   extend,
-  iterRebor_,
 ) where
 
 import Control.Functor.Linear qualified as Control
 import Control.Monad.Borrow.Pure
-import Control.Monad.Borrow.Pure.Experimental.Loop (for_)
-import Control.Monad.Borrow.Pure.Experimental.Reborrowable
-import Control.Syntax.DataFlow qualified as DataFlow
-import Data.Bifunctor qualified as BiNL
-import Data.Bifunctor.Linear qualified as Bi
-import Data.Functor.Linear qualified as Data
+import Data.Function qualified as P
 import Data.HashMap.Mutable.Linear (Keyed)
-import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal
-import Data.HashMap.RobinHood.Mutable.Linear qualified as Raw
-import Data.Ref.Linear qualified as Ref
-import Data.Ref.Linear.Borrow qualified as Ref
+import Data.HashMap.RobinHood.Mutable.Linear.Borrow (
+  InsertPlan,
+  alter,
+  alterF,
+  delete,
+  empty,
+  extend,
+  fromList,
+  insert,
+  swap,
+  take,
+  take_,
+  union,
+  unsafeInsertPrepared,
+ )
+import Data.HashMap.RobinHood.Mutable.Linear.Borrow qualified as Raw
+import Data.List qualified as P
 import Prelude.Linear hiding (filter, insert, lookup, mapMaybe, take)
-import Prelude qualified as P
+import Text.Show.Borrowed (Display (..))
 
--- * Construction
+-- | A mutable HashMap with unrestricted keys and values.
+type HashMapUr = Raw.HashMap
 
-{-# INLINE empty #-}
-empty :: forall k v. Int -> Linearly %1 -> HashMapUr k v
-empty size l =
-  dup l & \(l, l'') -> HM $ Ref.new (Raw.new size l) l''
+{- | Answer a query and discard the borrow it threaded back.
 
-{-# INLINE fromList #-}
-fromList :: (Keyed k) => [(k, v)] -> Linearly %1 -> HashMapUr k v
-fromList dic l =
-  dup l & \(l, l') ->
-    HM $! Ref.new (Raw.fromList dic l) l'
-
--- * Mutation
-
-{-# INLINE insert #-}
-insert ::
-  (Keyed k) =>
-  k ->
-  v ->
-  Mut α (HashMapUr k v) %1 ->
-  BO α (Ur (Maybe v), Mut α (HashMapUr k v))
-insert key !v !dic = Control.do
-  (Ur mval, dic) <-
-    Ref.update
-      (\dic -> Control.pure $ Raw.insert key v dic)
-      (coerceBor dic)
-  Control.pure (Ur $ forceMay mval, recoerceBor dic)
-
-{-# INLINE lookupForInsert #-}
-lookupForInsert ::
-  forall k v bk α m.
-  (Keyed k) =>
-  k ->
-  Borrow bk α (HashMapUr k v) %m ->
-  BO α (Ur (Either v (InsertPlan k)))
-lookupForInsert key = askRaw go
-  where
-    go :: Raw.HashMap k v %1 -> (Ur (Either v (InsertPlan k)), Raw.HashMap k v)
-    go hm = case Raw.lookupForInsert key hm of
-      (Ur result, hm) -> (Ur (P.fmap InsertPlan result), hm)
-
-{- | Resume an unsuccessful 'lookupForInsert' as an insertion.
-
-The map must not have been mutated since the plan was produced.
+The borrow returned by an upstream query is the occurrence that was passed in,
+so dropping it here leaves the caller exactly where the pre-upstreaming API
+left them: having spent one occurrence on the query.
 -}
-{-# INLINE unsafeInsertPrepared #-}
-unsafeInsertPrepared ::
-  InsertPlan k ->
-  v ->
-  Mut α (HashMapUr k v) %1 ->
-  BO α (Mut α (HashMapUr k v))
-unsafeInsertPrepared (InsertPlan plan) !v =
-  Control.fmap recoerceBor
-    . Ref.modify (Raw.unsafeInsertPrepared plan v)
-    . coerceBor
-
-{-# INLINE delete #-}
-delete ::
-  (Keyed k) => k -> Mut α (HashMapUr k v) %1 -> BO α (Ur (Maybe v), Mut α (HashMapUr k v))
-delete key dic = Control.do
-  (Ur mval, dic) <-
-    Ref.update
-      (\dic -> Control.pure $ Raw.delete key dic)
-      (coerceBor dic)
-  Control.pure (Ur $ forceMay mval, recoerceBor dic)
-
-forceMay :: Maybe a %1 -> Maybe a
-forceMay = \case
-  Nothing -> Nothing
-  Just !x -> Just x
-
-{-# INLINE alter #-}
-alter ::
-  (Keyed k) =>
-  (Maybe v -> Maybe v) ->
-  k ->
-  Mut α (HashMapUr k v) %1 ->
-  BO α (Mut α (HashMapUr k v))
-alter f k =
-  Control.fmap recoerceBor
-    . Ref.modify (Raw.alter f k)
-    . coerceBor
-
-{-# INLINE alterF #-}
-alterF ::
-  (Keyed k) =>
-  (Maybe v -> BO α (Ur (Maybe v))) ->
-  k ->
-  Mut α (HashMapUr k v) %1 ->
-  BO α (Mut α (HashMapUr k v))
-alterF f key dic = Control.do
-  ((), dic) <-
-    Ref.update
-      ( Control.fmap ((),)
-          . Raw.alterF (\ !may -> Data.fmap forceMay Control.<$> f (forceMay may)) key
-      )
-      (coerceBor dic)
-  Control.pure $ recoerceBor dic
+answering ::
+  (Consumable (Borrow bk α (HashMapUr k v))) =>
+  BO α (Ur a, Borrow bk α (HashMapUr k v)) %1 ->
+  BO α (Ur a)
+{-# INLINE answering #-}
+answering =
+  Control.fmap \(Ur !answer, dic) -> consume dic `lseq` Ur answer
 
 -- * Query
 
 {-# INLINE size #-}
-size :: Borrow bk α (HashMapUr k v) %m -> BO α (Ur Int)
-size = askRaw Raw.size
+size :: Borrow bk α (HashMapUr k v) %1 -> BO α (Ur Int)
+size = answering . Raw.size
 
 {-# INLINE lookup #-}
-lookup ::
-  (Keyed k) =>
-  k ->
-  Borrow bk α (HashMapUr k v) %m ->
-  BO α (Ur (Maybe v))
-lookup !key !dic = askRaw (Raw.lookup key) dic
+lookup :: (Keyed k) => k -> Borrow bk α (HashMapUr k v) %1 -> BO α (Ur (Maybe v))
+lookup key = answering . Raw.lookup key
 
 {-# INLINE member #-}
-member :: (Keyed k) => k -> Borrow bk α (HashMapUr k v) %m -> BO α (Ur Bool)
-member key = askRaw (Raw.member key)
+member :: (Keyed k) => k -> Borrow bk α (HashMapUr k v) %1 -> BO α (Ur Bool)
+member key = answering . Raw.member key
 
--- * Bulk operations
-
-{-# INLINE swap #-}
-swap ::
-  forall k v α.
-  HashMapUr k v %1 ->
-  Mut α (HashMapUr k v) %1 ->
-  BO α (HashMapUr k v, Mut α (HashMapUr k v))
-swap keys dic = asksLinearlyM \lin -> Control.do
-  Bi.second recoerceBor
-    Control.<$> Ref.update (\ !old -> Control.pure (HM $ Ref.new old lin, Ref.free $ inner keys)) (coerceBor dic)
-
--- | Takes all elements from the map, leaving it empty.
-take :: forall k v α. Mut α (HashMapUr k v) %1 -> BO α (HashMapUr k v, Mut α (HashMapUr k v))
-take dic = Control.do
-  Bi.second recoerceBor Control.<$> Ref.update go (coerceBor dic)
-  where
-    go :: Raw.HashMap k v %1 -> BO α (HashMapUr k v, Raw.HashMap k v)
-    go s = asksLinearlyM \lin ->
-      dup lin & \(lin, lin') -> Control.do
-        Control.pure (HM $! Ref.new s lin, Raw.new 16 lin')
-
-take_ :: forall k v α. Mut α (HashMapUr k v) %1 -> BO α (HashMapUr k v)
-{-# INLINE take_ #-}
-take_ dic = Control.fmap (uncurry $ flip lseq) $ take dic
-
-{-# INLINE union #-}
-union :: (Keyed k) => HashMapUr k v %1 -> HashMapUr k v %1 -> HashMapUr k v
-union (HM ref1) (HM ref2) = DataFlow.do
-  (l, ref1) <- withLinearly ref1
-  HM $! Ref.new (Raw.union (Ref.free ref1) (Ref.free ref2)) l
-
-{-# INLINE extend #-}
-extend :: (Keyed k) => HashMapUr k v %1 -> Mut α (HashMapUr k v) %1 -> BO α (Mut α (HashMapUr k v))
-extend (HM dicRef') dic = Control.do
-  let %1 !dic' = Ref.free dicRef'
-  !dic <- Ref.modify (\ !s -> Raw.union s dic') $ coerceBor dic
-  Control.pure $! recoerceBor dic
-
-iterRebor_ ::
-  forall bor α bk k v a.
-  (Reborrowable bor, α ~ LifetimeOf bor) =>
-  bor a %1 ->
+{-# INLINE lookupForInsert #-}
+lookupForInsert ::
+  (Keyed k) =>
+  k ->
   Borrow bk α (HashMapUr k v) %1 ->
-  (forall β. WithLifetime bor (β /\ α) a %1 -> k -> v -> BO (β /\ α) ()) ->
-  BO α (bor a)
-iterRebor_ bor dic f = Control.do
-  Ur (P.map (BiNL.bimap Ur Ur) -> ents) <- toList dic
-  flip Control.execStateT bor $ for_ ents \(Ur k, Ur v) ->
-    Control.StateT \bor -> locally bor \bor -> f bor k v
+  BO α (Ur (Either v (InsertPlan k)))
+lookupForInsert key = answering . Raw.lookupForInsert key
+
+-- * Iteration
+
+{-# INLINE toList #-}
+toList :: Borrow bk α (HashMapUr k v) %1 -> BO α (Ur [(k, v)])
+toList = answering . Raw.toList
+
+instance (Show k, Show v) => Display (HashMapUr k v) where
+  displayPrec _ bor = Control.do
+    Ur lst <- toList bor
+    Control.pure $
+      Ur $
+        showString "{"
+          P.. P.foldr
+            (P..)
+            id
+            ( P.intersperse
+                (showString ", ")
+                [showChar '(' P.. showsPrec 0 k P.. showString ", " P.. showsPrec 0 v P.. showChar ')' | (k, v) <- lst]
+            )
+          P.. showString "}"

@@ -40,9 +40,8 @@ import Control.Monad.Borrow.Pure.BO.Unsafe
 import Control.Monad.Borrow.Pure.Experimental.Loop (IndexedFold)
 import Data.Function ((&))
 import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue (HashMapUr, Keyed)
-import Data.HashMap.Mutable.Linear.Borrowed.UnrestrictedValue.Internal qualified as Raw
-import Data.HashMap.RobinHood.Mutable.Linear qualified as Raw
 import Data.HashMap.RobinHood.Mutable.Linear qualified as RawLin
+import Data.HashMap.RobinHood.Mutable.Linear.Borrow.Internal qualified as Bor
 import Data.Ref.Linear qualified as Ref
 import Prelude.Linear (unur)
 import Prelude.Linear qualified as PL
@@ -52,26 +51,26 @@ import Prelude hiding (lookup)
 newtype ImmutableHashMapUr k v = ImmutableHashMapUr (RawLin.HashMap k v)
 
 empty :: Int -> Linearly %1 -> Ur (ImmutableHashMapUr k v)
-empty n lin = Unsafe.toLinear Ur (ImmutableHashMapUr (Raw.new n lin))
+empty n lin = Unsafe.toLinear Ur (ImmutableHashMapUr (RawLin.new n lin))
 
 {-# INLINE unsafeFreeze #-}
-unsafeFreeze :: Share α (Raw.HashMapUr k v) %m -> Ur (ImmutableHashMapUr k v)
-unsafeFreeze (UnsafeAlias (Raw.HM ref)) =
+unsafeFreeze :: Share α (Bor.HashMap k v) %m -> Ur (ImmutableHashMapUr k v)
+unsafeFreeze (UnsafeAlias (Bor.HashMap ref)) =
   Unsafe.toLinear Ur (ImmutableHashMapUr (Ref.free ref))
 
 {-# INLINE freeze #-}
 freeze :: HashMapUr k v %1 -> Ur (ImmutableHashMapUr k v)
-freeze (Raw.HM ref) = Unsafe.toLinear Ur (ImmutableHashMapUr (Ref.free ref))
+freeze (Bor.HashMap ref) = Unsafe.toLinear Ur (ImmutableHashMapUr (Ref.free ref))
 
 {-# INLINE thaw #-}
 thaw :: ImmutableHashMapUr k v -> Linearly %1 -> HashMapUr k v
 thaw (ImmutableHashMapUr hm) =
   dup hm PL.& \(!_, !hm') ->
-    Raw.HM PL.. Ref.new hm'
+    Bor.HashMap PL.. Ref.new hm'
 
 {-# INLINE unsafeThaw #-}
 unsafeThaw :: ImmutableHashMapUr k v -> Linearly %1 -> HashMapUr k v
-unsafeThaw (ImmutableHashMapUr hm) = Raw.HM PL.. Ref.new hm
+unsafeThaw (ImmutableHashMapUr hm) = Bor.HashMap PL.. Ref.new hm
 
 {-# INLINE lookup #-}
 lookup :: (Keyed k) => k -> ImmutableHashMapUr k v -> Maybe v
@@ -83,11 +82,11 @@ size (ImmutableHashMapUr hm) = RawLin.size hm & \(Ur !n, !_) -> n
 
 {-# INLINE foldMapWithKey #-}
 foldMapWithKey :: (Monoid w) => (k -> v -> w) -> ImmutableHashMapUr k v %1 -> w
-foldMapWithKey f (ImmutableHashMapUr dic) = unur (Raw.foldMapWithKey (fmap Ur . f) dic)
+foldMapWithKey f (ImmutableHashMapUr dic) = unur (RawLin.foldMapWithKey (fmap Ur . f) dic)
 
 {-# INLINE foldMapWithKeyL #-}
 foldMapWithKeyL :: (PL.Monoid w) => (k -> v -> w) -> ImmutableHashMapUr k v %1 -> w
-foldMapWithKeyL f (ImmutableHashMapUr dic) = Raw.foldMapWithKey f dic
+foldMapWithKeyL f (ImmutableHashMapUr dic) = RawLin.foldMapWithKey f dic
 
 instance Foldable (ImmutableHashMapUr k) where
   foldMap f v = foldMapWithKey (\_ -> f) v

@@ -6,12 +6,7 @@
 #
 # Scope is the e-graph suite, and within it tamagoh's own leaves:
 #
-#   tamagoh-bench-hashmap is not measured here at all. It compares tamagoh's
-#   Robin Hood table against linear-base and unordered-containers, which is a
-#   design question about data structures rather than the thing this project
-#   is: it can stay a local `cabal bench`.
-#
-#   hegg is dropped from the math suite for the same reason in sharper form.
+#   hegg is dropped from the math suite.
 #   It is the rival implementation, not ours -- nothing in this repository can
 #   move its numbers, so tracking them spends roughly 45% of the suite's
 #   measured work on a series nobody can act on, and turns a bump of the hegg
