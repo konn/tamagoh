@@ -7,14 +7,15 @@ For serious usage, go to [hegg][hegg].
 
 ## Benchmarking
 
-Two `tasty-bench` suites, both measured on every pull request by the `codspeed`
-job in [Haskell CI](.github/workflows/haskell.yml) — which measures the very
-binaries the GHC 9.12.4 build job produced, so the thing benchmarked is the
-thing CI tested:
+Two `tasty-bench` suites — the e-graph one, which also measures
+[hegg][hegg] on the same workloads for comparison:
 
 ```bash
 cabal bench tamagoh-bench-math
 ```
+
+and one comparing tamagoh's Robin Hood table against `linear-base` and
+`unordered-containers`:
 
 ```bash
 cabal bench tamagoh-bench-hashmap
@@ -39,6 +40,19 @@ For fixed code and input that figure is exact and reproducible, which for a
 deterministic saturation algorithm makes it the sharper of the two signals —
 `codspeed-hs-compare baseline.csv alloc.csv` diffs two runs, and CI does this
 against `main`.
+
+### What CI actually measures
+
+The `codspeed` job in [Haskell CI](.github/workflows/haskell.yml) runs on every
+pull request, and measures the very binaries the GHC 9.12.4 build job produced
+— so the thing benchmarked is the thing CI tested. Its scope is narrower than
+what you get locally, deliberately: **tamagoh's own e-graph leaves and nothing
+else.** The `hegg` leaves are filtered out and `tamagoh-bench-hashmap` is not
+measured at all, because nothing in this repository can move those numbers, so
+tracking them would spend the simulation budget on series nobody can act on and
+turn a dependency bump into a "regression" beside tamagoh's own. Both remain
+fully available under a plain `cabal bench`, which is unfiltered — that is
+where the tamagoh-vs-hegg comparison lives.
 
 `-A32m -T -V0 -I0` in both suites' `with-rtsopts` is part of the measurement
 contract, not decoration: changing `-A` shifts instruction counts exactly as a

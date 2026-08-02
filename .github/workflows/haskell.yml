@@ -205,10 +205,15 @@ jobs:
             exit 1
           fi
 
-  # Measures both benchmark suites on CodSpeed, per `bench` leaf, using the
-  # konn/haskell-codspeed harness. The suites are ordinary tasty-bench suites;
-  # the only difference is that they import Test.Tasty.Bench.CodSpeed, which
-  # behaves identically when no runner is attached.
+  # Measures the e-graph benchmark suite on CodSpeed, per `bench` leaf, using
+  # the konn/haskell-codspeed harness. It is an ordinary tasty-bench suite; the
+  # only difference is that it imports Test.Tasty.Bench.CodSpeed, which behaves
+  # identically when no runner is attached.
+  #
+  # Scope is tamagoh's own e-graph work and nothing else -- the hegg leaves are
+  # filtered out and tamagoh-bench-hashmap is not measured at all. See
+  # ci/scripts/codspeed-bench.sh for why. Both still build and still run under
+  # a plain `cabal bench`; they are simply not series on the dashboard.
   #
   # Two metrics come out of a run:
   #
@@ -227,13 +232,13 @@ jobs:
     name: CodSpeed benchmarks
     needs: [build]
     runs-on: ubuntu-latest
-    # Simulation is roughly 200x native. One deterministic pass over both
-    # suites is ~11 s natively (~8 s math, of which ~5 s is the
-    # cross-validation annotateControlled does before defaultMain is reached,
-    # and ~3 s hashmap), so expect the measured step to take on the order of
-    # 30-45 minutes. If that becomes the binding constraint, the lever is a
-    # tasty --pattern in ci/scripts/codspeed-bench.sh -- but note that
-    # narrowing the set changes which URIs report, not how each is measured.
+    # Simulation is roughly 200x native. One deterministic pass over the twelve
+    # measured leaves is ~6.7 s natively, of which only ~1.6 s is benchmark
+    # bodies -- the other ~5 s is the cross-validation annotateControlled does
+    # before defaultMain is reached, which reports nothing and is now most of
+    # the cost. So expect the measured step on the order of 20-25 minutes, and
+    # note that the remaining lever is that startup work rather than the
+    # benchmark set.
     timeout-minutes: 180
     # One `codspeed run` per ref. A commit carrying more than one upload is not
     # readable: the backend keeps whichever arrived last, and sometimes merges
@@ -288,13 +293,12 @@ jobs:
           tar xaf "${{steps.download.outputs.download-path}}/${{env.artifact}}.tar.zst"
           {
             echo "math=${{github.workspace}}/${{env.artifact}}/benchs/tamagoh-bench-math"
-            echo "hashmap=${{github.workspace}}/${{env.artifact}}/benchs/tamagoh-bench-hashmap"
             echo "rewrite=${{github.workspace}}/${{env.artifact}}/exes/codspeed-hs-rewrite"
             echo "compare=${{github.workspace}}/${{env.artifact}}/exes/codspeed-hs-compare"
           } >>"$GITHUB_OUTPUT"
           # Check now rather than discovering it as exit 127 from inside
-          # Valgrind, half an hour in.
-          for b in benchs/tamagoh-bench-math benchs/tamagoh-bench-hashmap \
+          # Valgrind, twenty minutes in.
+          for b in benchs/tamagoh-bench-math \
                    exes/codspeed-hs-rewrite exes/codspeed-hs-compare; do
             test -x "${{env.artifact}}/${b}" \
               || { echo "::error::${b} is not in ${{env.artifact}}"; exit 1; }
@@ -307,7 +311,6 @@ jobs:
         uses: CodSpeedHQ/action@v5
         env:
           MATH_BIN: ${{steps.bin.outputs.math}}
-          HASHMAP_BIN: ${{steps.bin.outputs.hashmap}}
           REWRITE_BIN: ${{steps.bin.outputs.rewrite}}
           SIDECAR_DIR: ${{github.workspace}}/sidecar
           # NOT set: CODSPEED_HS_CCS_DIR. Setting it makes the chained rewriter
@@ -329,10 +332,14 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          for f in sidecar/allocation-math.csv sidecar/allocation-hashmap.csv; do
-            [ -f "$f" ] || { echo "::error::$f was never written"; exit 1; }
-          done
+          [ -f sidecar/allocation-math.csv ] \
+            || { echo "::error::sidecar/allocation-math.csv was never written"; exit 1; }
           cat sidecar/allocation-math.csv
+          # The filter is part of what is asserted: a hegg row here means the
+          # pattern stopped matching and the dashboard has grown a series
+          # nobody can act on.
+          ! grep -q '\.hegg,' sidecar/allocation-math.csv \
+            || { echo "::error::hegg leaves were measured; the --pattern is not taking"; exit 1; }
           # Natively ~217 MB. Anything under 1 MB means the allocation counter
           # is being read somewhere other than the benchmark's own thread.
           alloc=$(awk -F, '$1 ~ /merge-rebuild.*\.tamagoh$/ {print $2}' \
@@ -380,18 +387,15 @@ jobs:
           status=0
           {
             echo "## Allocation vs main"
-            for f in allocation-math.csv allocation-hashmap.csv; do
-              echo ""
-              echo "### ${f}"
-              echo '```'
-              if [ -f "baseline/${f}" ]; then
-                "${{steps.bin.outputs.compare}}" "baseline/${f}" "sidecar/${f}" \
-                  --tolerance 0.01 2>&1 || status=1
-              else
-                echo "no baseline for ${f}"
-              fi
-              echo '```'
-            done
+            echo '```'
+            if [ -f baseline/allocation-math.csv ]; then
+              "${{steps.bin.outputs.compare}}" \
+                baseline/allocation-math.csv sidecar/allocation-math.csv \
+                --tolerance 0.01 2>&1 || status=1
+            else
+              echo "no baseline for allocation-math.csv"
+            fi
+            echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
           [ "$status" -eq 0 ] || echo "::warning::allocation grew against main; see the job summary"
           exit "$status"

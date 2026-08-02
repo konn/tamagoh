@@ -76,6 +76,11 @@ Details, history, and the evidence behind each rule: `workspace/TUNE-PLAN.md`.
   silently drops the suite out of the `codspeed` job in
   `.github/workflows/haskell.yml`, which measures the GHC 9.12.4 build job's own
   binaries rather than compiling its own.
+- CodSpeed measures **tamagoh's e-graph leaves only**: `tamagoh-bench-math` filtered
+  by `--pattern '$NF != "hegg"'`, and `tamagoh-bench-hashmap` not at all. Nothing here
+  can move hegg's or `unordered-containers`' numbers, so tracking them would spend the
+  simulation budget on series nobody can act on. Local `cabal bench` is unfiltered and
+  is where the tamagoh-vs-hegg comparison belongs — do not "fix" CI to match it.
 - `-with-rtsopts=-A32m -T -V0 -I0` on both suites is a measurement contract, not
   decoration: changing `-A` shifts CodSpeed's instruction counts exactly as a code
   change would and invalidates the baseline. Never add `-threaded -N` back — the
