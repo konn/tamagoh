@@ -22,7 +22,7 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/SoftwareFoundationGroupAtKyotoU/pure-borrow.git
-  tag: 9592f768097e2615051513ab3ec64640c6426cd3
+  tag: a926c5efaba3f79b5d3234c5c9ce510ba59344c8
 
 -- The CodSpeed harness. Not on Hackage, and the same reasoning as the stanza
 -- above applies: it must live here rather than in the freeze, so CI's
